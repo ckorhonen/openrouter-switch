@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible Baseten Switch problem
+description: Report a reproducible OpenRouter Switch problem
 title: "[Bug]: "
 body:
   - type: markdown
@@ -24,17 +24,16 @@ body:
   - type: input
     id: version
     attributes:
-      label: Baseten Switch version
-      placeholder: baseten-switch v0.2.0
+      label: OpenRouter Switch version
+      placeholder: openrouter-switch v0.2.0
     validations:
       required: true
   - type: input
-    id: baseten_cli_version
+    id: openrouter_account
     attributes:
-      label: Baseten CLI version
-      placeholder: baseten v0.3.0
-    validations:
-      required: true
+      label: OpenRouter account state
+      description: Report only masked output from openrouter-switch auth status. Never include the key.
+      placeholder: key valid, catalog available
   - type: input
     id: system
     attributes:

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 )
 
@@ -397,7 +396,7 @@ func mergeOpenAICachedInputUsage(
 }
 
 // parseNumber accepts int64 from a JSON number literal or a JSON string of digits,
-// which is necessary because Baseten's usage sometimes wraps counts in strings.
+// Some upstream adapters wrap usage counts in strings.
 func parseNumber(v json.RawMessage) (int64, error) {
 	var n json.Number
 	if err := json.Unmarshal(v, &n); err == nil {
@@ -411,96 +410,6 @@ func parseNumber(v json.RawMessage) (int64, error) {
 		}
 	}
 	return 0, fmt.Errorf("not a number: %s", string(v))
-}
-
-// NormalizeAnthropicUsage rewrites a single Anthropic-shape usage object so
-// input_tokens EXCLUDES cached reads, per Anthropic semantics.
-//
-// Protocol normalization: a usage object that carries
-// cache_creation_input_tokens (any value, including 0) is treated as already
-// exclusive and passed through untouched. The guard matters because
-// exclusive-semantics
-// responses with a partial cache hit (input >= cache_read) are otherwise
-// indistinguishable from inclusive ones and would be under-counted.
-//
-// Returns (rewritten, true) only when a usage object carries input_tokens
-// and cache_read_input_tokens, carries NO cache_creation_input_tokens, and
-// input_tokens >= cache_read (never synthesize a negative count). Otherwise
-// it returns the input bytes and false, leaving anything it does not
-// understand untouched.
-func NormalizeAnthropicUsage(raw []byte) ([]byte, bool) {
-	var u map[string]json.RawMessage
-	if json.Unmarshal(raw, &u) != nil {
-		return raw, false
-	}
-	if _, fixed := u["cache_creation_input_tokens"]; fixed {
-		return raw, false
-	}
-	inRaw, ok := u["input_tokens"]
-	if !ok {
-		return raw, false
-	}
-	input, err := parseNumber(inRaw)
-	if err != nil {
-		return raw, false
-	}
-	crRaw, ok := u["cache_read_input_tokens"]
-	if !ok {
-		return raw, false
-	}
-	cacheRead, err := parseNumber(crRaw)
-	if err != nil || input < cacheRead {
-		return raw, false
-	}
-	u["input_tokens"] = json.RawMessage(strconv.FormatInt(input-cacheRead, 10))
-	out, err := json.Marshal(u)
-	if err != nil {
-		return raw, false
-	}
-	return out, true
-}
-
-// NormalizeAnthropicBody applies NormalizeAnthropicUsage to the usage object(s)
-// carried by one Anthropic-shape JSON object: the top-level `usage` (a
-// non-streaming /v1/messages body or an SSE message_delta event) and a nested
-// `message.usage` (an SSE message_start event, which Baseten emits without
-// cache fields so this is a no-op there unless one appears). Untouched keys
-// keep their original bytes; only rewritten usage objects change. Returns
-// (rewritten, true) when any usage object was normalized, else (body, false).
-func NormalizeAnthropicBody(body []byte) ([]byte, bool) {
-	var evt map[string]json.RawMessage
-	if json.Unmarshal(body, &evt) != nil {
-		return body, false
-	}
-	changed := false
-	if uraw, ok := evt["usage"]; ok {
-		if nu, ok := NormalizeAnthropicUsage(uraw); ok {
-			evt["usage"] = nu
-			changed = true
-		}
-	}
-	if mraw, ok := evt["message"]; ok {
-		var m map[string]json.RawMessage
-		if json.Unmarshal(mraw, &m) == nil {
-			if uraw, ok := m["usage"]; ok {
-				if nu, ok := NormalizeAnthropicUsage(uraw); ok {
-					m["usage"] = nu
-					if mb, err := json.Marshal(m); err == nil {
-						evt["message"] = mb
-						changed = true
-					}
-				}
-			}
-		}
-	}
-	if !changed {
-		return body, false
-	}
-	out, err := json.Marshal(evt)
-	if err != nil {
-		return body, false
-	}
-	return out, true
 }
 
 func ParseUsage(jsonBody []byte) Usage {

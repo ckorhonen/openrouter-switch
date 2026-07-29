@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/proxy"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/proxy"
 )
 
 // TestResponsesStripToolTypesConfigLoad: the knob parses from YAML into
@@ -73,7 +73,7 @@ func TestResponsesStripHashCoversStripList(t *testing.T) {
 		Name:          "codex",
 		BindAddr:      "127.0.0.1:18081",
 		ProtocolShape: "openai",
-		Route:         "baseten",
+		Route:         "openrouter",
 	}
 	a := base
 	a.ResponsesStripToolTypes = []string{"tool_search"}
@@ -194,25 +194,25 @@ func captureServer(t *testing.T, gotBody chan []byte) *httptest.Server {
 	return srv
 }
 
-const reasoningNeutralBasetenModel = "moonshotai/Kimi-K2.7-Code"
+const reasoningNeutralOpenRouterModel = "moonshotai/Kimi-K2.7-Code"
 
-func resolvedResponsesBaseten(t *testing.T) resolvedClientConfig {
+func resolvedResponsesOpenRouter(t *testing.T) resolvedClientConfig {
 	t.Helper()
-	rc := resolvedOpenAIBaseten(t, "codex", "baseten")
-	rc.DefaultModel = reasoningNeutralBasetenModel
+	rc := resolvedOpenAIOpenRouter(t, "codex", "openrouter")
+	rc.DefaultModel = reasoningNeutralOpenRouterModel
 	return rc
 }
 
-// TestResponsesStripBasetenAttempt: with the knob set, the baseten
+// TestResponsesStripOpenRouterAttempt: with the knob set, the openrouter
 // /v1/responses attempt has denylisted tools[] entries stripped and the
 // model rewritten (default model) in the same pass; the telemetry row
 // carries the stripped_tool_types marker and one stderr line names the
 // client and the stripped types.
-func TestResponsesStripBasetenAttempt(t *testing.T) {
+func TestResponsesStripOpenRouterAttempt(t *testing.T) {
 	gotBody := make(chan []byte, 1)
 	srv := captureServer(t, gotBody)
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedResponsesBaseten(t)
+	rc := resolvedResponsesOpenRouter(t)
 	rc.ResponsesStripToolTypes = []string{"tool_search"}
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -243,8 +243,8 @@ func TestResponsesStripBasetenAttempt(t *testing.T) {
 	if !reflect.DeepEqual(up["tools"], wantTools) {
 		t.Fatalf("upstream tools = %v, want %v", up["tools"], wantTools)
 	}
-	if up["model"] != reasoningNeutralBasetenModel {
-		t.Fatalf("upstream model = %v, want %s (default-model rewrite must share the strip's decode)", up["model"], reasoningNeutralBasetenModel)
+	if up["model"] != reasoningNeutralOpenRouterModel {
+		t.Fatalf("upstream model = %v, want %s (default-model rewrite must share the strip's decode)", up["model"], reasoningNeutralOpenRouterModel)
 	}
 	if up["tool_choice"] != "auto" || up["input"] != "hi" {
 		t.Fatalf("unrelated fields not preserved: %v", up)
@@ -258,16 +258,16 @@ func TestResponsesStripBasetenAttempt(t *testing.T) {
 	}
 }
 
-// TestResponsesStripForcedBasetenTarget verifies that an explicitly
-// mapped Baseten target still passes through the Responses strip.
+// TestResponsesStripForcedOpenRouterTarget verifies that an explicitly
+// mapped OpenRouter target still passes through the Responses strip.
 // Explicit mappings use the forced-target attempt path, but every
-// Baseten Responses attempt must apply the configured compatibility
+// OpenRouter Responses attempt must apply the configured compatibility
 // transform.
-func TestResponsesStripForcedBasetenTarget(t *testing.T) {
+func TestResponsesStripForcedOpenRouterTarget(t *testing.T) {
 	gotBody := make(chan []byte, 1)
 	srv := captureServer(t, gotBody)
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedResponsesBaseten(t)
+	rc := resolvedResponsesOpenRouter(t)
 	rc.ResponsesStripToolTypes = []string{"tool_search"}
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -278,7 +278,7 @@ func TestResponsesStripForcedBasetenTarget(t *testing.T) {
 		g.clients["codex"],
 		req,
 		body,
-		"baseten",
+		"openrouter",
 		"responses",
 		"moonshotai/Kimi-K2.7-Code",
 		true,
@@ -291,7 +291,7 @@ func TestResponsesStripForcedBasetenTarget(t *testing.T) {
 		t.Fatalf("upstream body invalid json: %v", err)
 	}
 	if up["model"] != "moonshotai/Kimi-K2.7-Code" {
-		t.Fatalf("upstream model = %v, want forced Baseten target", up["model"])
+		t.Fatalf("upstream model = %v, want forced OpenRouter target", up["model"])
 	}
 	wantTools := []any{map[string]any{"type": "function", "name": "shell"}}
 	if !reflect.DeepEqual(up["tools"], wantTools) {
@@ -314,7 +314,7 @@ func TestResponsesStripWithoutModelRewrite(t *testing.T) {
 		Name:                    "codex",
 		BindAddr:                "127.0.0.1:0",
 		ProtocolShape:           "openai",
-		Route:                   "baseten",
+		Route:                   "openrouter",
 		ResponsesStripToolTypes: []string{"tool_search"},
 	}
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -341,20 +341,20 @@ func TestResponsesStripWithoutModelRewrite(t *testing.T) {
 	}
 }
 
-// TestResponsesStripFallbackAttemptByteOriginal: when the baseten
+// TestResponsesStripFallbackAttemptByteOriginal: when the openrouter
 // attempt trips the fallback waterfall, the fallback attempt's body is
 // byte-identical to what the client sent (no strip, no rewrite, no
 // re-marshal) and its telemetry row omits the marker.
 func TestResponsesStripFallbackAttemptByteOriginal(t *testing.T) {
-	basetenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	openrouterSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 	}))
-	defer basetenSrv.Close()
+	defer openrouterSrv.Close()
 	gotBody := make(chan []byte, 1)
 	openaiSrv := captureServer(t, gotBody)
-	cfg := testConfig(t, basetenSrv.URL, basetenSrv.URL)
+	cfg := testConfig(t, openrouterSrv.URL, openrouterSrv.URL)
 	cfg.OpenAIURL = openaiSrv.URL
-	rc := resolvedResponsesBaseten(t)
+	rc := resolvedResponsesOpenRouter(t)
 	rc.ResponsesStripToolTypes = []string{"tool_search"}
 	rc.FallbackRoute = "openai"
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -381,7 +381,7 @@ func TestResponsesStripFallbackAttemptByteOriginal(t *testing.T) {
 // before "tools" so any stealth re-marshal (which sorts keys) or strip
 // changes the bytes.
 func TestResponsesStripKnobUnsetBytesUnchanged(t *testing.T) {
-	// No default model: today's Baseten attempt forwards the exact client bytes.
+	// No default model: today's OpenRouter attempt forwards the exact client bytes.
 	// The knob-unset path must keep doing that.
 	t.Run("no rewrite forwards exact bytes", func(t *testing.T) {
 		gotBody := make(chan []byte, 1)
@@ -391,7 +391,7 @@ func TestResponsesStripKnobUnsetBytesUnchanged(t *testing.T) {
 			Name:          "codex",
 			BindAddr:      "127.0.0.1:0",
 			ProtocolShape: "openai",
-			Route:         "baseten",
+			Route:         "openrouter",
 		}
 		g, adminL, _ := newGateway(t, cfg, rc)
 		defer adminL.Close()
@@ -415,7 +415,7 @@ func TestResponsesStripKnobUnsetBytesUnchanged(t *testing.T) {
 		gotBody := make(chan []byte, 1)
 		srv := captureServer(t, gotBody)
 		cfg := testConfig(t, srv.URL, srv.URL)
-		rc := resolvedResponsesBaseten(t)
+		rc := resolvedResponsesOpenRouter(t)
 		g, adminL, _ := newGateway(t, cfg, rc)
 		defer adminL.Close()
 		stop := start(t, g)
@@ -423,7 +423,7 @@ func TestResponsesStripKnobUnsetBytesUnchanged(t *testing.T) {
 
 		body := []byte(`{"model":"gpt-5","tools":[{"type":"tool_search"},{"type":"function","name":"shell"}],"input":"hi"}`)
 		postResponses(t, g, "codex", body)
-		want := proxy.RewriteModelInBody(body, reasoningNeutralBasetenModel).NewBody
+		want := proxy.RewriteModelInBody(body, reasoningNeutralOpenRouterModel).NewBody
 		if got := <-gotBody; !bytes.Equal(got, want) {
 			t.Fatalf("knob unset must match the pre-knob rewrite bytes\ngot:  %s\nwant: %s", got, want)
 		}
@@ -439,7 +439,7 @@ func TestResponsesStripKnobUnsetBytesUnchanged(t *testing.T) {
 			Name:                    "codex",
 			BindAddr:                "127.0.0.1:0",
 			ProtocolShape:           "openai",
-			Route:                   "baseten",
+			Route:                   "openrouter",
 			ResponsesStripToolTypes: []string{"tool_search"},
 		}
 		g, adminL, _ := newGateway(t, cfg, rc)
@@ -475,7 +475,7 @@ func TestResponsesStripOtherEndpointsUnaffected(t *testing.T) {
 		}))
 		defer srv.Close()
 		cfg := testConfig(t, srv.URL, srv.URL)
-		rc := resolvedResponsesBaseten(t)
+		rc := resolvedResponsesOpenRouter(t)
 		rc.ResponsesStripToolTypes = []string{"tool_search"}
 		g, adminL, _ := newGateway(t, cfg, rc)
 		defer adminL.Close()
@@ -515,7 +515,7 @@ func TestResponsesStripOtherEndpointsUnaffected(t *testing.T) {
 		}))
 		defer srv.Close()
 		cfg := testConfig(t, srv.URL, srv.URL)
-		rc := resolvedAnthropicBaseten(t)
+		rc := resolvedAnthropicOpenRouter(t)
 		rc.ResponsesStripToolTypes = []string{"tool_search"}
 		g, adminL, _ := newGateway(t, cfg, rc)
 		defer adminL.Close()

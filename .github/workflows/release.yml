@@ -97,9 +97,9 @@ jobs:
 
       - name: Build ad-hoc signed beta release assets
         env:
-          BASETEN_SWITCH_RELEASE_TAG: ${{ inputs.release_tag }}
-          BASETEN_SWITCH_BUILD_NUMBER: ${{ inputs.build_number }}
-          BASETEN_SWITCH_RELEASE_SIGNING_MODE: adhoc
+          OPENROUTER_SWITCH_RELEASE_TAG: ${{ inputs.release_tag }}
+          OPENROUTER_SWITCH_BUILD_NUMBER: ${{ inputs.build_number }}
+          OPENROUTER_SWITCH_RELEASE_SIGNING_MODE: adhoc
         run: scripts/release/build-artifacts.sh
 
       - name: Scan release archive for secrets
@@ -115,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
-          artifact_name="baseten-switch_${version}_darwin_universal.zip"
+          artifact_name="openrouter-switch_${version}_darwin_universal.zip"
           artifact="dist/$artifact_name"
           artifact_sha256="$(
             awk -v artifact="$artifact_name" '$2 == artifact { print $1 }' dist/checksums.txt
@@ -124,8 +124,8 @@ jobs:
             || { printf 'final artifact checksum is missing from checksums.txt\n' >&2; exit 1; }
 
           tap_stage="$GITHUB_WORKSPACE/dist/homebrew-tap"
-          formula="$tap_stage/Formula/baseten-switch.rb"
-          patch="dist/baseten-switch_${version}_homebrew.patch"
+          formula="$tap_stage/Formula/openrouter-switch.rb"
+          patch="dist/openrouter-switch_${version}_homebrew.patch"
           scripts/release/render-formula.sh \
             --tag "$RELEASE_TAG" \
             --sha256 "$artifact_sha256" \
@@ -146,7 +146,7 @@ jobs:
       - name: Preserve formula and tap patch as workflow artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: baseten-switch-${{ inputs.release_tag }}-homebrew
+          name: openrouter-switch-${{ inputs.release_tag }}-homebrew
           path: |
             ${{ steps.formula.outputs.formula }}
             ${{ steps.formula.outputs.patch }}
@@ -166,11 +166,11 @@ jobs:
           fi
           version="${RELEASE_TAG#v}"
           gh release create "$RELEASE_TAG" \
-            "dist/baseten-switch_${version}_darwin_universal.zip" \
+            "dist/openrouter-switch_${version}_darwin_universal.zip" \
             "dist/checksums.txt" \
             --prerelease \
             --verify-tag \
-            --title "Baseten Switch $RELEASE_TAG (Beta)" \
+            --title "OpenRouter Switch $RELEASE_TAG (Beta)" \
             --notes-from-tag
 
       - name: Remove ephemeral tag verification files

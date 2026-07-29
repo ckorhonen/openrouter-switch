@@ -1,8 +1,8 @@
 package pricing
 
 import (
+	"bytes"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-const maxBasetenCatalogBytes = 32 << 20
+const maxOpenRouterCatalogBytes = 32 << 20
 
 // Price stores provider rates in USD per one million tokens.
 type Price struct {
@@ -193,7 +193,7 @@ func (q Quote) CostUSD(
 	)
 }
 
-// CatalogMetadata describes the Baseten catalog held by a Snapshot.
+// CatalogMetadata describes the OpenRouter catalog held by a Snapshot.
 type CatalogMetadata struct {
 	Source           string
 	Provenance       string
@@ -217,20 +217,20 @@ func (s *Snapshot) Quote(route, model string) Quote {
 	return s.QuoteProfile(route, model, ProfileStandard)
 }
 
-// BasetenMetadata returns metadata for this exact snapshot.
-func (s *Snapshot) BasetenMetadata() CatalogMetadata {
+// OpenRouterMetadata returns metadata for this exact snapshot.
+func (s *Snapshot) OpenRouterMetadata() CatalogMetadata {
 	if s == nil {
 		return CatalogMetadata{}
 	}
-	return activeBasetenPricingCatalog(s.providerLayers).metadata
+	return activeOpenRouterPricingCatalog(s.providerLayers).metadata
 }
 
-// BasetenModels returns a copy of the catalog's sorted model IDs.
-func (s *Snapshot) BasetenModels() []string {
+// OpenRouterModels returns a copy of the catalog's sorted model IDs.
+func (s *Snapshot) OpenRouterModels() []string {
 	if s == nil {
 		return nil
 	}
-	return activeBasetenPricingCatalog(s.providerLayers).models
+	return activeOpenRouterPricingCatalog(s.providerLayers).models
 }
 
 // Pricing atomically publishes immutable pricing snapshots.
@@ -240,46 +240,9 @@ type Pricing struct {
 	publishMu sync.Mutex
 }
 
-//go:embed baseten_fallback_prices.json
-var basetenFallbackJSON []byte
-
-//go:embed baseten_reasoning_fallback.json
-var basetenReasoningFallbackJSON []byte
-
-const basetenFallbackSource = "baseten_embedded_fallback"
-
-// New constructs pricing with the bundled Baseten fallback. Live /v1/models
-// hydration replaces the fallback atomically after a complete valid response.
+// New constructs an empty OpenRouter catalog. Account-scoped live data is the
+// only authority allowed to populate OpenRouter models and prices.
 func New() *Pricing {
-	var envelope struct {
-		Source       string `json:"source"`
-		FetchedAt    string `json:"fetched_at"`
-		SourceSHA256 string `json:"source_sha256"`
-	}
-	if err := json.Unmarshal(basetenFallbackJSON, &envelope); err != nil {
-		panic("invalid embedded Baseten fallback envelope: " + err.Error())
-	}
-	fetchedAt, err := time.Parse(time.RFC3339, envelope.FetchedAt)
-	if err != nil {
-		panic("invalid embedded Baseten fallback fetched_at: " + err.Error())
-	}
-	if envelope.Source == "" || envelope.SourceSHA256 == "" {
-		panic("invalid embedded Baseten fallback provenance")
-	}
-	candidate, err := parseBasetenCatalog(
-		basetenFallbackJSON,
-		basetenFallbackSource,
-		fetchedAt,
-	)
-	if err != nil {
-		panic("invalid embedded Baseten fallback pricing: " + err.Error())
-	}
-	provenance := fmt.Sprintf(
-		"source=%s; fetched=%s; source_sha256=%s",
-		envelope.Source,
-		envelope.FetchedAt,
-		envelope.SourceSHA256,
-	)
 	p := &Pricing{}
 	supplement, err := parseOfficialPricingSupplement(
 		officialPricingSupplementJSON,
@@ -287,48 +250,22 @@ func New() *Pricing {
 	if err != nil {
 		panic("invalid embedded official pricing supplement: " + err.Error())
 	}
-	fallbackRevision := "baseten-embedded-" +
-		fetchedAt.Format(time.DateOnly) + "+" + candidate.revision
 	snapshot := &Snapshot{
 		providerLayers:            map[providerLayerKey]providerCatalog{},
 		officialPricingSupplement: supplement,
 	}
-	embeddedProvenance := Provenance{
-		Source: basetenFallbackSource, LoadedFrom: LoadedFromVendoredFallback,
-		Revision: fallbackRevision, CapturedAt: candidate.fetchedAt,
-	}
-	snapshot.providerLayers[providerLayerKey{
-		provider: ProviderBaseten, loadedFrom: LoadedFromVendoredFallback,
-		source: basetenFallbackSource,
-	}] = basetenProviderCatalog(
-		candidate,
-		embeddedProvenance,
-		provenance,
-		false,
-	)
-	fallbackCatalog := snapshot.providerLayers[providerLayerKey{
-		provider: ProviderBaseten, loadedFrom: LoadedFromVendoredFallback,
-		source: basetenFallbackSource,
-	}]
-	if err := attachVendoredBasetenReasoning(&fallbackCatalog); err != nil {
-		panic("invalid embedded Baseten reasoning fallback: " + err.Error())
-	}
-	snapshot.providerLayers[providerLayerKey{
-		provider: ProviderBaseten, loadedFrom: LoadedFromVendoredFallback,
-		source: basetenFallbackSource,
-	}] = fallbackCatalog
 	snapshot.providerCatalogs = activeProviderCatalogsForSnapshot(snapshot)
 	p.current.Store(snapshot)
 	return p
 }
 
-// NewWithPrices constructs a static Baseten snapshot for tests and embedders.
-func NewWithPrices(baseten map[string]Price) *Pricing {
+// NewWithPrices constructs a static OpenRouter snapshot for tests and embedders.
+func NewWithPrices(openrouter map[string]Price) *Pricing {
 	p := New()
 	p.publishMu.Lock()
 	defer p.publishMu.Unlock()
-	basetenCopy := clonePrices(baseten)
-	models := sortedModelIDs(basetenCopy)
+	openrouterCopy := clonePrices(openrouter)
+	models := sortedModelIDs(openrouterCopy)
 	snapshot := &Snapshot{
 		providerLayers: cloneProviderLayers(p.current.Load().providerLayers),
 		officialPricingSupplement: cloneOfficialPricingSupplement(
@@ -336,10 +273,10 @@ func NewWithPrices(baseten map[string]Price) *Pricing {
 		),
 	}
 	capturedAt := time.Now().UTC()
-	if len(basetenCopy) > 0 {
+	if len(openrouterCopy) > 0 {
 		snapshot.providerLayers[providerLayerKey{
-			provider: ProviderBaseten, loadedFrom: LoadedFromLive, source: "static",
-		}] = staticBasetenProviderCatalog(basetenCopy, models, capturedAt)
+			provider: ProviderOpenRouter, loadedFrom: LoadedFromLive, source: "static",
+		}] = staticOpenRouterProviderCatalog(openrouterCopy, models, capturedAt)
 	}
 	snapshot.providerCatalogs = activeProviderCatalogsForSnapshot(snapshot)
 	p.publishLocked(snapshot)
@@ -359,8 +296,8 @@ func (p *Pricing) Quote(route, model string) Quote {
 	return p.Capture().Quote(route, model)
 }
 
-func (p *Pricing) HydrateFromBaseten(baseURL, apiKey, expectedModel string) error {
-	url := strings.TrimRight(baseURL, "/") + "/v1/models"
+func (p *Pricing) HydrateFromOpenRouter(baseURL, apiKey, expectedModel string) error {
+	url := strings.TrimRight(baseURL, "/") + "/v1/models/user"
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -371,8 +308,8 @@ func (p *Pricing) HydrateFromBaseten(baseURL, apiKey, expectedModel string) erro
 	return p.hydrateFromRequest(client, req, expectedModel)
 }
 
-func (p *Pricing) HydrateFromBasetenClient(client *http.Client, baseURL, expectedModel string) error {
-	url := strings.TrimRight(baseURL, "/") + "/v1/models"
+func (p *Pricing) HydrateFromOpenRouterClient(client *http.Client, baseURL, expectedModel string) error {
+	url := strings.TrimRight(baseURL, "/") + "/v1/models/user"
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -388,28 +325,28 @@ func (p *Pricing) hydrateFromRequest(client *http.Client, req *http.Request, exp
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("baseten /v1/models returned %d", resp.StatusCode)
+		return fmt.Errorf("openrouter /v1/models/user returned %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBasetenCatalogBytes+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxOpenRouterCatalogBytes+1))
 	if err != nil {
 		return err
 	}
-	if len(body) > maxBasetenCatalogBytes {
-		return fmt.Errorf("baseten /v1/models response exceeds %d bytes", maxBasetenCatalogBytes)
+	if len(body) > maxOpenRouterCatalogBytes {
+		return fmt.Errorf("openrouter /v1/models/user response exceeds %d bytes", maxOpenRouterCatalogBytes)
 	}
-	return p.ReplaceBasetenCatalog(body, "baseten_v1_models", time.Now().UTC(), expectedModel)
+	return p.ReplaceOpenRouterCatalog(body, "openrouter_models_user", time.Now().UTC(), expectedModel)
 }
 
-// ReplaceBasetenCatalog validates a complete /v1/models response and
-// atomically replaces the live Baseten catalog. Any error leaves the
+// ReplaceOpenRouterCatalog validates a complete /v1/models/user response and
+// atomically replaces the live OpenRouter catalog. Any error leaves the
 // last-known-good snapshot untouched.
-func (p *Pricing) ReplaceBasetenCatalog(body []byte, source string, fetchedAt time.Time, expectedModel string) error {
-	candidate, err := parseBasetenCatalog(body, source, fetchedAt)
+func (p *Pricing) ReplaceOpenRouterCatalog(body []byte, source string, fetchedAt time.Time, expectedModel string) error {
+	candidate, err := parseOpenRouterCatalog(body, source, fetchedAt)
 	if err != nil {
 		return err
 	}
 	if expectedModel != "" && !containsSorted(candidate.models, expectedModel) {
-		return fmt.Errorf("expected model %q not present in Baseten /v1/models catalog", expectedModel)
+		return fmt.Errorf("expected model %q not present in OpenRouter /v1/models/user catalog", expectedModel)
 	}
 
 	p.publishMu.Lock()
@@ -426,8 +363,8 @@ func (p *Pricing) ReplaceBasetenCatalog(body []byte, source string, fetchedAt ti
 		Revision: candidate.revision, CapturedAt: candidate.fetchedAt,
 	}
 	snapshot.providerLayers[providerLayerKey{
-		provider: ProviderBaseten, loadedFrom: LoadedFromLive, source: candidate.source,
-	}] = basetenProviderCatalog(candidate, provenance, "", true)
+		provider: ProviderOpenRouter, loadedFrom: LoadedFromLive, source: candidate.source,
+	}] = openrouterProviderCatalog(candidate, provenance, "", true)
 	snapshot.providerCatalogs = activeProviderCatalogsForSnapshot(snapshot)
 	p.publishLocked(snapshot)
 	return nil
@@ -443,26 +380,56 @@ func (p *Pricing) publishLocked(snapshot *Snapshot) {
 	p.current.Store(snapshot)
 }
 
-type basetenCandidate struct {
+type openrouterCandidate struct {
 	prices       map[string]Price
 	ratePresence map[string]RatePresence
 	models       []string
+	metadata     map[string]openrouterModelMetadata
+	diagnostics  []string
 	source       string
 	revision     string
 	fetchedAt    time.Time
 }
 
-func basetenProviderCatalog(
-	candidate basetenCandidate,
+type openrouterCatalogModel struct {
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	ContextLength       int64    `json:"context_length"`
+	SupportedParameters []string `json:"supported_parameters"`
+	Architecture        struct {
+		InputModalities  []string `json:"input_modalities"`
+		OutputModalities []string `json:"output_modalities"`
+	} `json:"architecture"`
+	TopProvider struct {
+		MaxCompletionTokens int64 `json:"max_completion_tokens"`
+	} `json:"top_provider"`
+	Reasoning json.RawMessage `json:"reasoning"`
+	Pricing   json.RawMessage `json:"pricing"`
+}
+
+type openrouterModelMetadata struct {
+	displayName         string
+	contextTokens       int64
+	maxOutputTokens     int64
+	inputModalities     []string
+	outputModalities    []string
+	supportedParameters []string
+	reasoningSupported  bool
+	reasoningOptions    []ReasoningOption
+}
+
+func openrouterProviderCatalog(
+	candidate openrouterCandidate,
 	provenance Provenance,
 	provenanceDescription string,
 	replacesPricing bool,
 ) providerCatalog {
 	records := make(map[string]ModelRecord, len(candidate.models))
 	authenticatedAvailability :=
-		provenance.Source == "baseten_v1_models" ||
-			provenance.Source == "baseten-v1-models"
+		provenance.Source == "openrouter_models_user" ||
+			provenance.Source == "openrouter-models-user"
 	for _, id := range candidate.models {
+		metadata := candidate.metadata[id]
 		availability := ModelAvailability{}
 		if authenticatedAvailability {
 			availability.Account = &AvailabilityEvidence{
@@ -472,8 +439,15 @@ func basetenProviderCatalog(
 			}
 		}
 		record := ModelRecord{
-			Provider: ProviderBaseten, CanonicalModelID: id,
-			Availability: availability,
+			Provider: ProviderOpenRouter, CanonicalModelID: id,
+			DisplayName:      metadata.displayName,
+			ContextTokens:    metadata.contextTokens,
+			MaxOutputTokens:  metadata.maxOutputTokens,
+			InputModalities:  append([]string(nil), metadata.inputModalities...),
+			OutputModalities: append([]string(nil), metadata.outputModalities...),
+			SupportedParams:  append([]string(nil), metadata.supportedParameters...),
+			ToolCapable:      containsString(metadata.supportedParameters, "tools"),
+			Availability:     availability,
 			Profiles: map[ExecutionProfile]ProfileDefinition{
 				ProfileStandard: {
 					Profile: ProfileStandard, Supported: true, Provenance: provenance,
@@ -481,6 +455,13 @@ func basetenProviderCatalog(
 			},
 			Prices:     map[ExecutionProfile]PriceProfile{},
 			Provenance: provenance,
+		}
+		if metadata.reasoningSupported {
+			record.Reasoning = &ReasoningCapability{
+				Supported:  true,
+				Options:    cloneReasoningOptions(metadata.reasoningOptions),
+				Provenance: provenance,
+			}
 		}
 		if price, ok := candidate.prices[id]; ok {
 			record.Prices[ProfileStandard] = PriceProfile{
@@ -497,13 +478,14 @@ func basetenProviderCatalog(
 	}
 	return providerCatalog{
 		metadata: ProviderMetadata{
-			Provider: ProviderBaseten, Provenance: provenance,
+			Provider: ProviderOpenRouter, Provenance: provenance,
 			ModelCount: len(records), PricedModelCount: len(candidate.prices),
+			Diagnostics: append([]string(nil), candidate.diagnostics...),
 		},
 		models:                      records,
 		replacesAccountAvailability: authenticatedAvailability,
 		replacesPricing:             replacesPricing,
-		basetenPricing: &basetenPricingCatalog{
+		openrouterPricing: &openrouterPricingCatalog{
 			metadata: CatalogMetadata{
 				Source:           candidate.source,
 				Provenance:       provenanceDescription,
@@ -517,7 +499,7 @@ func basetenProviderCatalog(
 	}
 }
 
-func staticBasetenProviderCatalog(
+func staticOpenRouterProviderCatalog(
 	prices map[string]Price,
 	models []string,
 	capturedAt time.Time,
@@ -530,7 +512,7 @@ func staticBasetenProviderCatalog(
 	records := make(map[string]ModelRecord, len(prices))
 	for id, price := range prices {
 		records[id] = ModelRecord{
-			Provider: ProviderBaseten, CanonicalModelID: id, DisplayName: id,
+			Provider: ProviderOpenRouter, CanonicalModelID: id, DisplayName: id,
 			Profiles: map[ExecutionProfile]ProfileDefinition{
 				ProfileStandard: {
 					Profile: ProfileStandard, Supported: true, Provenance: provenance,
@@ -565,12 +547,12 @@ func staticBasetenProviderCatalog(
 	}
 	return providerCatalog{
 		metadata: ProviderMetadata{
-			Provider: ProviderBaseten, Provenance: provenance,
+			Provider: ProviderOpenRouter, Provenance: provenance,
 			ModelCount: len(records), PricedModelCount: len(records),
 		},
 		models:          records,
 		replacesPricing: true,
-		basetenPricing: &basetenPricingCatalog{
+		openrouterPricing: &openrouterPricingCatalog{
 			metadata: CatalogMetadata{
 				Source: "static", Provenance: "static",
 				Revision: revision, FetchedAt: capturedAt,
@@ -581,59 +563,262 @@ func staticBasetenProviderCatalog(
 	}
 }
 
-func parseBasetenCatalog(body []byte, source string, fetchedAt time.Time) (basetenCandidate, error) {
+func parseOpenRouterCatalog(body []byte, source string, fetchedAt time.Time) (openrouterCandidate, error) {
 	var data struct {
-		Data []struct {
-			ID      string          `json:"id"`
-			Pricing json.RawMessage `json:"pricing"`
-		} `json:"data"`
+		Data []json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(body, &data); err != nil {
-		return basetenCandidate{}, fmt.Errorf("decode Baseten catalog: %w", err)
+		return openrouterCandidate{}, fmt.Errorf("decode OpenRouter catalog: %w", err)
 	}
 	if len(data.Data) == 0 {
-		return basetenCandidate{}, fmt.Errorf("Baseten catalog contains no models")
+		return openrouterCandidate{}, fmt.Errorf("OpenRouter catalog contains no models")
 	}
 
 	prices := make(map[string]Price, len(data.Data))
 	ratePresence := make(map[string]RatePresence, len(data.Data))
+	metadata := make(map[string]openrouterModelMetadata, len(data.Data))
 	models := make([]string, 0, len(data.Data))
 	seen := make(map[string]bool, len(data.Data))
-	for _, model := range data.Data {
-		id := strings.TrimSpace(model.ID)
+	diagnostics := make([]string, 0)
+	for _, rawModel := range data.Data {
+		var identity struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal(rawModel, &identity); err != nil {
+			diagnostics = append(
+				diagnostics,
+				"excluded malformed OpenRouter model with unusable id: entry must be an object",
+			)
+			continue
+		}
+		var rawID string
+		if len(identity.ID) == 0 ||
+			json.Unmarshal(identity.ID, &rawID) != nil {
+			diagnostics = append(
+				diagnostics,
+				"excluded malformed OpenRouter model with unusable id: id must be a non-empty string",
+			)
+			continue
+		}
+		id := strings.TrimSpace(rawID)
 		if id == "" {
-			return basetenCandidate{}, fmt.Errorf("Baseten catalog contains an empty model id")
+			diagnostics = append(
+				diagnostics,
+				"excluded malformed OpenRouter model with unusable id: id must be a non-empty string",
+			)
+			continue
 		}
 		if seen[id] {
-			return basetenCandidate{}, fmt.Errorf("Baseten catalog contains duplicate model %q", id)
+			return openrouterCandidate{}, fmt.Errorf("OpenRouter catalog contains duplicate model %q", id)
 		}
 		seen[id] = true
-		models = append(models, id)
 
-		price, presence, priced, err := parseBasetenPrice(model.Pricing)
+		modelMetadata, price, presence, priced, err :=
+			parseOpenRouterCatalogModel(rawModel, id)
 		if err != nil {
-			return basetenCandidate{}, fmt.Errorf("Baseten model %q pricing: %w", id, err)
+			diagnostics = append(
+				diagnostics,
+				fmt.Sprintf(
+					"excluded malformed OpenRouter model %q: %v",
+					id,
+					err,
+				),
+			)
+			continue
 		}
+		models = append(models, id)
+		metadata[id] = modelMetadata
 		if priced {
 			prices[id] = price
 			ratePresence[id] = presence
 		}
 	}
 	sort.Strings(models)
-	if source == "" {
-		source = "baseten-v1-models"
+	sort.Strings(diagnostics)
+	if len(models) == 0 {
+		return openrouterCandidate{}, fmt.Errorf(
+			"OpenRouter catalog contains no usable models: %s",
+			strings.Join(diagnostics, "; "),
+		)
 	}
-	return basetenCandidate{
+	if source == "" {
+		source = "openrouter-models-user"
+	}
+	return openrouterCandidate{
 		prices:       prices,
 		ratePresence: ratePresence,
 		models:       models,
+		metadata:     metadata,
+		diagnostics:  diagnostics,
 		source:       source,
 		revision:     catalogRevisionWithRatePresence(models, prices, ratePresence),
 		fetchedAt:    fetchedAt,
 	}, nil
 }
 
-func parseBasetenPrice(raw json.RawMessage) (Price, RatePresence, bool, error) {
+func parseOpenRouterCatalogModel(
+	rawModel json.RawMessage,
+	id string,
+) (
+	openrouterModelMetadata,
+	Price,
+	RatePresence,
+	bool,
+	error,
+) {
+	var model openrouterCatalogModel
+	if err := json.Unmarshal(rawModel, &model); err != nil {
+		return openrouterModelMetadata{}, Price{}, RatePresence{}, false,
+			fmt.Errorf("decode metadata: invalid field type")
+	}
+	if model.ContextLength < 0 || model.TopProvider.MaxCompletionTokens < 0 {
+		return openrouterModelMetadata{}, Price{}, RatePresence{}, false,
+			fmt.Errorf("contains negative token limits")
+	}
+	parameters, err := normalizedUniqueStrings(
+		model.SupportedParameters,
+		"supported parameter",
+	)
+	if err != nil {
+		return openrouterModelMetadata{}, Price{}, RatePresence{}, false, err
+	}
+	inputModalities, err := normalizedUniqueStrings(
+		model.Architecture.InputModalities,
+		"input modality",
+	)
+	if err != nil {
+		return openrouterModelMetadata{}, Price{}, RatePresence{}, false, err
+	}
+	outputModalities, err := normalizedUniqueStrings(
+		model.Architecture.OutputModalities,
+		"output modality",
+	)
+	if err != nil {
+		return openrouterModelMetadata{}, Price{}, RatePresence{}, false, err
+	}
+	displayName := strings.TrimSpace(model.Name)
+	if displayName == "" {
+		displayName = id
+	}
+	reasoningSupported, reasoningOptions, err := parseOpenRouterReasoning(
+		model.Reasoning,
+		parameters,
+	)
+	if err != nil {
+		return openrouterModelMetadata{}, Price{}, RatePresence{}, false,
+			fmt.Errorf("reasoning: %w", err)
+	}
+	modelMetadata := openrouterModelMetadata{
+		displayName:         displayName,
+		contextTokens:       model.ContextLength,
+		maxOutputTokens:     model.TopProvider.MaxCompletionTokens,
+		inputModalities:     inputModalities,
+		outputModalities:    outputModalities,
+		supportedParameters: parameters,
+		reasoningSupported:  reasoningSupported,
+		reasoningOptions:    reasoningOptions,
+	}
+	price, presence, priced, err := parseOpenRouterPrice(model.Pricing)
+	if err != nil {
+		return openrouterModelMetadata{}, Price{}, RatePresence{}, false,
+			fmt.Errorf("pricing: %w", err)
+	}
+	return modelMetadata, price, presence, priced, nil
+}
+
+var allOpenRouterReasoningEfforts = []string{
+	"max",
+	"xhigh",
+	"high",
+	"medium",
+	"low",
+	"minimal",
+	"none",
+}
+
+func parseOpenRouterReasoning(
+	raw json.RawMessage,
+	supportedParameters []string,
+) (bool, []ReasoningOption, error) {
+	advertised := containsString(supportedParameters, "reasoning") ||
+		containsString(supportedParameters, "include_reasoning")
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		if !advertised {
+			return false, nil, nil
+		}
+		return true, []ReasoningOption{{Type: ReasoningToggle}}, nil
+	}
+
+	var fields struct {
+		SupportedEfforts  json.RawMessage `json:"supported_efforts"`
+		SupportsMaxTokens bool            `json:"supports_max_tokens"`
+		Mandatory         bool            `json:"mandatory"`
+	}
+	if err := json.Unmarshal(trimmed, &fields); err != nil {
+		return false, nil, err
+	}
+	options := make([]ReasoningOption, 0, 3)
+	if !fields.Mandatory {
+		options = append(options, ReasoningOption{Type: ReasoningToggle})
+	}
+	if len(fields.SupportedEfforts) != 0 {
+		efforts := allOpenRouterReasoningEfforts
+		if !bytes.Equal(
+			bytes.TrimSpace(fields.SupportedEfforts),
+			[]byte("null"),
+		) {
+			var decoded []string
+			if err := json.Unmarshal(fields.SupportedEfforts, &decoded); err != nil {
+				return false, nil, fmt.Errorf(
+					"supported_efforts is not an array or null",
+				)
+			}
+			var err error
+			efforts, err = normalizedUniqueStrings(
+				decoded,
+				"reasoning effort",
+			)
+			if err != nil {
+				return false, nil, err
+			}
+			for _, effort := range efforts {
+				if !validReasoningEffort(effort) {
+					return false, nil, fmt.Errorf(
+						"reasoning effort %q is invalid",
+						effort,
+					)
+				}
+			}
+			if !fields.Mandatory &&
+				!containsString(efforts, "none") {
+				efforts = append(efforts, "none")
+			}
+		}
+		values := make([]*string, 0, len(efforts))
+		for _, effort := range efforts {
+			value := strings.Clone(effort)
+			values = append(values, &value)
+		}
+		options = append(options, ReasoningOption{
+			Type:   ReasoningEffort,
+			Values: values,
+		})
+	}
+	if fields.SupportsMaxTokens {
+		options = append(options, ReasoningOption{
+			Type: ReasoningBudgetTokens,
+		})
+	}
+	for _, option := range options {
+		if err := validateReasoningOption(option); err != nil {
+			return false, nil, err
+		}
+	}
+	return true, options, nil
+}
+
+func parseOpenRouterPrice(raw json.RawMessage) (Price, RatePresence, bool, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return Price{}, RatePresence{}, false, nil
 	}
@@ -642,20 +827,23 @@ func parseBasetenPrice(raw json.RawMessage) (Price, RatePresence, bool, error) {
 		Completion      json.RawMessage `json:"completion"`
 		InputCacheRead  json.RawMessage `json:"input_cache_read"`
 		InputCacheWrite json.RawMessage `json:"input_cache_write"`
+		CacheRead       json.RawMessage `json:"cache_read"`
+		CacheWrite      json.RawMessage `json:"cache_write"`
 	}
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return Price{}, RatePresence{}, false, err
 	}
-	presence := RatePresence{
-		Input:        ratePresent(fields.Prompt),
-		Output:       ratePresent(fields.Completion),
-		CacheRead:    ratePresent(fields.InputCacheRead),
-		CacheWrite5m: ratePresent(fields.InputCacheWrite),
+	if !ratePresent(fields.InputCacheRead) {
+		fields.InputCacheRead = fields.CacheRead
+	}
+	if !ratePresent(fields.InputCacheWrite) {
+		fields.InputCacheWrite = fields.CacheWrite
 	}
 	values := []struct {
-		name string
-		raw  json.RawMessage
-		out  *float64
+		name    string
+		raw     json.RawMessage
+		out     *float64
+		present *bool
 	}{
 		{name: "prompt", raw: fields.Prompt},
 		{name: "completion", raw: fields.Completion},
@@ -663,32 +851,95 @@ func parseBasetenPrice(raw json.RawMessage) (Price, RatePresence, bool, error) {
 		{name: "input_cache_write", raw: fields.InputCacheWrite},
 	}
 	var price Price
+	var presence RatePresence
 	values[0].out = &price.Prompt
 	values[1].out = &price.Completion
 	values[2].out = &price.CacheRead
 	values[3].out = &price.CacheWrite5m
+	values[0].present = &presence.Input
+	values[1].present = &presence.Output
+	values[2].present = &presence.CacheRead
+	values[3].present = &presence.CacheWrite5m
 	for _, value := range values {
-		perToken, err := strictOptionalFloat(value.raw)
+		perToken, present, err := openRouterOptionalRate(value.raw)
 		if err != nil {
 			return Price{}, RatePresence{}, false, fmt.Errorf("%s: %w", value.name, err)
 		}
 		*value.out = perToken * 1e6
+		*value.present = present
 	}
 	return price, presence, presence.Input && presence.Output, nil
+}
+
+// OpenRouter publishes -1 for variable-price router models whose token rates
+// are not meaningful at catalog time. Keep the model available to the account,
+// but treat that individual rate as unknown. Other negative values remain
+// malformed.
+func openRouterOptionalRate(
+	raw json.RawMessage,
+) (float64, bool, error) {
+	if !ratePresent(raw) {
+		return 0, false, nil
+	}
+	value, err := optionalFloat(raw)
+	if err != nil {
+		return 0, false, err
+	}
+	if value == -1 {
+		return 0, false, nil
+	}
+	if value < 0 {
+		return 0, false, fmt.Errorf("must be finite and nonnegative or -1")
+	}
+	return value, true, nil
+}
+
+func normalizedUniqueStrings(values []string, field string) ([]string, error) {
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, fmt.Errorf("%s is empty", field)
+		}
+		if _, exists := seen[value]; exists {
+			return nil, fmt.Errorf("%s %q is duplicated", field, value)
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+func containsString(values []string, target string) bool {
+	index := sort.SearchStrings(values, target)
+	return index < len(values) && values[index] == target
 }
 
 func strictOptionalFloat(raw json.RawMessage) (float64, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return 0, nil
 	}
+	value, err := optionalFloat(raw)
+	if err != nil {
+		return 0, err
+	}
+	if value < 0 {
+		return 0, fmt.Errorf("must be finite and nonnegative")
+	}
+	return value, nil
+}
+
+func optionalFloat(raw json.RawMessage) (float64, error) {
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err == nil {
 		value, err := number.Float64()
 		if err != nil {
 			return 0, fmt.Errorf("invalid number")
 		}
-		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			return 0, fmt.Errorf("must be finite and nonnegative")
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return 0, fmt.Errorf("must be finite")
 		}
 		return value, nil
 	}
@@ -697,36 +948,36 @@ func strictOptionalFloat(raw json.RawMessage) (float64, error) {
 		return 0, fmt.Errorf("must be a number or numeric string")
 	}
 	value, err := strconv.ParseFloat(text, 64)
-	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-		return 0, fmt.Errorf("must be finite and nonnegative")
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, fmt.Errorf("must be finite")
 	}
 	return value, nil
 }
 
-func (p *Pricing) CheckBasetenModel(expectedModel string) error {
+func (p *Pricing) CheckOpenRouterModel(expectedModel string) error {
 	if expectedModel == "" {
 		return nil
 	}
-	if !containsSorted(p.Capture().BasetenModels(), expectedModel) {
-		return fmt.Errorf("expected model %q not present in Baseten /v1/models catalog", expectedModel)
+	if !containsSorted(p.Capture().OpenRouterModels(), expectedModel) {
+		return fmt.Errorf("expected model %q not present in OpenRouter /v1/models/user catalog", expectedModel)
 	}
 	return nil
 }
 
-func (p *Pricing) BasetenPrice(model string) Price {
-	return p.Quote("baseten", model).Price
+func (p *Pricing) OpenRouterPrice(model string) Price {
+	return p.Quote("openrouter", model).Price
 }
 
-func (p *Pricing) BasetenCount() int {
+func (p *Pricing) OpenRouterCount() int {
 	snapshot := p.Capture()
 	if snapshot == nil {
 		return 0
 	}
-	return snapshot.BasetenMetadata().PricedModelCount
+	return snapshot.OpenRouterMetadata().PricedModelCount
 }
 
-func (p *Pricing) BasetenModelCount() int {
-	return p.Capture().BasetenMetadata().ModelCount
+func (p *Pricing) OpenRouterModelCount() int {
+	return p.Capture().OpenRouterMetadata().ModelCount
 }
 
 func costUSD(

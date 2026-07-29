@@ -1,246 +1,234 @@
-# Baseten Switch
+# OpenRouter Switch
 
-Baseten Switch is a local macOS app and gateway that routes supported AI
-coding harnesses between their native providers and models served on Baseten.
-One global switch controls Baseten routing, and per-client mappings select the
-model that serves each request.
+OpenRouter Switch is a local macOS app and gateway for routing Claude Code and
+Codex through models available to your OpenRouter account. One switch controls
+OpenRouter routing; client-specific mappings select models for Claude Code and
+Codex while preserving optional native Anthropic and OpenAI fallback.
 
-> **Beta:** Baseten Switch is under active development. Interfaces,
-> configuration, and behavior may change between releases. The current macOS
-> build is ad hoc signed and not yet notarized by Apple, so first launch may
-> require approval under System Settings → Privacy & Security.
+> **Beta:** Interfaces, configuration, and packaging may change before a
+> stable release. Release builds are ad-hoc signed and are not notarized.
 
-The first public release supports macOS 13 or newer on Apple Silicon and Intel.
+OpenRouter Switch is a fork of
+[Baseten Switch](https://github.com/basetenlabs/baseten-switch). The upstream
+MIT copyright and license are preserved in [LICENSE](LICENSE).
 
-## Quick start
+## Install
+
+Homebrew is the canonical install and upgrade path:
 
 ```sh
-brew install basetenlabs/baseten/baseten-switch
-baseten-switch setup
-baseten-switch up --install
-baseten-switch claude on
-baseten-switch doctor --probe
+brew install ckorhonen/openrouter-switch/openrouter-switch
 ```
 
-The fully qualified Homebrew command adds Baseten's public tap and installs
-both Baseten Switch and its Baseten CLI dependency. It requires no GitHub
-login, separate `brew tap`, second install command, or local compiler. The beta
-release includes a universal macOS artifact for Apple Silicon and Intel.
+Then configure a key and start the services:
 
-`setup` verifies the Baseten CLI and its current credential, opens
-`baseten auth login` when needed, and creates the initial configuration.
-It never overwrites an existing configuration. `up --install` installs the
-user launch agents, starts the local gateway, installs Baseten Switch.app in
-`~/Applications`, and opens the app. `claude on` connects new Claude Code
-sessions to the gateway. The final command checks the complete request path
-with a small live request.
+```sh
+openrouter-switch setup
+openrouter-switch up --install
+openrouter-switch menubar
+openrouter-switch claude on
+openrouter-switch doctor --probe
+```
 
-If macOS blocks the app's first launch, open **System Settings → Privacy &
-Security**, scroll to **Security**, and click **Open Anyway**. This control
-appears after a blocked launch attempt. A managed Mac may prohibit the
-override.
+`setup` prompts for a key when none is configured. `auth set-key` replaces it.
+Both prompts avoid terminal echo, validate against OpenRouter, and update
+Keychain only after validation succeeds. The prior working key remains active
+when validation fails.
 
-## Use the Mac app
+Fresh configuration starts with native routing off and no assumed model.
+Choose one of the account models offered by the app, then turn OpenRouter
+routing on.
 
-The menu bar app is the primary interface for daily use. It provides:
+## Authentication and account models
 
-- the global Baseten routing switch;
-- Claude Code and Codex model configuration;
-- current health, active fallback, and authentication status;
-- recent traffic, performance, and spend views;
-- actions to start the system and run it at login.
+Credential precedence:
 
-After an upgrade, `baseten-switch up` adopts the new CLI and app version.
-Run `baseten-switch menubar` when you only need to install, refresh, or reopen
-the app from the current Homebrew package.
+1. macOS Keychain service `openrouter-switch`, account `openrouter`;
+2. inherited `OPENROUTER_API_KEY`;
+3. no credential.
 
-The app and CLI update the same configuration. You can use either interface
-without maintaining separate state.
+Environment credentials are a read-only fallback. Do not put an OpenRouter API
+key in `gateway.yaml`, shell history, command arguments, or issue reports.
+
+```sh
+openrouter-switch auth status
+openrouter-switch auth set-key
+```
+
+The gateway validates credentials with OpenRouter's authenticated `/api/v1/key`
+endpoint. It obtains selectable models from authenticated
+`/api/v1/models/user`. The app and CLI offer only tool-capable models present
+in that account-scoped response and compatible with the selected client.
+Public model catalogs may enrich display metadata, but never authorize model
+selection.
+
+A saved model that disappears from the account catalog remains visible as
+unavailable and cannot be selected or requested. OpenRouter Switch never
+silently substitutes another OpenRouter model.
 
 ## Claude Code
 
-`baseten-switch claude on` saves the previous Claude Code setting and points
-new sessions at Baseten Switch. Restart Claude Code after enabling or
-disabling the integration.
-
-Useful controls:
-
 ```sh
-baseten-switch on
-baseten-switch off
-baseten-switch claude status
-baseten-switch claude route
-baseten-switch claude route sonnet zai-org/GLM-5.2
-baseten-switch claude route sonnet native
-baseten-switch claude subagents zai-org/GLM-5.2
+openrouter-switch claude on
+openrouter-switch claude status
+openrouter-switch claude route
+openrouter-switch claude route sonnet <account-model>
+openrouter-switch claude subagents <account-model>
 ```
 
-`on` and `off` change one global routing switch. Saved model mappings remain
-editable while routing is off. A Claude family can map to `native`, a
-configured alias, or a Baseten model slug. Run
-`baseten-switch claude route <family> default` to remove a family override.
+Restart Claude Code after enabling or disabling the integration. OpenRouter
+models are exposed through the local Anthropic-compatible Messages endpoint.
+Streaming, tool calls, multimodal content, and supported reasoning controls are
+forwarded in the OpenRouter Messages shape.
 
-To restore the Claude Code setting that existed before setup:
-
-```sh
-baseten-switch claude off
-```
-
-## Codex CLI
-
-Codex support is opt-in. Install
-[Codex CLI](https://github.com/openai/codex), start Baseten Switch,
-and create its managed profile:
+Disable the managed integration:
 
 ```sh
-baseten-switch codex on
-baseten-switch codex route zai-org/GLM-5.2
-baseten-switch codex status
-codex --profile baseten
+openrouter-switch claude off
 ```
 
-The first `codex on` may request permission to enable the parked Codex
-listener. Baseten Switch writes `~/.codex/baseten.config.toml`; it does not
-modify `~/.codex/config.toml`. Start Codex without `--profile baseten` to use
-native OpenAI routing.
-
-Remove the managed profile and restore any file it replaced:
+## Codex
 
 ```sh
-baseten-switch codex off
+openrouter-switch codex route <account-model>
+openrouter-switch codex on
+openrouter-switch codex status
+codex --profile openrouter
 ```
 
-Do not override the managed profile's compatibility model with `-m`. Select
-the upstream Baseten model with `baseten-switch codex route` instead.
+OpenRouter Switch writes a managed `~/.codex/openrouter.config.toml` overlay. It
+does not modify `~/.codex/config.toml`. Start Codex without
+`--profile openrouter` to use the normal Codex configuration.
 
-## Status and troubleshooting
+Disable the managed integration:
 
 ```sh
-baseten-switch status
-baseten-switch status --verbose
-baseten-switch doctor
-baseten-switch doctor --probe
+openrouter-switch codex off
 ```
 
-`status` summarizes the router, front door, Mac app, authentication, and
-client routing state. `doctor` inspects the same path without changing it and
-prints the first failure with a concrete fix. `doctor --fix` can apply
-supported repairs after confirmation.
+## Routing and fallback
 
-Baseten Switch stores configuration, local state, logs, and telemetry under
-`~/.config/baseten-switch/`. The primary logs are:
+```sh
+openrouter-switch on
+openrouter-switch off
+openrouter-switch status --verbose
+```
+
+When routing is off, requests use the client's native provider and OpenRouter
+credentials are not consulted. When routing is on, configured requests use
+OpenRouter.
+
+Native fallback is optional and protocol-specific: Claude Code falls back only
+to Anthropic; Codex falls back only to OpenAI. Explicit model choices never
+fall back. Authentication, payment, permission, and guardrail failures
+(`401`, `402`, `403`) never fall back. Eligible transient failures such as
+`429`, `502`, and `503` may use bounded retry and configured native fallback.
+
+## Files and diagnostics
+
+OpenRouter Switch stores current-product state under:
 
 ```text
-~/.config/baseten-switch/logs/router.log
-~/.config/baseten-switch/logs/door.log
+~/.config/openrouter-switch/
+├── gateway.yaml
+├── logs/
+├── telemetry/
+└── backups/
 ```
 
-Run `baseten-switch auth login` if the Baseten credential expires. The command
-delegates authentication to the Baseten CLI, reloads the gateway, and prints
-the current identity.
-
-## Upgrade
+Useful commands:
 
 ```sh
-brew upgrade baseten-switch
-baseten-switch up
-baseten-switch doctor
+openrouter-switch status
+openrouter-switch doctor
+openrouter-switch doctor --probe
 ```
 
-`up` leaves healthy current components alone and moves stale components to the
-new binary and app. Homebrew remains the canonical public install and upgrade
-channel.
+Configuration can be overridden with
+`OPENROUTER_SWITCH_CONFIG_PATH`. See [config/schema.md](config/schema.md) for
+the complete schema.
 
-## Uninstall
+## Privacy and security
 
-Inspect the exact removal first:
+The router, door, and administration API bind to loopback. Prompt and response
+bodies are forwarded only to the selected provider. Telemetry is local and
+metadata-only: provider, model, endpoint shape, latency, token counts, cost
+estimate, and normalized retry or fallback outcomes.
+
+OpenRouter Switch must not log or persist:
+
+- API keys or authorization headers;
+- prompt or response content;
+- raw upstream error bodies;
+- Keychain data;
+- reversible credential fingerprints.
+
+See [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+
+## Build from source
+
+Requirements:
+
+- Go from `gateway/go.mod`;
+- macOS with Xcode command-line tools for the app;
+- Swift 5.9 or newer.
 
 ```sh
-baseten-switch uninstall --dry-run
+scripts/build.sh gateway
+scripts/check.sh --offline
 ```
 
-Then remove managed harness settings, processes, launch agents, runtime
-residue, and the Mac app:
+The CLI is written to `gateway/bin/openrouter-switch`. Build the app with:
 
 ```sh
-baseten-switch uninstall
-brew uninstall baseten-switch
+scripts/build-menubar.sh
 ```
 
-The default uninstall retains configuration, telemetry, logs, and backups.
-To remove those files as well, use this instead of the standard uninstall:
+Nix builds the CLI only:
 
 ```sh
-baseten-switch uninstall --purge --yes
-brew uninstall baseten-switch
+nix profile install github:ckorhonen/openrouter-switch#openrouter-switch
 ```
 
-Uninstall never removes Baseten CLI credentials or keychain entries. If the
-app's Start at Login item prevents safe bundle removal, the command prints the
-manual action required in macOS System Settings.
-
-## Privacy and trust
-
-Baseten Switch binds its services to the local loopback interface. It receives
-harness requests and credentials because it is in the selected request path.
-Request content leaves the machine only for the upstream chosen by the active
-routing policy. Baseten credentials go only to Baseten, and native credentials
-go only to their matching native provider.
-
-Local telemetry contains request metadata, not prompts, responses,
-credentials, headers, or request bodies. Disable future records by setting
-`telemetry_enabled: false` in `gateway.yaml`, then reload the configuration.
-Delete existing records from
-`~/.config/baseten-switch/telemetry/`.
-
-Public model-catalog refreshes from models.dev send no credential or
-user-derived data. The unauthenticated administration API binds to loopback
-and must never be exposed on a network interface.
-
-## Configuration
-
-The generated configuration is
-`~/.config/baseten-switch/gateway.yaml`. Prefer the Mac app or typed CLI
-commands over direct edits; routing changes hot-reload without a restart.
-
-See [config/schema.md](config/schema.md) for every field and
-[config/gateway.example.yaml](config/gateway.example.yaml) for the generated
-shape. Store API-key overrides in
-`~/.config/baseten-switch/env`, which must use mode `0600`, rather than in
-`gateway.yaml`.
-
-## Build and test
-
-The Go module in `gateway/` builds the CLI, router, administration API, and
-front door. The Swift package in `mac/BasetenSwitch/` builds the native menu
-bar app without external Swift packages.
+## Upgrade and uninstall
 
 ```sh
-scripts/build.sh
-scripts/check.sh
+brew upgrade openrouter-switch
+openrouter-switch up
+openrouter-switch doctor
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and dependency rules.
-See [TESTING.md](TESTING.md) for test layers and isolation requirements.
-
-## Nix source build
-
-The Nix flake is an alternate source build for Linux and Apple Silicon macOS.
-It does not include the signed Mac app or install the Baseten CLI dependency:
+Preview uninstall actions:
 
 ```sh
-nix profile install github:basetenlabs/baseten-switch#baseten-switch
+openrouter-switch uninstall --dry-run
 ```
 
-Upgrade and restart the locally running components:
+Remove the current installation while retaining configuration and telemetry:
 
 ```sh
-nix profile upgrade --refresh baseten-switch
-baseten-switch up
+openrouter-switch uninstall
+brew uninstall openrouter-switch
 ```
 
-Homebrew is the supported path for the complete macOS product.
+Purge current-product data only:
+
+```sh
+openrouter-switch uninstall --purge --yes
+```
+
+The Keychain entry is retained unless explicitly removed in the app or macOS
+Keychain Access.
+
+## Migrating from Baseten Switch
+
+OpenRouter Switch uses an isolated config root and does not automatically read
+or modify `~/.config/baseten-switch`. Recreate model routes in
+`~/.config/openrouter-switch/gateway.yaml`, replacing each old provider route
+with `openrouter`, then enter an OpenRouter key using `auth set-key`. Do not
+copy provider credentials or old authentication files.
 
 ## License
 
-Baseten Switch is available under the [MIT License](LICENSE).
+OpenRouter Switch is available under the [MIT License](LICENSE). Third-party
+notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

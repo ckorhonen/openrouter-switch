@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 // writeTelemetryV1 is deliberately best-effort. Request routing must never

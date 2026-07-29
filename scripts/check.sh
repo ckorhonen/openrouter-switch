@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check.sh: the local build + test + smoke gate for baseten-switch.
+# check.sh: the local build + test + smoke gate for openrouter-switch.
 #
 # Run this after every change set (human or agent) and before calling any
 # work done. `go test ./...` alone is not sufficient. The smoke stage exercises
@@ -8,10 +8,10 @@
 #
 # Usage: scripts/check.sh [--offline]
 #   --offline  skip steps that need the network or the real credential
-#              store (whoami); build, vet, tests, and scratch boots still run.
+#              store; build, vet, tests, and scratch boots still run.
 #
 # Scratch ports default to: 28081, 28082, 28083, 28182, 28183, 28786,
-# 28787. Override individual ports with the BASETEN_SWITCH_CHECK_*_PORT variables
+# 28787. Override individual ports with the OPENROUTER_SWITCH_CHECK_*_PORT variables
 # when another worktree is using a default.
 
 set -euo pipefail
@@ -24,18 +24,18 @@ REPO_DIR="$(dirname "$SCRIPT_DIR")"
 GW_DIR="$REPO_DIR/gateway"
 GO="${GO:-go}"
 
-ADMIN_PORT="${BASETEN_SWITCH_CHECK_ADMIN_PORT:-28787}"
-CLIENT_PORT="${BASETEN_SWITCH_CHECK_CLIENT_PORT:-28081}"
-DOOR_PORT="${BASETEN_SWITCH_CHECK_DOOR_PORT:-28082}"
-DEAD_ROUTER_PORT="${BASETEN_SWITCH_CHECK_DEAD_ROUTER_PORT:-28182}"
+ADMIN_PORT="${OPENROUTER_SWITCH_CHECK_ADMIN_PORT:-28787}"
+CLIENT_PORT="${OPENROUTER_SWITCH_CHECK_CLIENT_PORT:-28081}"
+DOOR_PORT="${OPENROUTER_SWITCH_CHECK_DOOR_PORT:-28082}"
+DEAD_ROUTER_PORT="${OPENROUTER_SWITCH_CHECK_DEAD_ROUTER_PORT:-28182}"
 # up/down/status round trip scratch ports:
-UPDOWN_ADMIN_PORT="${BASETEN_SWITCH_CHECK_UPDOWN_ADMIN_PORT:-28786}"
-UPDOWN_CLIENT_PORT="${BASETEN_SWITCH_CHECK_UPDOWN_CLIENT_PORT:-28183}"
-UPDOWN_DOOR_PORT="${BASETEN_SWITCH_CHECK_UPDOWN_DOOR_PORT:-28083}"
+UPDOWN_ADMIN_PORT="${OPENROUTER_SWITCH_CHECK_UPDOWN_ADMIN_PORT:-28786}"
+UPDOWN_CLIENT_PORT="${OPENROUTER_SWITCH_CHECK_UPDOWN_CLIENT_PORT:-28183}"
+UPDOWN_DOOR_PORT="${OPENROUTER_SWITCH_CHECK_UPDOWN_DOOR_PORT:-28083}"
 
 # Template as an operand (not -t): the only mktemp form GNU and BSD
 # parse the same way, so the gate runs on Linux hosts too.
-TMPDIR_CHECK="$(mktemp -d "${TMPDIR:-/tmp}/baseten-switch-check.XXXXXX")"
+TMPDIR_CHECK="$(mktemp -d "${TMPDIR:-/tmp}/openrouter-switch-check.XXXXXX")"
 PIDS=()
 cleanup() {
     for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done
@@ -124,13 +124,17 @@ echo "ok ($(grep -cE '^ok' "$TMPDIR_CHECK/gotest.out") packages)"
 # SwiftPM and Clang caches.
 if [[ "$(uname -s)" == "Darwin" ]]; then
     step "swift build / test"
+    if [[ -z "${DEVELOPER_DIR:-}" &&
+          -d /Applications/Xcode.app/Contents/Developer ]]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    fi
     SWIFT_HOME="$TMPDIR_CHECK/swift-home"
     SWIFT_BUILD="$TMPDIR_CHECK/swift-build"
     SWIFT_CLANG_CACHE="$TMPDIR_CHECK/clang-module-cache"
     SWIFT_MODULE_CACHE="$TMPDIR_CHECK/swift-module-cache"
     mkdir -p "$SWIFT_HOME" "$SWIFT_CLANG_CACHE" "$SWIFT_MODULE_CACHE"
     (
-        cd "$REPO_DIR/mac/BasetenSwitch"
+        cd "$REPO_DIR/mac/OpenRouterSwitch"
         # The repository has no package dependencies or build plugins.
         # Disabling SwiftPM's nested sandbox keeps this gate runnable inside
         # CI and developer sandboxes while the explicit cache and scratch
@@ -158,11 +162,11 @@ step "build binary"
 cd "$GW_DIR"
 BUILD_VERSION="$(git -C "$REPO_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
 "$GO" build \
-    -ldflags "-X github.com/basetenlabs/baseten-switch/gateway/internal/version.Version=${BUILD_VERSION}" \
-    -o bin/baseten-switch ./cmd/baseten-switch || fail "build baseten-switch"
-[[ "$(bin/baseten-switch --version)" == "baseten-switch $BUILD_VERSION" ]] \
+    -ldflags "-X github.com/ckorhonen/openrouter-switch/gateway/internal/version.Version=${BUILD_VERSION}" \
+    -o bin/openrouter-switch ./cmd/openrouter-switch || fail "build openrouter-switch"
+[[ "$(bin/openrouter-switch --version)" == "openrouter-switch $BUILD_VERSION" ]] \
     || fail "built binary is not version-stamped as $BUILD_VERSION"
-echo "ok (bin/baseten-switch $BUILD_VERSION; the door is the 'baseten-switch door' subcommand)"
+echo "ok (bin/openrouter-switch $BUILD_VERSION; the door is the 'openrouter-switch door' subcommand)"
 
 # ------------------------------------------------------ scratch ports
 step "scratch ports free"
@@ -174,52 +178,81 @@ for port in $ADMIN_PORT $CLIENT_PORT $DOOR_PORT $DEAD_ROUTER_PORT \
 done
 echo "ok"
 
-# ------------------------------------------------------- smoke: whoami
-# Exercises the real credential store (keychain + auth.json) and a live
-# /v1/users/me round trip. --refresh forces the token-refresh round trip
-# deterministically. The refreshed token persists to the same store the
-# normal path writes; otherwise this step is read-only.
-step "smoke: whoami --refresh (real credential store)"
-AUTH_JSON="$HOME/Library/Application Support/baseten/auth.json"
+# ------------------------------------------ smoke: OpenRouter auth + catalog
+# Exercises credential precedence without printing the key, validates it
+# through the product CLI, then proves the authenticated account catalog is
+# reachable. The key is written only to a 0600 scratch header file.
+step "smoke: OpenRouter key status + account catalog"
 if [[ "$OFFLINE" == 1 ]]; then
     echo "skipped (--offline)"
-elif [[ ! -f "$AUTH_JSON" ]]; then
-    echo "skipped (no baseten auth.json on this machine)"
 else
-    ./bin/baseten-switch whoami --refresh > "$TMPDIR_CHECK/whoami.out" 2>&1 \
-        || { cat "$TMPDIR_CHECK/whoami.out"; fail "whoami --refresh exited non-zero against the real credential store"; }
-    grep -qE 'Email|API key' "$TMPDIR_CHECK/whoami.out" \
-        || { cat "$TMPDIR_CHECK/whoami.out"; fail "whoami output missing identity"; }
-    echo "ok ($(head -1 "$TMPDIR_CHECK/whoami.out"))"
+    OPENROUTER_CHECK_KEY=""
+    if command -v security >/dev/null 2>&1; then
+        OPENROUTER_CHECK_STORED="$(
+            security find-generic-password \
+                -s openrouter-switch -a openrouter -w 2>/dev/null || true
+        )"
+        if [[ "$OPENROUTER_CHECK_STORED" == go-keyring-base64:* ]]; then
+            OPENROUTER_CHECK_KEY="$(
+                printf '%s' \
+                    "${OPENROUTER_CHECK_STORED#go-keyring-base64:}" \
+                    | /usr/bin/base64 -D 2>/dev/null || true
+            )"
+        else
+            OPENROUTER_CHECK_KEY="$OPENROUTER_CHECK_STORED"
+        fi
+        unset OPENROUTER_CHECK_STORED
+    fi
+    if [[ -z "$OPENROUTER_CHECK_KEY" ]]; then
+        OPENROUTER_CHECK_KEY="${OPENROUTER_API_KEY:-}"
+    fi
+    if [[ -z "$OPENROUTER_CHECK_KEY" ]]; then
+        echo "skipped (no OpenRouter key in Keychain or OPENROUTER_API_KEY)"
+    else
+        ./bin/openrouter-switch auth status > "$TMPDIR_CHECK/auth-status.out" 2>&1 \
+            || { sed -E 's/(sk-or-v1-[A-Za-z0-9_-]+|sk-or-[A-Za-z0-9_-]+)/[REDACTED]/g' "$TMPDIR_CHECK/auth-status.out"; fail "OpenRouter auth status"; }
+        HEADER_FILE="$TMPDIR_CHECK/openrouter.headers"
+        umask 077
+        printf 'Authorization: Bearer %s\n' "$OPENROUTER_CHECK_KEY" > "$HEADER_FILE"
+        curl --fail --silent --show-error --location \
+            -H "@$HEADER_FILE" \
+            -o "$TMPDIR_CHECK/models-user.json" \
+            https://openrouter.ai/api/v1/models/user \
+            || fail "OpenRouter account catalog"
+        grep -q '"data"' "$TMPDIR_CHECK/models-user.json" \
+            || fail "OpenRouter account catalog omitted data"
+        unset OPENROUTER_CHECK_KEY
+        echo "ok (masked auth status + authenticated account catalog)"
+    fi
 fi
 
 # --------------------------------------------- smoke: scratch gateway
 # Boots a throwaway gateway on scratch ports with a config that has an
-# unresolved ${VAR} and a baseten-routed client with no credential, then
+# unresolved ${VAR} and an OpenRouter-routed client with no credential, then
 # asserts healthz plus both preflight warnings. Isolated via env: its own
-# config, pidfile, telemetry, admin addr, and a nonexistent OAuth profile.
+# config, pidfile, telemetry, admin address, and disabled Keychain access.
 step "smoke: scratch gateway boot + preflight"
 cat > "$TMPDIR_CHECK/gateway.yaml" <<EOF
 global:
     routing_enabled: true
     auth:
-        baseten: \${BASETEN_SWITCH_CHECK_MISSING}
+        anthropic: \${OPENROUTER_SWITCH_CHECK_MISSING}
     telemetry_dir: $TMPDIR_CHECK/telemetry
 clients:
     - name: check-client
       enabled: true
       bind_addr: 127.0.0.1:$CLIENT_PORT
       protocol_shape: openai
-      default_model: zai-org/GLM-5.2
+      default_model: test/account-model
       fallback_route: openai
 EOF
-env BASETEN_SWITCH_CONFIG_PATH="$TMPDIR_CHECK/gateway.yaml" \
-    BASETEN_SWITCH_ENV_FILE="$TMPDIR_CHECK/nonexistent.env" \
-    BASETEN_SWITCH_ADMIN_ADDR="127.0.0.1:$ADMIN_PORT" \
-    BASETEN_SWITCH_GATEWAY_PIDFILE="$TMPDIR_CHECK/gw.pid" \
-    BASETEN_API_KEY= \
-    BASETEN_SWITCH_OAUTH_PROFILE=baseten-switch-check-nonexistent \
-    ./bin/baseten-switch gateway start --foreground --port "$ADMIN_PORT" \
+env OPENROUTER_SWITCH_CONFIG_PATH="$TMPDIR_CHECK/gateway.yaml" \
+    OPENROUTER_SWITCH_ENV_FILE="$TMPDIR_CHECK/nonexistent.env" \
+    OPENROUTER_SWITCH_ADMIN_ADDR="127.0.0.1:$ADMIN_PORT" \
+    OPENROUTER_SWITCH_GATEWAY_PIDFILE="$TMPDIR_CHECK/gw.pid" \
+    OPENROUTER_API_KEY= \
+    OPENROUTER_SWITCH_AUTH_NO_KEYRING=1 \
+    ./bin/openrouter-switch gateway start --foreground --port "$ADMIN_PORT" \
     > "$TMPDIR_CHECK/gateway.log" 2>&1 &
 GW_PID=$!
 PIDS+=("$GW_PID")
@@ -231,9 +264,9 @@ for _ in $(seq 1 25); do
     sleep 0.2
 done
 [[ -n "$HEALTH" ]] || { cat "$TMPDIR_CHECK/gateway.log"; fail "scratch gateway never became healthy on $ADMIN_PORT"; }
-grep -q 'references \${BASETEN_SWITCH_CHECK_MISSING}' "$TMPDIR_CHECK/gateway.log" \
+grep -q 'references \${OPENROUTER_SWITCH_CHECK_MISSING}' "$TMPDIR_CHECK/gateway.log" \
     || { cat "$TMPDIR_CHECK/gateway.log"; fail "preflight missing unresolved-placeholder warning"; }
-grep -q 'no Baseten credential found' "$TMPDIR_CHECK/gateway.log" \
+grep -q 'no OpenRouter API key found' "$TMPDIR_CHECK/gateway.log" \
     || { cat "$TMPDIR_CHECK/gateway.log"; fail "preflight missing no-credential banner"; }
 kill "$GW_PID" 2>/dev/null || true
 wait "$GW_PID" 2>/dev/null || true
@@ -241,13 +274,13 @@ forget_pid "$GW_PID"
 echo "ok (healthz + placeholder warning + credential banner)"
 
 # ------------------------------------------------- smoke: scratch door
-# Boots a throwaway door (the `baseten-switch door` subcommand) in flags mode
+# Boots a throwaway door (the `openrouter-switch door` subcommand) in flags mode
 # pointing at a dead router port and asserts /doorz answers. No traffic
-# is sent through it. BASETEN_SWITCH_DOOR_PIDFILE is scratched so the real
-# ~/.config/baseten-switch/door.pid is never touched.
+# is sent through it. OPENROUTER_SWITCH_DOOR_PIDFILE is scratched so the real
+# ~/.config/openrouter-switch/door.pid is never touched.
 step "smoke: scratch door boot + doorz"
-env BASETEN_SWITCH_DOOR_PIDFILE="$TMPDIR_CHECK/door.pid" \
-    ./bin/baseten-switch door --port "$DOOR_PORT=anthropic:127.0.0.1:$DEAD_ROUTER_PORT" --probe-interval 1s \
+env OPENROUTER_SWITCH_DOOR_PIDFILE="$TMPDIR_CHECK/door.pid" \
+    ./bin/openrouter-switch door --port "$DOOR_PORT=anthropic:127.0.0.1:$DEAD_ROUTER_PORT" --probe-interval 1s \
     > "$TMPDIR_CHECK/door.log" 2>&1 &
 DOOR_PID=$!
 PIDS+=("$DOOR_PID")
@@ -288,7 +321,7 @@ clients:
       enabled: true
       bind_addr: 127.0.0.1:$UPDOWN_CLIENT_PORT
       protocol_shape: anthropic
-      default_model: zai-org/GLM-5.2
+      default_model: test/account-model
 door:
     cooldown: 5s
     probe_interval: 1s
@@ -298,29 +331,29 @@ door:
 EOF
 
 updown() {
-    # BASETEN_SWITCH_LAUNCHD=off: the gate must never run launchctl operations
+    # OPENROUTER_SWITCH_LAUNCHD=off: the gate must never run launchctl operations
     # against the user's launchd session (supervision detection in
     # up/down/status is covered by unit tests with a fake runner).
-    # BASETEN_SWITCH_MENUBAR=off: likewise, the gate must never quit or relaunch
+    # OPENROUTER_SWITCH_MENUBAR=off: likewise, the gate must never quit or relaunch
     # the user's real menubar app (the up/down menubar step is covered
     # by unit tests over the runCmd seam).
-    env BASETEN_SWITCH_LAUNCHD=off \
-        BASETEN_SWITCH_MENUBAR=off \
-        BASETEN_SWITCH_CONFIG_PATH="$UP_DIR/gateway.yaml" \
-        BASETEN_SWITCH_ENV_FILE="$UP_DIR/nonexistent.env" \
-        BASETEN_SWITCH_ADMIN_ADDR="127.0.0.1:$UPDOWN_ADMIN_PORT" \
-        BASETEN_SWITCH_GATEWAY_PIDFILE="$UP_DIR/gw.pid" \
-        BASETEN_SWITCH_DOOR_PIDFILE="$UP_DIR/door.pid" \
-        BASETEN_SWITCH_GATEWAY_LOG="$UP_DIR/router.log" \
-        BASETEN_SWITCH_DOOR_LOG="$UP_DIR/door.log" \
-        BASETEN_SWITCH_TELEMETRY_DIR="$UP_DIR/telemetry" \
-        BASETEN_SWITCH_OAUTH_PROFILE=baseten-switch-check-nonexistent \
-        BASETEN_API_KEY= \
-        ./bin/baseten-switch "$@"
+    env OPENROUTER_SWITCH_LAUNCHD=off \
+        OPENROUTER_SWITCH_MENUBAR=off \
+        OPENROUTER_SWITCH_CONFIG_PATH="$UP_DIR/gateway.yaml" \
+        OPENROUTER_SWITCH_ENV_FILE="$UP_DIR/nonexistent.env" \
+        OPENROUTER_SWITCH_ADMIN_ADDR="127.0.0.1:$UPDOWN_ADMIN_PORT" \
+        OPENROUTER_SWITCH_GATEWAY_PIDFILE="$UP_DIR/gw.pid" \
+        OPENROUTER_SWITCH_DOOR_PIDFILE="$UP_DIR/door.pid" \
+        OPENROUTER_SWITCH_GATEWAY_LOG="$UP_DIR/router.log" \
+        OPENROUTER_SWITCH_DOOR_LOG="$UP_DIR/door.log" \
+        OPENROUTER_SWITCH_TELEMETRY_DIR="$UP_DIR/telemetry" \
+        OPENROUTER_SWITCH_AUTH_NO_KEYRING=1 \
+        OPENROUTER_API_KEY= \
+        ./bin/openrouter-switch "$@"
 }
 
 updown up > "$UP_DIR/up.out" 2>&1 \
-    || { cat "$UP_DIR/up.out" "$UP_DIR/router.log" "$UP_DIR/door.log" 2>/dev/null; fail "baseten-switch up failed on scratch ports"; }
+    || { cat "$UP_DIR/up.out" "$UP_DIR/router.log" "$UP_DIR/door.log" 2>/dev/null; fail "openrouter-switch up failed on scratch ports"; }
 # Register the daemons for trap cleanup in case a later step fails.
 for pf in "$UP_DIR/gw.pid" "$UP_DIR/door.pid"; do
     if [[ -f "$pf" ]]; then
@@ -346,7 +379,7 @@ grep -q 'already up' "$UP_DIR/up2.out" \
     || { cat "$UP_DIR/up2.out"; fail "second up did not report already-up components"; }
 
 updown down > "$UP_DIR/down.out" 2>&1 \
-    || { cat "$UP_DIR/down.out"; fail "baseten-switch down failed"; }
+    || { cat "$UP_DIR/down.out"; fail "openrouter-switch down failed"; }
 for managed_pid in "${UPDOWN_MANAGED_PIDS[@]:-}"; do
     forget_pid "$managed_pid"
 done

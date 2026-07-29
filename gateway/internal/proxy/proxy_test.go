@@ -19,7 +19,7 @@ func TestBuildUpstreamHeadersStripsHopByHopAndAuth(t *testing.T) {
 	in.Set("Content-Type", "application/json")
 	in.Set("X-Custom", "keep-me")
 
-	out, err := BuildUpstreamHeaders(in, UpstreamModeAPIKey, "bas-secret")
+	out, err := BuildUpstreamHeaders(in, UpstreamModeOpenRouter, "sk-or-secret")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -28,14 +28,35 @@ func TestBuildUpstreamHeadersStripsHopByHopAndAuth(t *testing.T) {
 			t.Fatalf("hop-by-hop %q leaked: %q", banned, out.Get(banned))
 		}
 	}
-	if out.Get("Authorization") != "Api-Key bas-secret" {
-		t.Fatalf("baseten auth not set: %q", out.Get("Authorization"))
+	if out.Get("Authorization") != "Bearer sk-or-secret" {
+		t.Fatalf("openrouter auth not set: %q", out.Get("Authorization"))
 	}
 	if out.Get("Anthropic-Version") != "2023-06-01" {
 		t.Fatalf("forward header dropped: %q", out.Get("Anthropic-Version"))
 	}
 	if out.Get("X-Custom") != "keep-me" {
 		t.Fatalf("custom header dropped: %q", out.Get("X-Custom"))
+	}
+}
+
+func TestBuildUpstreamHeadersOpenRouterBearer(t *testing.T) {
+	in := http.Header{}
+	in.Set("Authorization", "Bearer client-token")
+	in.Set("X-Api-Key", "client-anthropic-key")
+	in.Set("X-Custom", "keep-me")
+
+	out, err := BuildUpstreamHeaders(in, UpstreamModeOpenRouter, "sk-or-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.Get("Authorization"); got != "Bearer sk-or-test" {
+		t.Fatalf("Authorization = %q", got)
+	}
+	if got := out.Get("X-Api-Key"); got != "" {
+		t.Fatalf("X-Api-Key leaked: %q", got)
+	}
+	if got := out.Get("X-Custom"); got != "keep-me" {
+		t.Fatalf("custom header = %q", got)
 	}
 }
 
@@ -123,49 +144,29 @@ func TestBuildUpstreamHeadersPassthrough(t *testing.T) {
 	}
 }
 
-func TestBuildUpstreamHeadersOAuth(t *testing.T) {
+func TestBuildUpstreamHeadersOpenRouter(t *testing.T) {
 	in := http.Header{}
 	in.Set("Authorization", "Bearer client")
 	in.Set("X-Api-Key", "client-anthropic-key")
-	in.Set("X-Custom", "keep-me")
-	out, err := BuildUpstreamHeaders(in, UpstreamModeOAuth, "")
+	out, err := BuildUpstreamHeaders(in, UpstreamModeOpenRouter, "mykey")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Get("Authorization") != "" {
-		t.Fatalf("oauth mode must strip inbound Authorization: %q", out.Get("Authorization"))
-	}
-	if out.Get("X-Api-Key") != "" {
-		t.Fatalf("oauth mode must strip inbound X-Api-Key: %q", out.Get("X-Api-Key"))
-	}
-	if out.Get("X-Custom") != "keep-me" {
-		t.Fatalf("oauth mode dropped unrelated header: %q", out.Get("X-Custom"))
-	}
-}
-
-func TestBuildUpstreamHeadersAPIKey(t *testing.T) {
-	in := http.Header{}
-	in.Set("Authorization", "Bearer client")
-	in.Set("X-Api-Key", "client-anthropic-key")
-	out, err := BuildUpstreamHeaders(in, UpstreamModeAPIKey, "mykey")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if out.Get("Authorization") != "Api-Key mykey" {
-		t.Fatalf("apikey mode should set Authorization to Api-Key mykey: %q", out.Get("Authorization"))
+	if out.Get("Authorization") != "Bearer mykey" {
+		t.Fatalf("OpenRouter mode should set Bearer auth: %q", out.Get("Authorization"))
 	}
 	if out.Get("X-Api-Key") != "" {
 		t.Fatalf("apikey mode should not set X-Api-Key: %q", out.Get("X-Api-Key"))
 	}
 }
 
-// TestBuildUpstreamHeadersAPIKeyEmpty verifies the empty-key hard guard:
-// APIKey mode with no key must be an explicit error, never a silent strip
+// TestBuildUpstreamHeadersOpenRouterEmpty verifies the empty-key hard guard:
+// OpenRouter mode with no key must be an explicit error, never a silent strip
 // that sends an unauthenticated upstream request.
-func TestBuildUpstreamHeadersAPIKeyEmpty(t *testing.T) {
+func TestBuildUpstreamHeadersOpenRouterEmpty(t *testing.T) {
 	in := http.Header{}
 	in.Set("Authorization", "Bearer client")
-	out, err := BuildUpstreamHeaders(in, UpstreamModeAPIKey, "")
+	out, err := BuildUpstreamHeaders(in, UpstreamModeOpenRouter, "")
 	if err == nil {
 		t.Fatal("apikey mode with empty key must return an error")
 	}

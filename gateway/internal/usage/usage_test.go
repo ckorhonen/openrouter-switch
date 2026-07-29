@@ -19,7 +19,7 @@ func sseLine(payload string) string {
 	return "data: " + payload + "\n"
 }
 
-func TestParseSSEUsageBasetenMessageDelta(t *testing.T) {
+func TestParseSSEUsageMessageStartThenDelta(t *testing.T) {
 	buf := []byte(
 		sseLine(`{"message":{"usage":{"input_tokens":0,"output_tokens":0}}}`) +
 			sseLine(`{"usage":{"input_tokens":14,"output_tokens":1,"cache_read_input_tokens":0}}`))
@@ -555,117 +555,5 @@ func TestParseNumberAcceptsString(t *testing.T) {
 	n, err = parseNumber(json.RawMessage(`{"x":1}`))
 	if err == nil {
 		t.Fatalf("expected error for nested object, got %d", n)
-	}
-}
-
-// TestNormalizeAnthropicBody covers the Baseten inclusive-input compensation:
-// input_tokens is de-double-counted only when cache_read_input_tokens is
-// present, cache_creation_input_tokens is ABSENT (its presence is the
-// fixed-adapter sentinel: Anthropic always sends it, Baseten's inclusive
-// adapter never does), and the guard (input >= cache_read) holds; everything
-// else passes through untouched without panicking.
-func TestNormalizeAnthropicBody(t *testing.T) {
-	cases := []struct {
-		name        string
-		in          string
-		wantChanged bool
-		wantInput   int64 // only checked when wantChanged
-	}{
-		{
-			name:        "non-stream body with cache_read normalized",
-			in:          `{"id":"m","type":"message","usage":{"input_tokens":46292,"output_tokens":16,"cache_read_input_tokens":46272}}`,
-			wantChanged: true,
-			wantInput:   20,
-		},
-		{
-			name:        "cache_creation present (fixed adapter sentinel) untouched",
-			in:          `{"usage":{"input_tokens":100,"output_tokens":5,"cache_read_input_tokens":60,"cache_creation_input_tokens":30}}`,
-			wantChanged: false,
-		},
-		{
-			name:        "cache_creation zero still counts as sentinel, untouched",
-			in:          `{"usage":{"input_tokens":46292,"output_tokens":16,"cache_read_input_tokens":46272,"cache_creation_input_tokens":0}}`,
-			wantChanged: false,
-		},
-		{
-			name:        "string-wrapped counts normalized",
-			in:          `{"usage":{"input_tokens":"46292","output_tokens":"16","cache_read_input_tokens":"46272"}}`,
-			wantChanged: true,
-			wantInput:   20,
-		},
-		{
-			name:        "no cache fields untouched",
-			in:          `{"usage":{"input_tokens":20,"output_tokens":16}}`,
-			wantChanged: false,
-		},
-		{
-			name:        "input below cache_read untouched (guard)",
-			in:          `{"usage":{"input_tokens":20,"output_tokens":16,"cache_read_input_tokens":46272}}`,
-			wantChanged: false,
-		},
-		{
-			name:        "streaming message_delta with cache_read normalized",
-			in:          `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":107987,"output_tokens":124,"cache_read_input_tokens":76960}}`,
-			wantChanged: true,
-			wantInput:   31027,
-		},
-		{
-			name:        "message_start without cache fields untouched",
-			in:          `{"type":"message_start","message":{"id":"m","usage":{"input_tokens":107987,"output_tokens":1}}}`,
-			wantChanged: false,
-		},
-		{
-			name:        "message_start with cache fields normalized in nested usage",
-			in:          `{"type":"message_start","message":{"id":"m","usage":{"input_tokens":100,"output_tokens":1,"cache_read_input_tokens":90}}}`,
-			wantChanged: true,
-			wantInput:   10,
-		},
-		{
-			name:        "malformed usage body passed through unchanged",
-			in:          `{"usage":{"input_tokens":`,
-			wantChanged: false,
-		},
-		{
-			name:        "usage not an object passed through",
-			in:          `{"usage":"nope"}`,
-			wantChanged: false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			out, changed := NormalizeAnthropicBody([]byte(tc.in))
-			if changed != tc.wantChanged {
-				t.Fatalf("changed = %v, want %v (out=%s)", changed, tc.wantChanged, out)
-			}
-			if !changed {
-				if string(out) != tc.in {
-					t.Fatalf("unchanged body was rewritten: got %s want %s", out, tc.in)
-				}
-				return
-			}
-			// Parse the rewritten body and confirm input_tokens landed where
-			// expected; also confirm cache fields are preserved and no
-			// negative value was produced.
-			var body struct {
-				Usage   json.RawMessage `json:"usage"`
-				Message *struct {
-					Usage json.RawMessage `json:"usage"`
-				} `json:"message"`
-			}
-			if err := json.Unmarshal(out, &body); err != nil {
-				t.Fatalf("rewritten body is not valid JSON: %v (%s)", err, out)
-			}
-			raw := body.Usage
-			if len(raw) == 0 && body.Message != nil {
-				raw = body.Message.Usage
-			}
-			u := ParseUsage([]byte(`{"usage":` + string(raw) + `}`))
-			if u.InputTokens != tc.wantInput {
-				t.Fatalf("input_tokens = %d, want %d (out=%s)", u.InputTokens, tc.wantInput, out)
-			}
-			if u.InputTokens < 0 {
-				t.Fatalf("normalization produced negative input_tokens: %d", u.InputTokens)
-			}
-		})
 	}
 }

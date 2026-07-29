@@ -3,9 +3,9 @@ result
 gateway/bin/
 gateway/*.test
 tests/fresh-install/build/
-mac/BasetenSwitch/.build/
-mac/BasetenSwitch/dist/
-mac/BasetenSwitch/dist-preview/
+mac/OpenRouterSwitch/.build/
+mac/OpenRouterSwitch/dist/
+mac/OpenRouterSwitch/dist-preview/
 
 # Logs
 *.log
@@ -23,4 +23,4 @@ __pycache__/
 
 # Claude Code session state (agent worktrees, local settings)
 .claude/
-gateway/baseten-switch
+gateway/openrouter-switch

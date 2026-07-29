@@ -1,4 +1,4 @@
-// Package launchd renders the baseten-switch user LaunchAgent plists and
+// Package launchd renders the openrouter-switch user LaunchAgent plists and
 // wraps the launchctl invocations behind a small Runner interface so
 // the lifecycle commands (`up --install`, `up --uninstall`, supervised
 // `down`) are testable without touching the real launchd domain
@@ -20,19 +20,19 @@ import (
 
 // The two supervised components. Homebrew's `brew services` uses its
 // own homebrew.mxcl.* labels; install detection matches any label
-// mentioning "baseten-switch" so the two supervision stories never fight
+// mentioning "openrouter-switch" so the two supervision stories never fight
 // over the same ports.
 const (
-	RouterLabel = "co.baseten.switch.router"
-	DoorLabel   = "co.baseten.switch.door"
+	RouterLabel = "com.ckorhonen.openrouter-switch.router"
+	DoorLabel   = "com.ckorhonen.openrouter-switch.door"
 )
 
 // ToggleBundleID is the menubar app's bundle identifier. Both agents
 // set AssociatedBundleIdentifiers to it so System Settings Background
-// Activity groups router, door, and app as one "Baseten Switch" entry once
+// Activity groups router, door, and app as one "OpenRouter Switch" entry once
 // the app bundle ships (the lifecycle contract, background-items
 // grouping); the key is harmless while the app is absent.
-const ToggleBundleID = "co.baseten.switch"
+const ToggleBundleID = "com.ckorhonen.openrouter-switch"
 
 // Job describes one LaunchAgent to render: RunAtLoad + KeepAlive with
 // stdout/stderr appended to LogPath and Env pinned into launchd's
@@ -211,9 +211,9 @@ var labelRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 // (`"label" => { ... }`) and the columnar (`pid exit-status label`)
 // service-list formats, deduplicates, and sorts. Over-matching is the
 // safe direction here: any mention makes `up --install` refuse rather
-// than double-supervise. The Homebrew formula uses "baseten-switch",
+// than double-supervise. The Homebrew formula uses "openrouter-switch",
 // while native agents and the app use the reverse-DNS namespace
-// "co.baseten.switch".
+// "com.ckorhonen.openrouter-switch".
 func LabelsMentioning(out, needle string) []string {
 	seen := map[string]bool{}
 	var labels []string
@@ -221,8 +221,8 @@ func LabelsMentioning(out, needle string) []string {
 		for _, f := range strings.Fields(line) {
 			f = strings.Trim(f, `"';,{}=><()`)
 			matches := strings.Contains(f, needle)
-			if needle == "baseten-switch" {
-				matches = matches || strings.Contains(f, "co.baseten.switch")
+			if needle == "openrouter-switch" {
+				matches = matches || strings.Contains(f, "com.ckorhonen.openrouter-switch")
 			}
 			if f == "" || !matches {
 				continue

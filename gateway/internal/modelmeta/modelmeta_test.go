@@ -2,7 +2,7 @@ package modelmeta
 
 import "testing"
 
-func TestResolveBasetenKnownDisplayNames(t *testing.T) {
+func TestResolveOpenRouterKnownDisplayNames(t *testing.T) {
 	tests := map[string]string{
 		"zai-org/GLM-5.2":                               "GLM 5.2",
 		"moonshotai/Kimi-K2.7-Code":                     "Kimi K2.7 Code",
@@ -12,21 +12,21 @@ func TestResolveBasetenKnownDisplayNames(t *testing.T) {
 	}
 	for modelID, want := range tests {
 		t.Run(modelID, func(t *testing.T) {
-			got := ResolveBaseten(modelID)
+			got := ResolveOpenRouter(modelID)
 			if got.ID != modelID || got.DisplayName != want {
-				t.Fatalf("ResolveBaseten(%q) = %+v, want ID preserved and display %q", modelID, got, want)
+				t.Fatalf("ResolveOpenRouter(%q) = %+v, want ID preserved and display %q", modelID, got, want)
 			}
 		})
 	}
 }
 
-func TestResolveBasetenHumanizesUnknownLeaf(t *testing.T) {
-	got := ResolveBaseten("private-org/my__new---model\tv1")
+func TestResolveOpenRouterHumanizesUnknownLeaf(t *testing.T) {
+	got := ResolveOpenRouter("private-org/my__new---model\tv1")
 	if got.ID != "private-org/my__new---model\tv1" ||
 		got.DisplayName != "my new model v1" {
 		t.Fatalf("unknown model = %+v", got)
 	}
-	if got := ResolveBaseten("org/---___"); got.DisplayName != "Unknown" {
+	if got := ResolveOpenRouter("org/---___"); got.DisplayName != "Unknown" {
 		t.Fatalf("separator-only display = %q, want Unknown", got.DisplayName)
 	}
 }

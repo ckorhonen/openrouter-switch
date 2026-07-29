@@ -36,7 +36,7 @@ func TestEventV1NullAndZeroSemantics(t *testing.T) {
 	}
 	event.ActualCost = CostSnapshotV1{
 		Priced: false,
-		Source: "baseten_embedded_fallback",
+		Source: "openrouter_embedded_fallback",
 	}
 	if err := event.Validate(); err != nil {
 		t.Fatal(err)
@@ -689,8 +689,8 @@ func validEventV1(now time.Time) EventV1 {
 		StartedAt:            now,
 		CompletedAt:          now.Add(time.Second),
 		Client:               "claude-code",
-		ConfiguredRoute:      "baseten",
-		EffectiveProvider:    "baseten",
+		ConfiguredRoute:      "openrouter",
+		EffectiveProvider:    "openrouter",
 		RequestedModel:       "claude-fable-5",
 		RequestedModelFamily: "fable",
 		ModelFamilyRevision:  "claude-family-v1",
@@ -711,7 +711,7 @@ func validEventV1(now time.Time) EventV1 {
 		ActualCost: CostSnapshotV1{
 			Priced:               true,
 			NanoUSD:              &nanoUSD,
-			Source:               "baseten_embedded_fallback",
+			Source:               "openrouter_embedded_fallback",
 			Revision:             &revision,
 			CapturedAt:           &now,
 			RatesNanoUSDPerToken: rates,

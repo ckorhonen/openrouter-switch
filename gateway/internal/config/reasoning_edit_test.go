@@ -31,7 +31,7 @@ func TestSetClientModelReasoningPolicyCreatesNestedMappingsAndPreservesBytes(t *
 	err := SetClientModelReasoningPolicy(
 		path,
 		"claude-code",
-		"baseten",
+		"openrouter",
 		"zai-org/GLM-5.2",
 		ReasoningPolicy{Mode: ReasoningOff},
 	)
@@ -39,7 +39,7 @@ func TestSetClientModelReasoningPolicyCreatesNestedMappingsAndPreservesBytes(t *
 		t.Fatal(err)
 	}
 	got := readReasoningEditConfig(t, path)
-	want := "global:\n  # gate stays here\n  routing_enabled: true # untouched\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      baseten:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n"
+	want := "global:\n  # gate stays here\n  routing_enabled: true # untouched\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      openrouter:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n"
 	if got != want {
 		t.Fatalf("edited config:\n%s\nwant:\n%s", got, want)
 	}
@@ -61,17 +61,17 @@ func TestSetClientModelReasoningPolicyExpandsEmptyMappings(t *testing.T) {
 		{
 			name: "empty model options",
 			body: "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options: {}\n",
-			want: "    model_options:\n      baseten:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n",
+			want: "    model_options:\n      openrouter:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n",
 		},
 		{
 			name: "null model options",
 			body: "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options: null # preserve this comment\n",
-			want: "    model_options: # preserve this comment\n      baseten:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n",
+			want: "    model_options: # preserve this comment\n      openrouter:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n",
 		},
 		{
 			name: "empty provider",
-			body: "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      baseten: {}\n",
-			want: "      baseten:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n",
+			body: "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      openrouter: {}\n",
+			want: "      openrouter:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n",
 		},
 	}
 	for _, tc := range tests {
@@ -80,7 +80,7 @@ func TestSetClientModelReasoningPolicyExpandsEmptyMappings(t *testing.T) {
 			err := SetClientModelReasoningPolicy(
 				path,
 				"claude-code",
-				"baseten",
+				"openrouter",
 				"zai-org/GLM-5.2",
 				ReasoningPolicy{Mode: ReasoningOff},
 			)
@@ -96,12 +96,12 @@ func TestSetClientModelReasoningPolicyExpandsEmptyMappings(t *testing.T) {
 }
 
 func TestClientReasoningEditTouchesOnlySelectedClient(t *testing.T) {
-	path := writeReasoningEditConfig(t, "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      baseten:\n        \"zai-org/GLM-5.2\": # model comment\n          reasoning:\n            mode: fixed # mode comment\n            effort: low # effort comment\n  - name: codex\n    enabled: true\n    protocol_shape: openai\n    default_model: zai-org/GLM-5.2\n    model_options:\n      baseten:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n")
+	path := writeReasoningEditConfig(t, "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      openrouter:\n        \"zai-org/GLM-5.2\": # model comment\n          reasoning:\n            mode: fixed # mode comment\n            effort: low # effort comment\n  - name: codex\n    enabled: true\n    protocol_shape: openai\n    default_model: zai-org/GLM-5.2\n    model_options:\n      openrouter:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n")
 
 	err := SetClientModelReasoningPolicy(
 		path,
 		"claude-code",
-		"baseten",
+		"openrouter",
 		"zai-org/GLM-5.2",
 		ReasoningPolicy{Mode: ReasoningFollowHarness},
 	)
@@ -121,12 +121,12 @@ func TestClientReasoningEditTouchesOnlySelectedClient(t *testing.T) {
 }
 
 func TestRemoveClientModelReasoningPolicyPrunesOnlySelectedClient(t *testing.T) {
-	path := writeReasoningEditConfig(t, "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      baseten:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n  - name: codex\n    enabled: true\n    protocol_shape: openai\n    default_model: zai-org/GLM-5.2\n    model_options:\n      baseten:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: follow_harness\n")
+	path := writeReasoningEditConfig(t, "global:\n  routing_enabled: true\nclients:\n  - name: claude-code\n    enabled: true\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n    model_options:\n      openrouter:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: off\n  - name: codex\n    enabled: true\n    protocol_shape: openai\n    default_model: zai-org/GLM-5.2\n    model_options:\n      openrouter:\n        \"zai-org/GLM-5.2\":\n          reasoning:\n            mode: follow_harness\n")
 
 	if err := RemoveClientModelReasoningPolicy(
 		path,
 		"claude-code",
-		"baseten",
+		"openrouter",
 		"zai-org/GLM-5.2",
 	); err != nil {
 		t.Fatal(err)
@@ -148,13 +148,13 @@ func TestClientReasoningPolicyRejectsUnsafeValuesWithoutWriting(t *testing.T) {
 		model    string
 		policy   ReasoningPolicy
 	}{
-		{name: "missing client", client: "missing", provider: "baseten", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningOff}},
+		{name: "missing client", client: "missing", provider: "openrouter", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningOff}},
 		{name: "provider", client: "claude-code", provider: "openai", model: "gpt", policy: ReasoningPolicy{Mode: ReasoningOff}},
-		{name: "empty model", client: "claude-code", provider: "baseten", model: " ", policy: ReasoningPolicy{Mode: ReasoningOff}},
-		{name: "newline", client: "claude-code", provider: "baseten", model: "bad\nkey", policy: ReasoningPolicy{Mode: ReasoningOff}},
-		{name: "fixed missing effort", client: "claude-code", provider: "baseten", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningFixed}},
-		{name: "off with effort", client: "claude-code", provider: "baseten", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningOff, Effort: "high"}},
-		{name: "unsafe effort", client: "claude-code", provider: "baseten", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningFixed, Effort: "high\ninjected: true"}},
+		{name: "empty model", client: "claude-code", provider: "openrouter", model: " ", policy: ReasoningPolicy{Mode: ReasoningOff}},
+		{name: "newline", client: "claude-code", provider: "openrouter", model: "bad\nkey", policy: ReasoningPolicy{Mode: ReasoningOff}},
+		{name: "fixed missing effort", client: "claude-code", provider: "openrouter", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningFixed}},
+		{name: "off with effort", client: "claude-code", provider: "openrouter", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningOff, Effort: "high"}},
+		{name: "unsafe effort", client: "claude-code", provider: "openrouter", model: "org/model", policy: ReasoningPolicy{Mode: ReasoningFixed, Effort: "high\ninjected: true"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

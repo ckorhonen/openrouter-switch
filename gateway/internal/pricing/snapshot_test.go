@@ -1,129 +1,142 @@
 package pricing
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestNewIncludesBundledBasetenFallback(t *testing.T) {
+func TestNewHasNoOpenRouterFallback(t *testing.T) {
 	p := New()
-	quote := p.Quote("baseten", "zai-org/GLM-5.2")
-	if !quote.Priced {
-		t.Fatal("bundled GLM-5.2 fallback is unpriced")
+	if quote := p.Quote("openrouter", "zai-org/GLM-5.2"); quote.Priced {
+		t.Fatalf("cold-start OpenRouter quote must be unpriced: %+v", quote)
 	}
-	if !approx(quote.Price.Prompt, 1.4) ||
-		!approx(quote.Price.Completion, 4.4) ||
-		!approx(quote.Price.CacheRead, 0.14) ||
-		!approx(quote.Price.CacheWrite5m, 0) {
-		t.Fatalf("fallback price = %+v", quote.Price)
+	if models := p.Capture().OpenRouterModels(); len(models) != 0 {
+		t.Fatalf("cold-start OpenRouter models = %+v, want none", models)
 	}
-	metadata := p.Capture().BasetenMetadata()
-	if metadata.Source != basetenFallbackSource {
-		t.Fatalf("source = %q, want %q", metadata.Source, basetenFallbackSource)
-	}
-	if metadata.ModelCount != 3 || metadata.PricedModelCount != 3 {
-		t.Fatalf("fallback metadata = %+v", metadata)
-	}
-	for model, want := range map[string]Price{
-		"zai-org/GLM-5.2": {
-			Prompt: 1.4, Completion: 4.4, CacheRead: 0.14,
-		},
-		"moonshotai/Kimi-K2.7-Code": {
-			Prompt: 0.95, Completion: 4, CacheRead: 0.16,
-		},
-		"nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B": {
-			Prompt: 0.6, Completion: 2.4, CacheRead: 0.12,
-		},
-	} {
-		got := p.BasetenPrice(model)
-		if !approx(got.Prompt, want.Prompt) ||
-			!approx(got.Completion, want.Completion) ||
-			!approx(got.CacheRead, want.CacheRead) ||
-			!approx(got.CacheWrite5m, 0) {
-			t.Fatalf("%s fallback price = %+v, want %+v", model, got, want)
-		}
-	}
-	if metadata.Revision == "" {
-		t.Fatal("fallback revision is empty")
-	}
-	if want := time.Date(2026, time.July, 25, 20, 46, 58, 0, time.UTC); !metadata.FetchedAt.Equal(want) {
-		t.Fatalf("fallback fetched at = %s, want %s", metadata.FetchedAt, want)
+	metadata := p.Capture().OpenRouterMetadata()
+	if metadata.Source != "" || metadata.ModelCount != 0 ||
+		metadata.PricedModelCount != 0 || !metadata.FetchedAt.IsZero() {
+		t.Fatalf("cold-start OpenRouter metadata = %+v", metadata)
 	}
 }
 
-func TestEmbeddedFallbackProvenanceMatchesCompiledMetadata(t *testing.T) {
-	var envelope struct {
-		SchemaVersion int    `json:"schema_version"`
-		Source        string `json:"source"`
-		FetchedAt     string `json:"fetched_at"`
-		SourceSHA256  string `json:"source_sha256"`
-	}
-	if err := json.Unmarshal(basetenFallbackJSON, &envelope); err != nil {
+func TestOpenRouterModelsUserMetadataAndEligibility(t *testing.T) {
+	body := []byte(`{
+		"data": [
+			{
+				"id": "anthropic/claude-tools",
+				"name": "Claude Tools",
+				"context_length": 200000,
+				"architecture": {
+					"input_modalities": ["text", "image"],
+					"output_modalities": ["text"]
+				},
+				"top_provider": {"max_completion_tokens": 64000},
+				"supported_parameters": ["tools", "reasoning", "temperature"],
+				"reasoning": {
+					"supported_efforts": ["high", "medium", "low"],
+					"supports_max_tokens": true,
+					"mandatory": false
+				},
+				"pricing": {
+					"prompt": "0.000003",
+					"completion": "0.000015",
+					"cache_read": "0.0000003"
+				}
+			},
+			{
+				"id": "openai/gpt-no-tools",
+				"name": "GPT No Tools",
+				"context_length": 128000,
+				"architecture": {
+					"input_modalities": ["text"],
+					"output_modalities": ["text"]
+				},
+				"top_provider": {"max_completion_tokens": 16000},
+				"supported_parameters": ["temperature"],
+				"pricing": {"prompt": "0.000001", "completion": "0.000002"}
+			}
+		]
+	}`)
+	p := New()
+	if err := p.ReplaceOpenRouterCatalog(
+		body,
+		"openrouter_models_user",
+		time.Unix(10, 0),
+		"",
+	); err != nil {
 		t.Fatal(err)
 	}
-	if envelope.SchemaVersion != 1 {
-		t.Fatalf("schema_version = %d, want 1", envelope.SchemaVersion)
+	tools, ok := p.Capture().Model(ProviderOpenRouter, "anthropic/claude-tools")
+	if !ok {
+		t.Fatal("tool-capable model missing")
 	}
-	fetchedAt, err := time.Parse(time.RFC3339, envelope.FetchedAt)
-	if err != nil {
-		t.Fatalf("fetched_at = %q: %v", envelope.FetchedAt, err)
+	if !tools.ToolCapable || tools.ContextTokens != 200000 ||
+		tools.MaxOutputTokens != 64000 ||
+		tools.DisplayName != "Claude Tools" {
+		t.Fatalf("tool-capable metadata = %+v", tools)
 	}
-	if len(envelope.SourceSHA256) != 64 ||
-		strings.Trim(envelope.SourceSHA256, "0123456789abcdef") != "" {
-		t.Fatalf("source_sha256 = %q, want lowercase SHA-256", envelope.SourceSHA256)
+	if len(tools.InputModalities) != 2 ||
+		len(tools.OutputModalities) != 1 ||
+		len(tools.SupportedParams) != 3 {
+		t.Fatalf("tool-capable slices = %+v", tools)
 	}
-
-	metadata := New().Capture().BasetenMetadata()
-	if metadata.Source != basetenFallbackSource {
-		t.Fatalf("metadata source = %q, want %q", metadata.Source, basetenFallbackSource)
+	if tools.Availability.Account == nil {
+		t.Fatal("authenticated account availability missing")
 	}
-	if !metadata.FetchedAt.Equal(fetchedAt) {
-		t.Fatalf("metadata fetched_at = %s, envelope = %s", metadata.FetchedAt, fetchedAt)
+	if tools.Reasoning == nil || !tools.Reasoning.Supported ||
+		len(tools.Reasoning.Options) != 3 {
+		t.Fatalf("reasoning metadata = %+v", tools.Reasoning)
 	}
-	for _, field := range []string{
-		"source=" + envelope.Source,
-		"fetched=" + envelope.FetchedAt,
-		"source_sha256=" + envelope.SourceSHA256,
-	} {
-		if !strings.Contains(metadata.Provenance, field) {
-			t.Fatalf("metadata provenance %q does not contain %q", metadata.Provenance, field)
-		}
+	effort := tools.Reasoning.Options[1]
+	if effort.Type != ReasoningEffort ||
+		len(effort.Values) != 4 ||
+		effort.Values[3] == nil ||
+		*effort.Values[3] != "none" {
+		t.Fatalf("reasoning effort metadata = %+v", effort)
+	}
+	if got := p.Quote(ProviderOpenRouter, tools.CanonicalModelID).Price; got.Prompt != 3 || got.Completion != 15 || got.CacheRead != 0.3 {
+		t.Fatalf("numeric-string prices = %+v", got)
+	}
+	noTools, ok := p.Capture().Model(ProviderOpenRouter, "openai/gpt-no-tools")
+	if !ok || noTools.ToolCapable {
+		t.Fatalf("non-tool model eligibility = %+v, found=%t", noTools, ok)
 	}
 }
 
-func TestReplaceBasetenCatalogReplacesAndRemoves(t *testing.T) {
+func TestReplaceOpenRouterCatalogReplacesAndRemoves(t *testing.T) {
 	p := New()
 	first := catalogJSON(
 		catalogModel{id: "model-a", prompt: 0.000001},
 		catalogModel{id: "model-b", prompt: 0.000002},
 	)
-	if err := p.ReplaceBasetenCatalog(first, "live", time.Unix(10, 0), ""); err != nil {
+	if err := p.ReplaceOpenRouterCatalog(first, "live", time.Unix(10, 0), ""); err != nil {
 		t.Fatal(err)
 	}
-	if p.BasetenModelCount() != 2 {
-		t.Fatalf("first model count = %d, want 2", p.BasetenModelCount())
+	if p.OpenRouterModelCount() != 2 {
+		t.Fatalf("first model count = %d, want 2", p.OpenRouterModelCount())
 	}
 
 	second := catalogJSON(catalogModel{id: "model-b", prompt: 0.000003})
-	if err := p.ReplaceBasetenCatalog(second, "live", time.Unix(20, 0), ""); err != nil {
+	if err := p.ReplaceOpenRouterCatalog(second, "live", time.Unix(20, 0), ""); err != nil {
 		t.Fatal(err)
 	}
-	if p.Quote("baseten", "model-a").Priced {
+	if p.Quote("openrouter", "model-a").Priced {
 		t.Fatal("removed model-a survived replacement")
 	}
-	if got := p.BasetenPrice("model-b").Prompt; got != 3 {
+	if got := p.OpenRouterPrice("model-b").Prompt; got != 3 {
 		t.Fatalf("model-b prompt = %v, want 3", got)
 	}
-	if p.BasetenModelCount() != 1 {
-		t.Fatalf("second model count = %d, want 1", p.BasetenModelCount())
+	if p.OpenRouterModelCount() != 1 {
+		t.Fatalf("second model count = %d, want 1", p.OpenRouterModelCount())
 	}
 }
 
-func TestBasetenCatalogTracksMissingCacheRates(t *testing.T) {
+func TestOpenRouterCatalogTracksMissingCacheRates(t *testing.T) {
 	p := New()
 	body := []byte(`{
 		"data": [{
@@ -131,82 +144,223 @@ func TestBasetenCatalogTracksMissingCacheRates(t *testing.T) {
 			"pricing": {"prompt": 0.000001, "completion": 0.000002}
 		}]
 	}`)
-	if err := p.ReplaceBasetenCatalog(
+	if err := p.ReplaceOpenRouterCatalog(
 		body,
-		"baseten_v1_models",
+		"openrouter_models_user",
 		time.Unix(10, 0),
 		"",
 	); err != nil {
 		t.Fatal(err)
 	}
-	quote := p.Quote(ProviderBaseten, "model-a")
+	quote := p.Quote(ProviderOpenRouter, "model-a")
 	if !quote.Priced || !quote.RatePresenceKnown ||
 		!quote.RatePresence.Input ||
 		!quote.RatePresence.Output ||
 		quote.RatePresence.CacheRead ||
 		quote.RatePresence.CacheWrite5m {
-		t.Fatalf("Baseten rate presence = %+v", quote)
+		t.Fatalf("OpenRouter rate presence = %+v", quote)
 	}
 	if !quote.HasRatesForUsage(1, 1, 0, 0, 0) {
-		t.Fatal("zero cache usage required missing Baseten cache rates")
+		t.Fatal("zero cache usage required missing OpenRouter cache rates")
 	}
 	if quote.HasRatesForUsage(1, 1, 1, 0, 0) {
-		t.Fatal("nonzero cache usage accepted missing Baseten cache-read rate")
+		t.Fatal("nonzero cache usage accepted missing OpenRouter cache-read rate")
 	}
 }
 
-func TestInvalidBasetenRefreshRetainsLastKnownGood(t *testing.T) {
+func TestInvalidOpenRouterRefreshRetainsLastKnownGood(t *testing.T) {
 	p := New()
 	good := catalogJSON(catalogModel{id: "model-a", prompt: 0.000002})
 	fetchedAt := time.Unix(100, 0).UTC()
-	if err := p.ReplaceBasetenCatalog(good, "live", fetchedAt, ""); err != nil {
+	if err := p.ReplaceOpenRouterCatalog(good, "live", fetchedAt, ""); err != nil {
 		t.Fatal(err)
 	}
 	before := p.Capture()
-	beforeMetadata := before.BasetenMetadata()
+	beforeMetadata := before.OpenRouterMetadata()
 
-	bad := []byte(`{"data":[{"id":"model-a","pricing":{"prompt":-1}}]}`)
-	if err := p.ReplaceBasetenCatalog(bad, "broken", time.Unix(200, 0), ""); err == nil {
+	bad := []byte(`{"data":[{"id":"model-a","pricing":{"prompt":-2}}]}`)
+	if err := p.ReplaceOpenRouterCatalog(bad, "broken", time.Unix(200, 0), ""); err == nil {
 		t.Fatal("negative pricing refresh succeeded")
 	}
 	after := p.Capture()
 	if after != before {
 		t.Fatal("invalid refresh published a new snapshot")
 	}
-	if after.BasetenMetadata() != beforeMetadata {
+	if after.OpenRouterMetadata() != beforeMetadata {
 		t.Fatalf("metadata changed after failure: before=%+v after=%+v",
-			beforeMetadata, after.BasetenMetadata())
+			beforeMetadata, after.OpenRouterMetadata())
 	}
-	if got := after.Quote("baseten", "model-a").Price.Prompt; got != 2 {
+	if got := after.Quote("openrouter", "model-a").Price.Prompt; got != 2 {
 		t.Fatalf("last-known-good prompt = %v, want 2", got)
 	}
 }
 
-func TestBasetenRevisionIndependentOfResponseOrder(t *testing.T) {
+func TestOpenRouterCatalogSkipsMalformedModels(t *testing.T) {
+	p := New()
+	body := []byte(`{"data":[
+		{
+			"id":"good/tools",
+			"name":"Good Tools",
+			"context_length":128000,
+			"supported_parameters":["tools","reasoning"],
+			"reasoning":{"supported_efforts":["high","low"]},
+			"pricing":{"prompt":"0.000001","completion":"0.000002"}
+		},
+		{
+			"id":"bad/metadata",
+			"context_length":"many",
+			"supported_parameters":["tools"]
+		},
+		{
+			"id":"bad/reasoning",
+			"supported_parameters":["tools","reasoning"],
+			"reasoning":{"supported_efforts":"high"}
+		},
+		{
+			"id":"bad/pricing",
+			"supported_parameters":["tools"],
+			"pricing":{"prompt":"not-a-number"}
+		}
+	]}`)
+	if err := p.ReplaceOpenRouterCatalog(
+		body,
+		"openrouter_models_user",
+		time.Unix(100, 0).UTC(),
+		"good/tools",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := p.Capture()
+	if got := snapshot.OpenRouterModels(); len(got) != 1 ||
+		got[0] != "good/tools" {
+		t.Fatalf("published models = %v, want [good/tools]", got)
+	}
+	record, ok := snapshot.Model(ProviderOpenRouter, "good/tools")
+	if !ok || !record.ToolCapable || record.Reasoning == nil {
+		t.Fatalf("valid tool-capable model = %+v, found=%t", record, ok)
+	}
+	if quote := snapshot.Quote(ProviderOpenRouter, "good/tools"); !quote.Priced ||
+		quote.Price.Prompt != 1 || quote.Price.Completion != 2 {
+		t.Fatalf("valid model route quote = %+v", quote)
+	}
+	for _, id := range []string{"bad/metadata", "bad/reasoning", "bad/pricing"} {
+		if _, ok := snapshot.Model(ProviderOpenRouter, id); ok {
+			t.Errorf("malformed model %q was published", id)
+		}
+	}
+	wantDiagnostics := []string{
+		`excluded malformed OpenRouter model "bad/metadata": decode metadata: invalid field type`,
+		`excluded malformed OpenRouter model "bad/pricing": pricing: prompt: must be finite`,
+		`excluded malformed OpenRouter model "bad/reasoning": reasoning: supported_efforts is not an array or null`,
+	}
+	if got := snapshot.ProviderMetadata(ProviderOpenRouter).Diagnostics; !slices.Equal(got, wantDiagnostics) {
+		t.Fatalf("diagnostics = %#v, want %#v", got, wantDiagnostics)
+	}
+}
+
+func TestOpenRouterCatalogRejectsAllMalformedModelsAtomically(t *testing.T) {
+	p := New()
+	if err := p.ReplaceOpenRouterCatalog(
+		catalogJSON(catalogModel{id: "last-known-good", prompt: 0.000001}),
+		"live",
+		time.Unix(10, 0).UTC(),
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	before := p.Capture()
+
+	allBad := []byte(`{"data":[
+		{"id":"bad/metadata","context_length":"many"},
+		{"id":"bad/pricing","pricing":{"prompt":"not-a-number"}}
+	]}`)
+	err := p.ReplaceOpenRouterCatalog(
+		allBad,
+		"openrouter_models_user",
+		time.Unix(20, 0).UTC(),
+		"",
+	)
+	if err == nil || !strings.Contains(err.Error(), "no usable models") {
+		t.Fatalf("all-bad catalog error = %v, want no usable models", err)
+	}
+	if after := p.Capture(); after != before {
+		t.Fatal("all-bad catalog replaced the last-known-good snapshot")
+	}
+}
+
+func TestOpenRouterCatalogDuplicateIDsRemainAtomic(t *testing.T) {
+	p := New()
+	err := p.ReplaceOpenRouterCatalog(
+		[]byte(`{"data":[
+			{"id":"duplicate","pricing":{"prompt":0.000001}},
+			{"id":"duplicate","pricing":{"prompt":0.000002}}
+		]}`),
+		"openrouter_models_user",
+		time.Unix(20, 0).UTC(),
+		"",
+	)
+	if err == nil || !strings.Contains(err.Error(), `duplicate model "duplicate"`) {
+		t.Fatalf("duplicate catalog error = %v", err)
+	}
+	if models := p.Capture().OpenRouterModels(); len(models) != 0 {
+		t.Fatalf("duplicate catalog published models: %v", models)
+	}
+}
+
+func TestOpenRouterVariablePriceSentinelKeepsModelUnpriced(t *testing.T) {
+	p := New()
+	body := []byte(`{"data":[{
+		"id":"openrouter/auto",
+		"architecture":{
+			"input_modalities":["text"],
+			"output_modalities":["text"]
+		},
+		"supported_parameters":["tools"],
+		"pricing":{"prompt":"-1","completion":"-1"}
+	}]}`)
+	if err := p.ReplaceOpenRouterCatalog(
+		body,
+		"openrouter_models_user",
+		time.Unix(100, 0).UTC(),
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	record, ok := p.Capture().Model(ProviderOpenRouter, "openrouter/auto")
+	if !ok || !record.ToolCapable || record.Availability.Account == nil {
+		t.Fatalf("variable-price model availability = %+v, found=%t", record, ok)
+	}
+	if quote := p.Quote(ProviderOpenRouter, "openrouter/auto"); quote.Priced {
+		t.Fatalf("variable-price model quote = %+v, want unpriced", quote)
+	}
+}
+
+func TestOpenRouterRevisionIndependentOfResponseOrder(t *testing.T) {
 	modelA := catalogModel{id: "model-a", prompt: 0.000001, completion: 0.000002}
 	modelB := catalogModel{id: "model-b", prompt: 0.000003, completion: 0.000004}
 	p1 := New()
 	p2 := New()
-	if err := p1.ReplaceBasetenCatalog(
+	if err := p1.ReplaceOpenRouterCatalog(
 		catalogJSON(modelA, modelB), "one", time.Unix(10, 0), "",
 	); err != nil {
 		t.Fatal(err)
 	}
-	if err := p2.ReplaceBasetenCatalog(
+	if err := p2.ReplaceOpenRouterCatalog(
 		catalogJSON(modelB, modelA), "two", time.Unix(20, 0), "",
 	); err != nil {
 		t.Fatal(err)
 	}
-	revision1 := p1.Capture().BasetenMetadata().Revision
-	revision2 := p2.Capture().BasetenMetadata().Revision
+	revision1 := p1.Capture().OpenRouterMetadata().Revision
+	revision2 := p2.Capture().OpenRouterMetadata().Revision
 	if revision1 != revision2 {
 		t.Fatalf("revisions differ by response order: %q != %q", revision1, revision2)
 	}
 }
 
-func TestBasetenRevisionDistinguishesUnpricedFromPricedZero(t *testing.T) {
+func TestOpenRouterRevisionDistinguishesUnpricedFromPricedZero(t *testing.T) {
 	unpriced := New()
-	if err := unpriced.ReplaceBasetenCatalog(
+	if err := unpriced.ReplaceOpenRouterCatalog(
 		[]byte(`{"data":[{"id":"model-a"}]}`),
 		"live",
 		time.Unix(10, 0),
@@ -215,7 +369,7 @@ func TestBasetenRevisionDistinguishesUnpricedFromPricedZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	pricedZero := New()
-	if err := pricedZero.ReplaceBasetenCatalog(
+	if err := pricedZero.ReplaceOpenRouterCatalog(
 		[]byte(`{"data":[{"id":"model-a","pricing":{"prompt":0,"completion":0}}]}`),
 		"live",
 		time.Unix(10, 0),
@@ -223,15 +377,15 @@ func TestBasetenRevisionDistinguishesUnpricedFromPricedZero(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if unpriced.Capture().BasetenMetadata().Revision ==
-		pricedZero.Capture().BasetenMetadata().Revision {
+	if unpriced.Capture().OpenRouterMetadata().Revision ==
+		pricedZero.Capture().OpenRouterMetadata().Revision {
 		t.Fatal("unpriced and explicit zero-price catalogs have the same revision")
 	}
 }
 
 func TestCapturedSnapshotStableAcrossRefresh(t *testing.T) {
 	p := New()
-	if err := p.ReplaceBasetenCatalog(
+	if err := p.ReplaceOpenRouterCatalog(
 		catalogJSON(catalogModel{id: "model-a", prompt: 0.000001}),
 		"revision-a",
 		time.Unix(10, 0),
@@ -240,9 +394,9 @@ func TestCapturedSnapshotStableAcrossRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	captured := p.Capture()
-	oldQuote := captured.Quote("baseten", "model-a")
+	oldQuote := captured.Quote("openrouter", "model-a")
 
-	if err := p.ReplaceBasetenCatalog(
+	if err := p.ReplaceOpenRouterCatalog(
 		catalogJSON(catalogModel{id: "model-a", prompt: 0.000009}),
 		"revision-b",
 		time.Unix(20, 0),
@@ -250,10 +404,10 @@ func TestCapturedSnapshotStableAcrossRefresh(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if got := captured.Quote("baseten", "model-a"); got != oldQuote {
+	if got := captured.Quote("openrouter", "model-a"); got != oldQuote {
 		t.Fatalf("captured quote changed: before=%+v after=%+v", oldQuote, got)
 	}
-	if got := p.Quote("baseten", "model-a").Price.Prompt; got != 9 {
+	if got := p.Quote("openrouter", "model-a").Price.Prompt; got != 9 {
 		t.Fatalf("current prompt = %v, want 9", got)
 	}
 	if oldQuote.CostUSD(1_000_000, 0, 0, 0, 0) != 1 {
@@ -262,8 +416,12 @@ func TestCapturedSnapshotStableAcrossRefresh(t *testing.T) {
 }
 
 func TestQuoteNanoUSDRatesAndCheckedCost(t *testing.T) {
-	p := New()
-	quote := p.Quote("baseten", "zai-org/GLM-5.2")
+	p := NewWithPrices(map[string]Price{
+		"zai-org/GLM-5.2": {
+			Prompt: 1.4, Completion: 4.4, CacheRead: 0.14,
+		},
+	})
+	quote := p.Quote("openrouter", "zai-org/GLM-5.2")
 	rates, err := quote.NanoUSDRates()
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +462,7 @@ func TestQuoteNanoUSDRatesAndCheckedCost(t *testing.T) {
 	}
 }
 
-func TestExplicitZeroBasetenRatesRemainPriced(t *testing.T) {
+func TestExplicitZeroOpenRouterRatesRemainPriced(t *testing.T) {
 	p := New()
 	body := []byte(`{
 	  "data": [
@@ -314,10 +472,10 @@ func TestExplicitZeroBasetenRatesRemainPriced(t *testing.T) {
 	    }
 	  ]
 	}`)
-	if err := p.ReplaceBasetenCatalog(body, "live", time.Unix(10, 0), ""); err != nil {
+	if err := p.ReplaceOpenRouterCatalog(body, "live", time.Unix(10, 0), ""); err != nil {
 		t.Fatal(err)
 	}
-	quote := p.Quote("baseten", "free/model")
+	quote := p.Quote("openrouter", "free/model")
 	if !quote.Priced {
 		t.Fatal("explicit zero rates became unpriced")
 	}

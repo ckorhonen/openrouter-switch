@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the baseten-switch stack.
+# Build the openrouter-switch stack.
 #   ./scripts/build.sh gateway      build only the Go gateway binary
 
 set -euo pipefail
@@ -9,15 +9,15 @@ target="${1:-gateway}"
 
 case "$target" in
   gateway)
-    # Single binary: the front door is the `baseten-switch door` subcommand.
+    # Single binary: the front door is the `openrouter-switch door` subcommand.
     # Version is stamped from git so `status` can flag skew between the
     # running processes and the binary on disk ("restart to adopt").
     # Plain `go build` leaves it as "dev".
     VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
     (cd gateway && go build \
-        -ldflags "-X github.com/basetenlabs/baseten-switch/gateway/internal/version.Version=${VERSION}" \
-        -o bin/baseten-switch ./cmd/baseten-switch)
-    ls -lh gateway/bin/baseten-switch
+        -ldflags "-X github.com/ckorhonen/openrouter-switch/gateway/internal/version.Version=${VERSION}" \
+        -o bin/openrouter-switch ./cmd/openrouter-switch)
+    ls -lh gateway/bin/openrouter-switch
     ;;
   *)
     echo "unknown target: $target" >&2

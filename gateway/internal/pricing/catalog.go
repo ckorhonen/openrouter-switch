@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	ProviderAnthropic = "anthropic"
-	ProviderOpenAI    = "openai"
-	ProviderBaseten   = "baseten"
+	ProviderAnthropic  = "anthropic"
+	ProviderOpenAI     = "openai"
+	ProviderOpenRouter = "openrouter"
 )
 
 // ExecutionProfile names provider request behavior that can change pricing
@@ -141,6 +141,10 @@ type ModelRecord struct {
 	Family           string                                 `json:"family,omitempty"`
 	ContextTokens    int64                                  `json:"context_tokens,omitempty"`
 	MaxOutputTokens  int64                                  `json:"max_output_tokens,omitempty"`
+	InputModalities  []string                               `json:"input_modalities,omitempty"`
+	OutputModalities []string                               `json:"output_modalities,omitempty"`
+	SupportedParams  []string                               `json:"supported_parameters,omitempty"`
+	ToolCapable      bool                                   `json:"tool_capable"`
 	Availability     ModelAvailability                      `json:"availability"`
 	Profiles         map[ExecutionProfile]ProfileDefinition `json:"profiles"`
 	Prices           map[ExecutionProfile]PriceProfile      `json:"prices"`
@@ -162,10 +166,10 @@ type providerCatalog struct {
 	models                      map[string]ModelRecord
 	replacesAccountAvailability bool
 	replacesPricing             bool
-	basetenPricing              *basetenPricingCatalog
+	openrouterPricing           *openrouterPricingCatalog
 }
 
-type basetenPricingCatalog struct {
+type openrouterPricingCatalog struct {
 	metadata CatalogMetadata
 	models   []string
 }
@@ -178,7 +182,7 @@ type providerLayerKey struct {
 
 func supportedProvider(provider string) bool {
 	switch provider {
-	case ProviderAnthropic, ProviderOpenAI, ProviderBaseten:
+	case ProviderAnthropic, ProviderOpenAI, ProviderOpenRouter:
 		return true
 	default:
 		return false
@@ -699,6 +703,9 @@ func cloneModelRecord(record ModelRecord) ModelRecord {
 	out.CanonicalModelID = strings.Clone(record.CanonicalModelID)
 	out.DisplayName = strings.Clone(record.DisplayName)
 	out.Family = strings.Clone(record.Family)
+	out.InputModalities = append([]string(nil), record.InputModalities...)
+	out.OutputModalities = append([]string(nil), record.OutputModalities...)
+	out.SupportedParams = append([]string(nil), record.SupportedParams...)
 	out.Provenance = cloneProvenance(record.Provenance)
 	if record.Availability.Public != nil {
 		evidence := *record.Availability.Public
@@ -767,6 +774,16 @@ func cloneReasoningOption(option ReasoningOption) ReasoningOption {
 	return out
 }
 
+func cloneReasoningOptions(
+	options []ReasoningOption,
+) []ReasoningOption {
+	cloned := make([]ReasoningOption, len(options))
+	for index, option := range options {
+		cloned[index] = cloneReasoningOption(option)
+	}
+	return cloned
+}
+
 func cloneProviderCatalog(catalog providerCatalog) providerCatalog {
 	out := providerCatalog{
 		metadata:                    catalog.metadata,
@@ -774,10 +791,10 @@ func cloneProviderCatalog(catalog providerCatalog) providerCatalog {
 		replacesAccountAvailability: catalog.replacesAccountAvailability,
 		replacesPricing:             catalog.replacesPricing,
 	}
-	if catalog.basetenPricing != nil {
-		authority := *catalog.basetenPricing
-		authority.models = append([]string(nil), catalog.basetenPricing.models...)
-		out.basetenPricing = &authority
+	if catalog.openrouterPricing != nil {
+		authority := *catalog.openrouterPricing
+		authority.models = append([]string(nil), catalog.openrouterPricing.models...)
+		out.openrouterPricing = &authority
 	}
 	out.metadata.Provenance = cloneProvenance(catalog.metadata.Provenance)
 	out.metadata.Diagnostics = append(
@@ -790,12 +807,12 @@ func cloneProviderCatalog(catalog providerCatalog) providerCatalog {
 	return out
 }
 
-func activeBasetenPricingCatalog(
+func activeOpenRouterPricingCatalog(
 	layers map[providerLayerKey]providerCatalog,
-) basetenPricingCatalog {
+) openrouterPricingCatalog {
 	keys := make([]providerLayerKey, 0, len(layers))
 	for key, catalog := range layers {
-		if key.provider == ProviderBaseten && catalog.basetenPricing != nil {
+		if key.provider == ProviderOpenRouter && catalog.openrouterPricing != nil {
 			keys = append(keys, key)
 		}
 	}
@@ -806,9 +823,9 @@ func activeBasetenPricingCatalog(
 		}
 		return keys[i].source < keys[j].source
 	})
-	var active basetenPricingCatalog
+	var active openrouterPricingCatalog
 	for _, key := range keys {
-		active = *layers[key].basetenPricing
+		active = *layers[key].openrouterPricing
 		active.models = append([]string(nil), active.models...)
 	}
 	return active
@@ -837,11 +854,11 @@ func layerPriority(key providerLayerKey) int {
 
 func catalogSourcePriority(source string) int {
 	switch source {
-	case "baseten_model_apis", "baseten-model-apis":
+	case "openrouter_model_apis", "openrouter-model-apis":
 		return 40
 	case "anthropic_v1_models", "anthropic-v1-models",
 		"openai_v1_models", "openai-v1-models",
-		"baseten_v1_models", "baseten-v1-models":
+		"openrouter_models_user", "openrouter-models-user":
 		return 30
 	case modelsDevSource:
 		return 20
@@ -1014,11 +1031,11 @@ func preferProviderMetadata(lower, higher Provenance) bool {
 
 func providerMetadataAuthority(provenance Provenance) int {
 	switch provenance.Source {
-	case "baseten_model_apis", "baseten-model-apis":
+	case "openrouter_model_apis", "openrouter-model-apis":
 		return 40
 	case "anthropic_v1_models", "anthropic-v1-models",
 		"openai_v1_models", "openai-v1-models",
-		"baseten_v1_models", "baseten-v1-models":
+		"openrouter_models_user", "openrouter-models-user":
 		return 30
 	case modelsDevSource:
 		return 20
@@ -1240,8 +1257,8 @@ func (s *Snapshot) ModelsDevETag(provider string) string {
 	return etag
 }
 
-// ModelsDevRootETag returns a conditional-request validator only when all
-// provider slices parsed from the root models.dev response are present and
+// ModelsDevRootETag returns a conditional-request validator only when both
+// public provider slices parsed from the root models.dev response are present and
 // carry the same validator. An empty result forces an unconditional repair.
 func (s *Snapshot) ModelsDevRootETag() string {
 	if s == nil {
@@ -1251,7 +1268,6 @@ func (s *Snapshot) ModelsDevRootETag() string {
 	for _, provider := range []string{
 		ProviderAnthropic,
 		ProviderOpenAI,
-		ProviderBaseten,
 	} {
 		etag := s.ModelsDevETag(provider)
 		if etag == "" {

@@ -11,20 +11,20 @@ import (
 func TestRenderPlist(t *testing.T) {
 	j := Job{
 		Label:            RouterLabel,
-		ProgramArguments: []string{"/Users/x/.local/bin/baseten-switch", "gateway", "start", "--foreground"},
+		ProgramArguments: []string{"/Users/x/.local/bin/openrouter-switch", "gateway", "start", "--foreground"},
 		Env: map[string]string{
-			"PATH":                       "/usr/bin:/bin",
-			"BASETEN_SWITCH_CONFIG_PATH": "/Users/x/.config/baseten-switch/gateway.yaml",
+			"PATH":                          "/usr/bin:/bin",
+			"OPENROUTER_SWITCH_CONFIG_PATH": "/Users/x/.config/openrouter-switch/gateway.yaml",
 		},
-		LogPath: "/Users/x/.config/baseten-switch/logs/router.log",
+		LogPath: "/Users/x/.config/openrouter-switch/logs/router.log",
 	}
 	got := RenderPlist(j)
 	wants := []string{
 		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
 		"<key>Label</key>",
-		"<string>co.baseten.switch.router</string>",
+		"<string>com.ckorhonen.openrouter-switch.router</string>",
 		"<key>ProgramArguments</key>",
-		"<string>/Users/x/.local/bin/baseten-switch</string>",
+		"<string>/Users/x/.local/bin/openrouter-switch</string>",
 		"<string>gateway</string>",
 		"<string>start</string>",
 		"<string>--foreground</string>",
@@ -34,20 +34,20 @@ func TestRenderPlist(t *testing.T) {
 		// form, both agents (the lifecycle contract).
 		"<key>AssociatedBundleIdentifiers</key>\n\t<array>\n\t\t<string>" + ToggleBundleID + "</string>\n\t</array>",
 		"<key>EnvironmentVariables</key>",
-		"<key>BASETEN_SWITCH_CONFIG_PATH</key>",
-		"<string>/Users/x/.config/baseten-switch/gateway.yaml</string>",
+		"<key>OPENROUTER_SWITCH_CONFIG_PATH</key>",
+		"<string>/Users/x/.config/openrouter-switch/gateway.yaml</string>",
 		"<key>PATH</key>",
 		"<key>StandardOutPath</key>",
 		"<key>StandardErrorPath</key>",
-		"<string>/Users/x/.config/baseten-switch/logs/router.log</string>",
+		"<string>/Users/x/.config/openrouter-switch/logs/router.log</string>",
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
 			t.Errorf("plist missing %q:\n%s", w, got)
 		}
 	}
-	// Env keys render sorted: BASETEN_SWITCH_CONFIG_PATH before PATH.
-	if strings.Index(got, "BASETEN_SWITCH_CONFIG_PATH") > strings.Index(got, "<key>PATH</key>") {
+	// Env keys render sorted: OPENROUTER_SWITCH_CONFIG_PATH before PATH.
+	if strings.Index(got, "OPENROUTER_SWITCH_CONFIG_PATH") > strings.Index(got, "<key>PATH</key>") {
 		t.Errorf("env keys not sorted:\n%s", got)
 	}
 }
@@ -55,8 +55,8 @@ func TestRenderPlist(t *testing.T) {
 func TestRenderPlistEscapes(t *testing.T) {
 	j := Job{
 		Label:            DoorLabel,
-		ProgramArguments: []string{"/tmp/a&b <dir>/baseten-switch", "door"},
-		Env:              map[string]string{"BASETEN_SWITCH_CONFIG_PATH": `/tmp/it's "here".yaml`},
+		ProgramArguments: []string{"/tmp/a&b <dir>/openrouter-switch", "door"},
+		Env:              map[string]string{"OPENROUTER_SWITCH_CONFIG_PATH": `/tmp/it's "here".yaml`},
 		LogPath:          "/tmp/log",
 	}
 	got := RenderPlist(j)
@@ -74,11 +74,11 @@ func TestRenderPlistEscapes(t *testing.T) {
 
 func TestRewriteCellar(t *testing.T) {
 	cases := []struct{ in, want string }{
-		{"/opt/homebrew/Cellar/baseten-switch/0.3.0/bin/baseten-switch", "/opt/homebrew/opt/baseten-switch/bin/baseten-switch"},
-		{"/usr/local/Cellar/baseten-switch/1.0.0_1/bin/baseten-switch", "/usr/local/opt/baseten-switch/bin/baseten-switch"},
-		{"/Users/x/.local/bin/baseten-switch", "/Users/x/.local/bin/baseten-switch"},
-		{"/opt/homebrew/Cellar/baseten-switch", "/opt/homebrew/Cellar/baseten-switch"}, // no version/rest: unchanged
-		{"/opt/homebrew/bin/baseten-switch", "/opt/homebrew/bin/baseten-switch"},
+		{"/opt/homebrew/Cellar/openrouter-switch/0.3.0/bin/openrouter-switch", "/opt/homebrew/opt/openrouter-switch/bin/openrouter-switch"},
+		{"/usr/local/Cellar/openrouter-switch/1.0.0_1/bin/openrouter-switch", "/usr/local/opt/openrouter-switch/bin/openrouter-switch"},
+		{"/Users/x/.local/bin/openrouter-switch", "/Users/x/.local/bin/openrouter-switch"},
+		{"/opt/homebrew/Cellar/openrouter-switch", "/opt/homebrew/Cellar/openrouter-switch"}, // no version/rest: unchanged
+		{"/opt/homebrew/bin/openrouter-switch", "/opt/homebrew/bin/openrouter-switch"},
 	}
 	for _, tc := range cases {
 		if got := RewriteCellar(tc.in); got != tc.want {
@@ -94,7 +94,7 @@ const printQuoted = `system information:
 		"com.apple.something" => {
 			pid = 42
 		}
-		"homebrew.mxcl.baseten-switch" => {
+		"homebrew.mxcl.openrouter-switch" => {
 			pid = 99
 		}
 	}
@@ -102,13 +102,13 @@ const printQuoted = `system information:
 
 const printColumnar = `	services = {
 		0	-	com.apple.SafariHistoryServiceAgent
-		4321	0	co.baseten.switch.router
-		-	0	co.baseten.switch.door
+		4321	0	com.ckorhonen.openrouter-switch.router
+		-	0	com.ckorhonen.openrouter-switch.door
 	}
 	disabled services = {
-		"co.baseten.switch.door" => disabled
+		"com.ckorhonen.openrouter-switch.door" => disabled
 	}
-	plist path = /Users/x/Library/LaunchAgents/co.baseten.switch.router.plist
+	plist path = /Users/x/Library/LaunchAgents/com.ckorhonen.openrouter-switch.router.plist
 `
 
 func TestLabelsMentioning(t *testing.T) {
@@ -117,14 +117,14 @@ func TestLabelsMentioning(t *testing.T) {
 		out  string
 		want []string
 	}{
-		{"brew label quoted", printQuoted, []string{"homebrew.mxcl.baseten-switch"}},
+		{"brew label quoted", printQuoted, []string{"homebrew.mxcl.openrouter-switch"}},
 		{"ours columnar dedup, paths ignored", printColumnar,
-			[]string{"co.baseten.switch.door", "co.baseten.switch.router"}},
+			[]string{"com.ckorhonen.openrouter-switch.door", "com.ckorhonen.openrouter-switch.router"}},
 		{"no match", "services = {\n 0 - com.apple.Foo\n}", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := LabelsMentioning(tc.out, "baseten-switch")
+			got := LabelsMentioning(tc.out, "openrouter-switch")
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}
@@ -193,7 +193,7 @@ func TestLoaded(t *testing.T) {
 func TestProgramBinary(t *testing.T) {
 	j := Job{
 		Label:            RouterLabel,
-		ProgramArguments: []string{"/opt/dir with & ampersand/baseten-switch", "gateway", "start"},
+		ProgramArguments: []string{"/opt/dir with & ampersand/openrouter-switch", "gateway", "start"},
 		LogPath:          "/tmp/router.log",
 	}
 	pp := filepath.Join(t.TempDir(), RouterLabel+".plist")

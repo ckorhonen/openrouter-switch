@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose an improvement to Baseten Switch
+description: Propose an improvement to OpenRouter Switch
 title: "[Feature]: "
 body:
   - type: textarea

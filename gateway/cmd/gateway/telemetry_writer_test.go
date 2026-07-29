@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 func TestReloadConfigDisablesAndLazilyReenablesTelemetry(t *testing.T) {
@@ -177,9 +177,8 @@ func TestGatewayShutdownClosesAndStopsTelemetryWriter(t *testing.T) {
 			TelemetryEnabled:       &enabled,
 			TelemetryRetentionDays: 90,
 		},
-		adminServer:  &http.Server{},
-		groups:       map[string]*listenerGroup{},
-		authTickStop: make(chan struct{}),
+		adminServer: &http.Server{},
+		groups:      map[string]*listenerGroup{},
 	}
 	g.writeTelemetryV1(gatewayTelemetryEvent(1))
 	if err := g.Shutdown(context.Background()); err != nil {

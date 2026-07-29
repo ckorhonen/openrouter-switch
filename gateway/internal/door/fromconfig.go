@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 // SpecsOptions adjusts SpecsFromConfig. The zero value uses the
@@ -74,11 +74,11 @@ func SpecsFromConfig(f *config.File, opts SpecsOptions) ([]Config, error) {
 			case ShapeOpenAI:
 				hasO = true
 			default:
-				logf("[baseten-switch door] config: client %s: unknown protocol_shape %q; ignoring", c.Name, c.ProtocolShape)
+				logf("[openrouter-switch door] config: client %s: unknown protocol_shape %q; ignoring", c.Name, c.ProtocolShape)
 			}
 		}
 		if !hasA && !hasO {
-			logf("[baseten-switch door] config: door port %s: router_addr %s matches no enabled client; skipping", p.BindAddr, p.RouterAddr)
+			logf("[openrouter-switch door] config: door port %s: router_addr %s matches no enabled client; skipping", p.BindAddr, p.RouterAddr)
 			continue
 		}
 		seen[p.BindAddr] = true

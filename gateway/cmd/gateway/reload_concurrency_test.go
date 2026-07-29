@@ -13,8 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
 )
 
 // TestReloadConfigConcurrentRequests exercises the two runtime snapshots that
@@ -27,7 +25,7 @@ func TestReloadConfigConcurrentRequests(t *testing.T) {
 
 	cfg := testConfig(t, upstream.URL, upstream.URL)
 	cfg.ConfigPath = filepath.Join(t.TempDir(), "gateway.yaml")
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.BindAddr = "127.0.0.1:0"
 	writeGatewayYAML(t, cfg.ConfigPath, []resolvedClientConfig{rc})
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -97,18 +95,19 @@ func TestReloadRetiresListenerBeforePublishingConfig(t *testing.T) {
 
 	cfg := testConfig(t, upstream.URL, upstream.URL)
 	cfg.ConfigPath = filepath.Join(t.TempDir(), "gateway.yaml")
-	old := resolvedAnthropicBaseten(t)
+	old := resolvedAnthropicOpenRouter(t)
 	old.BindAddr = "127.0.0.1:" + itoa(freeTCPPort(t))
 	writeGatewayYAML(t, cfg.ConfigPath, []resolvedClientConfig{old})
 	adminL, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := New(cfg, pricing.New(), adminL, []resolvedClientConfig{old})
+	g, err := New(cfg, testOpenRouterPricing(t), adminL, []resolvedClientConfig{old})
 	if err != nil {
 		adminL.Close()
 		t.Fatal(err)
 	}
+	g.catalogFingerprint = cfg.CredentialFingerprint
 	defer adminL.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	serveDone := make(chan error, 1)
@@ -171,7 +170,7 @@ func TestReloadRetiresListenerBeforePublishingConfig(t *testing.T) {
 		t.Fatal("old request did not reach upstream")
 	}
 
-	next := resolvedAnthropicBaseten(t)
+	next := resolvedAnthropicOpenRouter(t)
 	next.Name = "replacement"
 	next.BindAddr = "127.0.0.1:" + itoa(freeTCPPort(t))
 	next.Route = "anthropic"

@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest released version of Baseten Switch.
+Security fixes are provided for the latest released version of OpenRouter Switch.
 Pre-release builds and older versions may be used to reproduce a report, but
 are not supported release lines.
 
@@ -11,7 +11,7 @@ are not supported release lines.
 Do not open a public issue for a suspected vulnerability.
 
 Use GitHub's
-[private vulnerability reporting form](https://github.com/basetenlabs/baseten-switch/security/advisories/new)
+[private vulnerability reporting form](https://github.com/ckorhonen/openrouter-switch/security/advisories/new)
 to send the report directly to the repository's security maintainers. Include:
 
 - the affected version and operating system;
@@ -29,7 +29,7 @@ publishing report details.
 
 ## Security boundary
 
-Baseten Switch handles provider credentials and coding-harness traffic. Reports
+OpenRouter Switch handles provider credentials and coding-harness traffic. Reports
 about credential exposure, unintended network destinations, prompt or response
 disclosure, unsafe local file mutation, localhost access control, release
 signing, or update integrity are in scope.

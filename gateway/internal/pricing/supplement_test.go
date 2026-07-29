@@ -38,14 +38,14 @@ func TestEmbeddedOfficialPricingSupplementIsStrictAndScoped(t *testing.T) {
 	}
 	entries := envelope["entries"].([]any)
 	first := entries[0].(map[string]any)
-	first["provider"] = ProviderBaseten
+	first["provider"] = ProviderOpenRouter
 	body, err := json.Marshal(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := parseOfficialPricingSupplement(body); err == nil ||
-		!strings.Contains(err.Error(), "Baseten supplement entries are forbidden") {
-		t.Fatalf("Baseten supplement error = %v", err)
+		!strings.Contains(err.Error(), "OpenRouter supplement entries are forbidden") {
+		t.Fatalf("OpenRouter supplement error = %v", err)
 	}
 
 	withUnknownField := bytes.Replace(

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/responsescompat"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/responsescompat"
 )
 
 func newResponsesCompatibilityGateway(
@@ -105,7 +105,7 @@ func TestResponsesCompatibilityNormalizesRequestProactively(t *testing.T) {
 	defer srv.Close()
 
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedResponsesBaseten(t)
+	rc := resolvedResponsesOpenRouter(t)
 	rc.ResponsesCompatibility = responsesCompatibilityDefaults(t)
 	rc.ResponsesCompatibility.AdditionalToolsInput =
 		config.ResponsesCompatibilityModeOn
@@ -195,7 +195,7 @@ func TestResponsesCompatibilitySSEGuardFreshnessAndTelemetry(t *testing.T) {
 	defer srv.Close()
 
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedResponsesBaseten(t)
+	rc := resolvedResponsesOpenRouter(t)
 	rc.ResponsesCompatibility = responsesCompatibilityOnlyStream(t)
 	g, adminL, _ := newResponsesCompatibilityGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -421,7 +421,7 @@ func TestResponsesCompatibilityUnexpectedEncodingSkipsGuard(t *testing.T) {
 	defer srv.Close()
 
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedResponsesBaseten(t)
+	rc := resolvedResponsesOpenRouter(t)
 	rc.ResponsesCompatibility = responsesCompatibilityOnlyStream(t)
 	g, adminL, _ := newResponsesCompatibilityGateway(t, cfg, rc)
 	defer adminL.Close()

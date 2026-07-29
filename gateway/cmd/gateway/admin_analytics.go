@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/analytics"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/analytics"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
 const (
@@ -94,7 +94,7 @@ func (g *Gateway) analyticsResponse(
 	presentationRevision := ""
 	if catalog != nil {
 		presentationRevision = catalog.PresentationRevision(
-			pricing.ProviderBaseten,
+			pricing.ProviderOpenRouter,
 		)
 	}
 	key := analyticsResponseCacheKey{

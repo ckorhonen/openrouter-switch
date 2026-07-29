@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
 func globalRoutingFile(enabled bool) *config.File {
@@ -28,10 +28,10 @@ func globalRoutingFile(enabled bool) *config.File {
 			ProtocolShape: "anthropic",
 			DefaultModel:  "zai-org/GLM-5.2",
 			ModelAliases: map[string]string{
-				"claude-baseten-glm-5-2": "zai-org/GLM-5.2",
+				"claude-openrouter-glm-5-2": "zai-org/GLM-5.2",
 			},
 			ModelOptions: config.ModelOptions{
-				pricing.ProviderBaseten: {
+				pricing.ProviderOpenRouter: {
 					"zai-org/GLM-5.2": {
 						Reasoning: &config.ReasoningPolicy{
 							Mode: config.ReasoningFollowHarness,
@@ -47,10 +47,10 @@ func globalRoutingFile(enabled bool) *config.File {
 func newGlobalRoutingGateway(
 	t *testing.T,
 	f *config.File,
-	basetenURL, anthropicURL string,
+	openrouterURL, anthropicURL string,
 ) (*Gateway, func()) {
 	t.Helper()
-	cfg := testConfig(t, basetenURL, anthropicURL)
+	cfg := testConfig(t, openrouterURL, anthropicURL)
 	cfg.ConfigPath = t.TempDir() + "/gateway.yaml"
 	if err := config.Save(cfg.ConfigPath, f); err != nil {
 		t.Fatal(err)
@@ -64,13 +64,13 @@ func newGlobalRoutingGateway(
 	return g, stop
 }
 
-func TestGlobalRoutingAbsoluteOffBypassesEveryBasetenPolicy(t *testing.T) {
-	var basetenRequests atomic.Int64
-	baseten := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		basetenRequests.Add(1)
+func TestGlobalRoutingAbsoluteOffBypassesEveryOpenRouterPolicy(t *testing.T) {
+	var openrouterRequests atomic.Int64
+	openrouter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		openrouterRequests.Add(1)
 		http.Error(w, "must not be reached", http.StatusInternalServerError)
 	}))
-	defer baseten.Close()
+	defer openrouter.Close()
 	gotNativeModel := make(chan string, 1)
 	anthropic := recordingStub(t, gotNativeModel, "NATIVE")
 	defer anthropic.Close()
@@ -80,16 +80,14 @@ func TestGlobalRoutingAbsoluteOffBypassesEveryBasetenPolicy(t *testing.T) {
 	c.ModelRoutes = map[string]string{
 		"opus": "zai-org/GLM-5.2",
 	}
-	c.SubagentModel = "claude-baseten-glm-5-2"
+	c.SubagentModel = "claude-openrouter-glm-5-2"
 	c.SubagentRouting = "on"
 
-	g, stop := newGlobalRoutingGateway(t, f, baseten.URL, anthropic.URL)
+	g, stop := newGlobalRoutingGateway(t, f, openrouter.URL, anthropic.URL)
 	defer stop()
-	// Prove request routing does not even need a Baseten credential.
+	// Prove request routing does not even need a OpenRouter credential.
 	g.authMu.Lock()
-	g.oauthClient = nil
-	g.cfg.APIKeyFallback = false
-	g.cfg.BasetenKey = ""
+	g.cfg.OpenRouterKey = ""
 	g.authMu.Unlock()
 
 	resp, body := postModelMessages(t, g, "claude-opus-4-8", "agent-1")
@@ -109,29 +107,29 @@ func TestGlobalRoutingAbsoluteOffBypassesEveryBasetenPolicy(t *testing.T) {
 	if got := <-gotNativeModel; got != CodexCompatibilityModel {
 		t.Fatalf("native upstream model = %q, want %q", got, CodexCompatibilityModel)
 	}
-	for _, explicit := range []string{"claude-baseten-glm-5-2", "zai-org/GLM-5.2"} {
+	for _, explicit := range []string{"claude-openrouter-glm-5-2", "zai-org/GLM-5.2"} {
 		resp, body = postModelMessages(t, g, explicit, "")
 		if resp.StatusCode != http.StatusBadRequest ||
 			!strings.Contains(body, "global routing is Off") {
 			t.Fatalf("explicit %q status=%d body=%s", explicit, resp.StatusCode, body)
 		}
 	}
-	if got := basetenRequests.Load(); got != 0 {
-		t.Fatalf("Baseten received %d requests while global routing was Off", got)
+	if got := openrouterRequests.Load(); got != 0 {
+		t.Fatalf("OpenRouter received %d requests while global routing was Off", got)
 	}
 }
 
 func TestAnthropicShapeCodexSentinelRetainsNativeFallback(t *testing.T) {
-	baseten := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	openrouter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "retry natively", http.StatusInternalServerError)
 	}))
-	defer baseten.Close()
+	defer openrouter.Close()
 	gotNativeModel := make(chan string, 1)
 	anthropic := recordingStub(t, gotNativeModel, "NATIVE")
 	defer anthropic.Close()
 
 	f := globalRoutingFile(true)
-	g, stop := newGlobalRoutingGateway(t, f, baseten.URL, anthropic.URL)
+	g, stop := newGlobalRoutingGateway(t, f, openrouter.URL, anthropic.URL)
 	defer stop()
 
 	resp, body := postModelMessages(t, g, CodexCompatibilityModel, "")
@@ -145,8 +143,8 @@ func TestAnthropicShapeCodexSentinelRetainsNativeFallback(t *testing.T) {
 
 func TestGlobalRoutingOnPrecedenceAndDefaultModel(t *testing.T) {
 	gotModel := make(chan string, 8)
-	baseten := recordingStub(t, gotModel, "BASETEN")
-	defer baseten.Close()
+	openrouter := recordingStub(t, gotModel, "OPENROUTER")
+	defer openrouter.Close()
 	anthropic := recordingStub(t, nil, "NATIVE")
 	defer anthropic.Close()
 
@@ -156,7 +154,7 @@ func TestGlobalRoutingOnPrecedenceAndDefaultModel(t *testing.T) {
 		"opus": "zai-org/FAMILY",
 	}
 
-	g, stop := newGlobalRoutingGateway(t, f, baseten.URL, anthropic.URL)
+	g, stop := newGlobalRoutingGateway(t, f, openrouter.URL, anthropic.URL)
 	defer stop()
 	for _, tc := range []struct {
 		model, want string
@@ -177,14 +175,14 @@ func TestGlobalRoutingOnPrecedenceAndDefaultModel(t *testing.T) {
 }
 
 func TestGlobalRoutingStatusUsesActiveResolverAndExactByteHashes(t *testing.T) {
-	baseten := recordingStub(t, nil, "BASETEN")
-	defer baseten.Close()
+	openrouter := recordingStub(t, nil, "OPENROUTER")
+	defer openrouter.Close()
 	anthropic := recordingStub(t, nil, "NATIVE")
 	defer anthropic.Close()
 	f := globalRoutingFile(true)
 	f.Clients[0].ModelRoutes = map[string]string{"opus": "zai-org/GLM-5.2"}
 
-	g, stop := newGlobalRoutingGateway(t, f, baseten.URL, anthropic.URL)
+	g, stop := newGlobalRoutingGateway(t, f, openrouter.URL, anthropic.URL)
 	defer stop()
 	status := adminStatusGet(t, g)
 	if status["global_routing_enabled"] != true {
@@ -202,10 +200,10 @@ func TestGlobalRoutingStatusUsesActiveResolverAndExactByteHashes(t *testing.T) {
 		t.Fatalf("capabilities = %v", caps)
 	}
 	client := status["clients"].([]any)[0].(map[string]any)
-	if client["effective_route"] != "baseten" {
-		t.Fatalf("effective_route = %v, want baseten", client["effective_route"])
+	if client["effective_route"] != "openrouter" {
+		t.Fatalf("effective_route = %v, want openrouter", client["effective_route"])
 	}
-	if client["effective_summary"] != "Baseten · GLM 5.2" {
+	if client["effective_summary"] != "OpenRouter · GLM 5.2" {
 		t.Fatalf("effective_summary = %v", client["effective_summary"])
 	}
 	families := client["families"].([]any)
@@ -238,7 +236,7 @@ func TestGlobalRoutingStatusUsesActiveResolverAndExactByteHashes(t *testing.T) {
 		t.Fatalf("reload = %v", reload)
 	}
 	client = status["clients"].([]any)[0].(map[string]any)
-	if client["effective_summary"] != "Baseten · GLM 5.2" {
+	if client["effective_summary"] != "OpenRouter · GLM 5.2" {
 		t.Fatalf("failed reload changed active resolver: %v", client)
 	}
 }
@@ -292,13 +290,13 @@ func TestActiveConfigSnapshotIsImmutable(t *testing.T) {
 }
 
 func TestGlobalRoutingReloadKeepsListenerAndConnection(t *testing.T) {
-	baseten := recordingStub(t, nil, "BASETEN")
-	defer baseten.Close()
+	openrouter := recordingStub(t, nil, "OPENROUTER")
+	defer openrouter.Close()
 	anthropic := recordingStub(t, nil, "NATIVE")
 	defer anthropic.Close()
 
 	initial := globalRoutingFile(true)
-	g, stop := newGlobalRoutingGateway(t, initial, baseten.URL, anthropic.URL)
+	g, stop := newGlobalRoutingGateway(t, initial, openrouter.URL, anthropic.URL)
 	defer stop()
 	spec := groupResolved(mustResolveFile(t, initial))[0]
 	beforeGroup := g.snapshotGroup(spec.key)
@@ -353,7 +351,7 @@ func TestGlobalRoutingReloadKeepsListenerAndConnection(t *testing.T) {
 func TestGlobalRoutingReloadDrainsInFlightRequestOnOldResolver(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	baseten := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	openrouter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			http.NotFound(w, r)
 			return
@@ -361,15 +359,15 @@ func TestGlobalRoutingReloadDrainsInFlightRequestOnOldResolver(t *testing.T) {
 		close(entered)
 		<-release
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_baseten","type":"message","content":[]}`))
+		_, _ = w.Write([]byte(`{"id":"msg_openrouter","type":"message","content":[]}`))
 	}))
-	defer baseten.Close()
+	defer openrouter.Close()
 	nativeModels := make(chan string, 1)
 	anthropic := recordingStub(t, nativeModels, "NATIVE")
 	defer anthropic.Close()
 
 	initial := globalRoutingFile(true)
-	g, stop := newGlobalRoutingGateway(t, initial, baseten.URL, anthropic.URL)
+	g, stop := newGlobalRoutingGateway(t, initial, openrouter.URL, anthropic.URL)
 	defer stop()
 	spec := groupResolved(mustResolveFile(t, initial))[0]
 	beforeGroup := g.snapshotGroup(spec.key)
@@ -378,7 +376,7 @@ func TestGlobalRoutingReloadDrainsInFlightRequestOnOldResolver(t *testing.T) {
 	inflight := make(chan error, 1)
 	go func() {
 		resp, body := postModelMessages(t, g, "claude-opus-4-8", "")
-		if resp.StatusCode != http.StatusOK || !strings.Contains(body, "msg_baseten") {
+		if resp.StatusCode != http.StatusOK || !strings.Contains(body, "msg_openrouter") {
 			inflight <- fmt.Errorf("in-flight response status=%d body=%s", resp.StatusCode, body)
 			return
 		}
@@ -387,7 +385,7 @@ func TestGlobalRoutingReloadDrainsInFlightRequestOnOldResolver(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
-		t.Fatal("in-flight request did not reach the old Baseten resolver")
+		t.Fatal("in-flight request did not reach the old OpenRouter resolver")
 	}
 
 	updated := globalRoutingFile(false)
@@ -418,13 +416,13 @@ func TestGlobalRoutingReloadDrainsInFlightRequestOnOldResolver(t *testing.T) {
 }
 
 func TestGlobalRoutingFailedTopologyBindRetainsListenersAndActiveSnapshot(t *testing.T) {
-	baseten := recordingStub(t, nil, "BASETEN")
-	defer baseten.Close()
+	openrouter := recordingStub(t, nil, "OPENROUTER")
+	defer openrouter.Close()
 	anthropic := recordingStub(t, nil, "NATIVE")
 	defer anthropic.Close()
 
 	initial := globalRoutingFile(true)
-	g, stop := newGlobalRoutingGateway(t, initial, baseten.URL, anthropic.URL)
+	g, stop := newGlobalRoutingGateway(t, initial, openrouter.URL, anthropic.URL)
 	defer stop()
 	initialSpec := groupResolved(mustResolveFile(t, initial))[0]
 	beforeGroup := g.snapshotGroup(initialSpec.key)
@@ -473,13 +471,13 @@ func TestGlobalRoutingFailedTopologyBindRetainsListenersAndActiveSnapshot(t *tes
 		t.Fatalf("failed reload hashes = active:%v desired:%v", status["active_config_hash"], status["desired_config_hash"])
 	}
 	resp, body := postModelMessages(t, g, "claude-opus-4-8", "")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "BASETEN") {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "OPENROUTER") {
 		t.Fatalf("old listener stopped serving after failed topology reload: status=%d body=%s", resp.StatusCode, body)
 	}
 }
 
 func TestStartupUsesExactResolvedSnapshotWhenFileChanges(t *testing.T) {
-	cfg := testConfig(t, "http://baseten.invalid", "http://anthropic.invalid")
+	cfg := testConfig(t, "http://openrouter.invalid", "http://anthropic.invalid")
 	cfg.ConfigPath = t.TempDir() + "/gateway.yaml"
 	initial := globalRoutingFile(true)
 	if err := config.Save(cfg.ConfigPath, initial); err != nil {
@@ -516,7 +514,7 @@ func TestStartupUsesExactResolvedSnapshotWhenFileChanges(t *testing.T) {
 		t.Fatal("startup snapshot was relabeled with later Off bytes")
 	}
 	client := g.snapshotClients()[0].cfg
-	if client.Route != "baseten" || !client.GlobalRoutingEnabled {
+	if client.Route != "openrouter" || !client.GlobalRoutingEnabled {
 		t.Fatalf("startup listener does not match active snapshot: %+v", client)
 	}
 	if exactConfigHash(desiredRaw) == state.activeHash {

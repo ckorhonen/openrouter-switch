@@ -7,15 +7,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 // noAuthStore points the auth loader at an empty temp store so preflight
-// sees "no OAuth credential" regardless of the developer's real keychain.
+// sees no OpenRouter credential regardless of the developer's real keychain.
 func noAuthStore(t *testing.T) {
 	t.Helper()
-	t.Setenv("BASETEN_SWITCH_AUTH_NO_KEYRING", "1")
-	t.Setenv("BASETEN_SWITCH_AUTH_FILE", filepath.Join(t.TempDir(), "auth.json"))
+	t.Setenv("OPENROUTER_SWITCH_AUTH_NO_KEYRING", "1")
+	t.Setenv("OPENROUTER_SWITCH_AUTH_FILE", filepath.Join(t.TempDir(), "auth.json"))
 }
 
 func writeYAML(t *testing.T, content string) string {
@@ -31,7 +31,7 @@ func TestUnresolvedPlaceholders(t *testing.T) {
 	t.Setenv("TEST_PF_SET", "resolved")
 	f := &config.File{
 		Global: config.Global{
-			Auth: map[string]string{"baseten": "${TEST_PF_SET}"},
+			Auth: map[string]string{"openrouter": "${TEST_PF_SET}"},
 		},
 		Clients: []config.Client{
 			{
@@ -70,53 +70,54 @@ func TestUnresolvedPlaceholders(t *testing.T) {
 	}
 }
 
-// TestApplyGlobalAuthAtStartup verifies the startup/PUT symmetry fix: a
-// ${VAR} key set via global.auth in gateway.yaml lands in the process env
-// and on cfg.BasetenKey without an admin PUT.
-func TestApplyGlobalAuthAtStartup(t *testing.T) {
-	t.Setenv("TEST_PF_BASETEN_SWITCH_KEY", "sk-boot-42")
-	t.Setenv("BASETEN_API_KEY", "")
-	path := writeYAML(t, "global:\n  auth:\n    baseten: ${TEST_PF_BASETEN_SWITCH_KEY}\nclients: []\n")
+// OpenRouter credentials in gateway.yaml are ignored even when their
+// placeholders resolve. Only Keychain and OPENROUTER_API_KEY are authorities.
+func TestApplyGlobalAuthIgnoresOpenRouterCredential(t *testing.T) {
+	noAuthStore(t)
+	t.Setenv("TEST_PF_OPENROUTER_SWITCH_KEY", "sk-boot-42")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	path := writeYAML(t, "global:\n  auth:\n    openrouter: ${TEST_PF_OPENROUTER_SWITCH_KEY}\nclients: []\n")
 	cfg := Config{ConfigPath: path}
 	applyGlobalAuth(&cfg)
-	if got := os.Getenv("BASETEN_API_KEY"); got != "sk-boot-42" {
-		t.Fatalf("BASETEN_API_KEY = %q, want sk-boot-42", got)
+	if got := os.Getenv("OPENROUTER_API_KEY"); got != "" {
+		t.Fatalf("gateway.yaml set OPENROUTER_API_KEY = %q", got)
 	}
-	if cfg.BasetenKey != "sk-boot-42" {
-		t.Fatalf("cfg.BasetenKey = %q, want sk-boot-42", cfg.BasetenKey)
+	if cfg.OpenRouterKey != "" {
+		t.Fatalf("gateway.yaml configured OpenRouter key = %q", cfg.OpenRouterKey)
 	}
 }
 
 func TestApplyGlobalAuthUnsetPlaceholderStaysEmpty(t *testing.T) {
-	t.Setenv("BASETEN_API_KEY", "")
-	path := writeYAML(t, "global:\n  auth:\n    baseten: ${TEST_PF_NO_SUCH_KEY}\nclients: []\n")
+	noAuthStore(t)
+	t.Setenv("OPENROUTER_API_KEY", "")
+	path := writeYAML(t, "global:\n  auth:\n    openrouter: ${TEST_PF_NO_SUCH_KEY}\nclients: []\n")
 	cfg := Config{ConfigPath: path}
 	applyGlobalAuth(&cfg)
-	if got := os.Getenv("BASETEN_API_KEY"); got != "" {
-		t.Fatalf("BASETEN_API_KEY = %q, want empty (placeholder unset)", got)
+	if got := os.Getenv("OPENROUTER_API_KEY"); got != "" {
+		t.Fatalf("OPENROUTER_API_KEY = %q, want empty (placeholder unset)", got)
 	}
-	if cfg.BasetenKey != "" {
-		t.Fatalf("cfg.BasetenKey = %q, want empty", cfg.BasetenKey)
+	if cfg.OpenRouterKey != "" {
+		t.Fatalf("cfg.OpenRouterKey = %q, want empty", cfg.OpenRouterKey)
 	}
 }
 
 func TestApplyGlobalAuthMissingFileIsNoop(t *testing.T) {
-	cfg := Config{ConfigPath: filepath.Join(t.TempDir(), "no-such.yaml"), BasetenKey: "keep"}
+	cfg := Config{ConfigPath: filepath.Join(t.TempDir(), "no-such.yaml"), OpenRouterKey: "keep"}
 	applyGlobalAuth(&cfg)
-	if cfg.BasetenKey != "keep" {
-		t.Fatalf("cfg.BasetenKey = %q, want keep", cfg.BasetenKey)
+	if cfg.OpenRouterKey != "keep" {
+		t.Fatalf("cfg.OpenRouterKey = %q, want keep", cfg.OpenRouterKey)
 	}
 }
 
-func TestBasetenRoutedClients(t *testing.T) {
+func TestOpenRouterRoutedClients(t *testing.T) {
 	resolved := []resolvedClientConfig{
-		{Name: "claude-code", Route: "baseten"},
-		{Name: "opencode", Route: "openai", FallbackRoute: "baseten"},
+		{Name: "claude-code", Route: "openrouter"},
+		{Name: "opencode", Route: "openai", FallbackRoute: "openrouter"},
 		{Name: "codex", Route: "anthropic"},
 		{Name: "mon", Route: "monitor"},
 	}
-	got := basetenRoutedClients(resolved)
-	want := []string{"claude-code (route: baseten)", "opencode (fallback_route: baseten)"}
+	got := openrouterRoutedClients(resolved)
+	want := []string{"claude-code (route: openrouter)", "opencode (fallback_route: openrouter)"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -128,24 +129,20 @@ func TestBasetenRoutedClients(t *testing.T) {
 }
 
 func TestRunPreflightBanner(t *testing.T) {
-	oauthAuthJSON := `{"version":1,"current":"me","profiles":{"me":{"remote_url":"https://api.baseten.co","auth_type":"oauth","oauth_credential":{"access_token":"at","refresh_token":"rt"}}}}`
-	apiKeyAuthJSON := `{"version":1,"current":"svc","profiles":{"svc":{"remote_url":"https://api.baseten.co","auth_type":"api_key","api_key":"sk-1"}}}`
-
 	cases := []struct {
-		name       string
-		resolved   []resolvedClientConfig
-		basetenKey string
-		authJSON   string // "" = empty store
-		wantBanner bool
+		name          string
+		resolved      []resolvedClientConfig
+		openrouterKey string
+		wantBanner    bool
 	}{
 		{
-			name:       "baseten route without creds warns",
-			resolved:   []resolvedClientConfig{{Name: "claude-code", Route: "baseten"}},
+			name:       "openrouter route without creds warns",
+			resolved:   []resolvedClientConfig{{Name: "claude-code", Route: "openrouter"}},
 			wantBanner: true,
 		},
 		{
-			name:       "baseten fallback route without creds warns",
-			resolved:   []resolvedClientConfig{{Name: "opencode", Route: "openai", FallbackRoute: "baseten"}},
+			name:       "openrouter fallback route without creds warns",
+			resolved:   []resolvedClientConfig{{Name: "opencode", Route: "openai", FallbackRoute: "openrouter"}},
 			wantBanner: true,
 		},
 		{
@@ -154,42 +151,23 @@ func TestRunPreflightBanner(t *testing.T) {
 			wantBanner: false,
 		},
 		{
-			name:       "api key suppresses banner",
-			resolved:   []resolvedClientConfig{{Name: "claude-code", Route: "baseten"}},
-			basetenKey: "sk-x",
-			wantBanner: false,
-		},
-		{
-			name:       "oauth credential suppresses banner",
-			resolved:   []resolvedClientConfig{{Name: "claude-code", Route: "baseten"}},
-			authJSON:   oauthAuthJSON,
-			wantBanner: false,
-		},
-		{
-			name:       "api_key-type CLI profile suppresses banner",
-			resolved:   []resolvedClientConfig{{Name: "claude-code", Route: "baseten"}},
-			authJSON:   apiKeyAuthJSON,
-			wantBanner: false,
+			name:          "api key suppresses banner",
+			resolved:      []resolvedClientConfig{{Name: "claude-code", Route: "openrouter"}},
+			openrouterKey: "sk-x",
+			wantBanner:    false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			noAuthStore(t)
-			if tc.authJSON != "" {
-				path := filepath.Join(t.TempDir(), "auth.json")
-				if err := os.WriteFile(path, []byte(tc.authJSON), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				t.Setenv("BASETEN_SWITCH_AUTH_FILE", path)
-			}
 			cfg := Config{
-				ConfigPath: filepath.Join(t.TempDir(), "no-such.yaml"),
-				BasetenKey: tc.basetenKey,
+				ConfigPath:    filepath.Join(t.TempDir(), "no-such.yaml"),
+				OpenRouterKey: tc.openrouterKey,
 			}
 			var buf bytes.Buffer
 			runPreflight(&cfg, tc.resolved, &buf)
 			out := buf.String()
-			gotBanner := strings.Contains(out, "WARNING: no Baseten credential")
+			gotBanner := strings.Contains(out, "WARNING: no OpenRouter API key")
 			if gotBanner != tc.wantBanner {
 				t.Fatalf("banner = %t, want %t; output:\n%s", gotBanner, tc.wantBanner, out)
 			}
@@ -197,7 +175,7 @@ func TestRunPreflightBanner(t *testing.T) {
 				if !strings.Contains(out, tc.resolved[0].Name) {
 					t.Fatalf("banner does not name client %q:\n%s", tc.resolved[0].Name, out)
 				}
-				if !strings.Contains(out, "baseten auth login") {
+				if !strings.Contains(out, "openrouter-switch auth set-key") {
 					t.Fatalf("banner does not name the fix:\n%s", out)
 				}
 			}
@@ -213,7 +191,7 @@ func TestRunPreflightWarnsPlaceholdersFromFile(t *testing.T) {
 	path := writeYAML(t, `global:
   routing_enabled: false
   auth:
-    baseten: ${TEST_PF_MISSING_KEY}
+    openrouter: ${TEST_PF_MISSING_KEY}
 clients:
   - name: claude-code
     enabled: true
@@ -228,7 +206,7 @@ clients:
 	if !strings.Contains(out, "${TEST_PF_MISSING_KEY}") {
 		t.Fatalf("expected placeholder warning, got:\n%s", out)
 	}
-	if strings.Contains(out, "WARNING: no Baseten credential") {
+	if strings.Contains(out, "WARNING: no OpenRouter API key") {
 		t.Fatalf("passthrough-only client should not trigger the credential banner:\n%s", out)
 	}
 }

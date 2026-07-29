@@ -14,30 +14,33 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/reasoning"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/reasoning"
 )
 
 func reasoningTestGateway(t *testing.T) *Gateway {
 	t.Helper()
 	cfg := testConfig(
 		t,
-		"http://baseten.invalid",
+		"http://openrouter.invalid",
 		"http://anthropic.invalid",
 	)
-	return &Gateway{
+	g := &Gateway{
 		cfg:     cfg,
-		pricing: pricing.New(),
+		pricing: testOpenRouterPricing(t),
 		client:  &http.Client{Transport: defaultTransport()},
 	}
+	g.authFingerprint = cfg.CredentialFingerprint
+	g.catalogFingerprint = cfg.CredentialFingerprint
+	return g
 }
 
-func resolvedAnthropicBasetenDefaultReasoning(
+func resolvedAnthropicOpenRouterDefaultReasoning(
 	t *testing.T,
 ) resolvedClientConfig {
 	t.Helper()
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.ModelOptions = nil
 	return rc
 }
@@ -63,7 +66,7 @@ func assertGatewayThinkingDisabled(t *testing.T, body []byte) {
 
 func TestReasoningPolicyMappedToggleDefaultsOff(t *testing.T) {
 	g := reasoningTestGateway(t)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	cl := &clientListener{cfg: rc}
 	body := []byte(`{
 		"model":"claude-opus-4-8",
@@ -81,9 +84,9 @@ func TestReasoningPolicyMappedToggleDefaultsOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(attempts) != 1 ||
-		attempts[0].route != "baseten" ||
+		attempts[0].route != "openrouter" ||
 		attempts[0].fallbackTrigger != "" {
-		t.Fatalf("attempts = %+v, want one Baseten primary", attempts)
+		t.Fatalf("attempts = %+v, want one OpenRouter primary", attempts)
 	}
 	assertGatewayThinkingDisabled(t, attempts[0].res.NewBody)
 	if !bytes.Contains(
@@ -121,10 +124,10 @@ func TestReasoningPolicyToggleOffAfterEveryMessagesTargetResolver(
 			name: "Nemotron alias",
 			configure: func(rc *resolvedClientConfig, _ *http.Request) {
 				rc.ModelAliases = map[string]string{
-					"claude-baseten-nemotron": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
+					"claude-openrouter-nemotron": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
 				}
 			},
-			model: "claude-baseten-nemotron",
+			model: "claude-openrouter-nemotron",
 		},
 		{
 			name: "GLM raw slug",
@@ -153,7 +156,7 @@ func TestReasoningPolicyToggleOffAfterEveryMessagesTargetResolver(
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := reasoningTestGateway(t)
-			rc := resolvedAnthropicBasetenDefaultReasoning(t)
+			rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 			req := httptest.NewRequest(
 				http.MethodPost,
 				"/v1/messages",
@@ -175,7 +178,7 @@ func TestReasoningPolicyToggleOffAfterEveryMessagesTargetResolver(
 				t.Fatal(err)
 			}
 			if len(attempts) != 1 ||
-				attempts[0].route != "baseten" ||
+				attempts[0].route != "openrouter" ||
 				attempts[0].fallbackTrigger != "" {
 				t.Fatalf("attempts = %+v", attempts)
 			}
@@ -186,9 +189,9 @@ func TestReasoningPolicyToggleOffAfterEveryMessagesTargetResolver(
 
 func TestReasoningPolicyFollowHarnessPreservesToggle(t *testing.T) {
 	g := reasoningTestGateway(t)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	rc.ModelOptions = config.ModelOptions{
-		"baseten": {
+		"openrouter": {
 			"zai-org/GLM-5.2": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -220,11 +223,11 @@ func TestReasoningPolicyFollowHarnessPreservesToggle(t *testing.T) {
 func TestReasoningPolicyKimiFollowHarnessNormalizesClaudeAdaptiveThinking(
 	t *testing.T,
 ) {
-	var basetenHits atomic.Int32
+	var openrouterHits atomic.Int32
 	upstreamBody := make(chan []byte, 1)
-	baseten := httptest.NewServer(http.HandlerFunc(
+	openrouter := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			basetenHits.Add(1)
+			openrouterHits.Add(1)
 			body, _ := io.ReadAll(r.Body)
 			upstreamBody <- body
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -234,7 +237,7 @@ func TestReasoningPolicyKimiFollowHarnessNormalizesClaudeAdaptiveThinking(
 			))
 		},
 	))
-	defer baseten.Close()
+	defer openrouter.Close()
 
 	var nativeHits atomic.Int32
 	native := httptest.NewServer(http.HandlerFunc(
@@ -245,13 +248,13 @@ func TestReasoningPolicyKimiFollowHarnessNormalizesClaudeAdaptiveThinking(
 	))
 	defer native.Close()
 
-	cfg := testConfig(t, baseten.URL, native.URL)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	cfg := testConfig(t, openrouter.URL, native.URL)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	rc.ModelRoutes = map[string]string{
 		"sonnet": "moonshotai/Kimi-K2.7-Code",
 	}
 	rc.ModelOptions = config.ModelOptions{
-		pricing.ProviderBaseten: {
+		pricing.ProviderOpenRouter: {
 			"moonshotai/Kimi-K2.7-Code": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -295,15 +298,15 @@ func TestReasoningPolicyKimiFollowHarnessNormalizesClaudeAdaptiveThinking(
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf(
-			"status=%d body=%s, want successful Kimi Baseten attempt",
+			"status=%d body=%s, want successful Kimi OpenRouter attempt",
 			response.StatusCode,
 			responseBody,
 		)
 	}
-	if basetenHits.Load() != 1 || nativeHits.Load() != 0 {
+	if openrouterHits.Load() != 1 || nativeHits.Load() != 0 {
 		t.Fatalf(
-			"upstream hits = Baseten %d native %d, want 1/0",
-			basetenHits.Load(),
+			"upstream hits = OpenRouter %d native %d, want 1/0",
+			openrouterHits.Load(),
 			nativeHits.Load(),
 		)
 	}
@@ -335,7 +338,7 @@ func TestReasoningPolicyKimiFollowHarnessNormalizesClaudeAdaptiveThinking(
 
 func TestReasoningPolicyUnsupportedAdapterDefaultsPassthrough(t *testing.T) {
 	g := reasoningTestGateway(t)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	rc.UpstreamShape = "openai"
 	body := []byte(`{
 		"model":"claude-opus-4-8",
@@ -352,15 +355,14 @@ func TestReasoningPolicyUnsupportedAdapterDefaultsPassthrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(attempts) != 1 ||
-		attempts[0].route != "baseten" ||
+		attempts[0].route != "openrouter" ||
 		attempts[0].fallbackTrigger != "" {
-		t.Fatalf("attempt = %+v, want Baseten passthrough", attempts[0])
+		t.Fatalf("attempt = %+v, want OpenRouter passthrough", attempts[0])
 	}
 }
 
 func TestReasoningPolicyModelsWithoutOffDefaultPassthrough(t *testing.T) {
 	for _, model := range []string{
-		"deepseek-ai/DeepSeek-V4-Pro",
 		"example/No-Control",
 	} {
 		t.Run(model, func(t *testing.T) {
@@ -372,7 +374,7 @@ func TestReasoningPolicyModelsWithoutOffDefaultPassthrough(t *testing.T) {
 			); err != nil {
 				t.Fatal(err)
 			}
-			rc := resolvedAnthropicBasetenDefaultReasoning(t)
+			rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 			rc.DefaultModel = model
 			body := []byte(`{
 				"model":"claude-opus-4-8",
@@ -389,7 +391,7 @@ func TestReasoningPolicyModelsWithoutOffDefaultPassthrough(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(attempts) != 1 ||
-				attempts[0].route != "baseten" ||
+				attempts[0].route != "openrouter" ||
 				attempts[0].fallbackTrigger != "" {
 				t.Fatalf("attempts = %+v", attempts)
 			}
@@ -411,14 +413,14 @@ func TestReasoningPolicyModelsWithoutOffDefaultPassthrough(t *testing.T) {
 	}
 }
 
-func TestReasoningPolicyExplicitBasetenErrorHasNoFallback(t *testing.T) {
+func TestReasoningPolicyExplicitOpenRouterErrorHasNoFallback(t *testing.T) {
 	g := reasoningTestGateway(t)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
-	rc.DefaultModel = "deepseek-ai/DeepSeek-V4-Pro"
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
+	rc.DefaultModel = "example/No-Control"
 	rc.FallbackRoute = "anthropic"
 	rc.ModelOptions = config.ModelOptions{
-		pricing.ProviderBaseten: {
-			"deepseek-ai/DeepSeek-V4-Pro": {
+		pricing.ProviderOpenRouter: {
+			"example/No-Control": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningOff,
 				},
@@ -436,7 +438,7 @@ func TestReasoningPolicyExplicitBasetenErrorHasNoFallback(t *testing.T) {
 		&clientListener{cfg: rc},
 		httptest.NewRequest(http.MethodPost, "/v1/messages", nil),
 		[]byte(`{
-			"model":"deepseek-ai/DeepSeek-V4-Pro",
+			"model":"example/No-Control",
 			"messages":[{"role":"user","content":"hello"}]
 		}`),
 		"messages",
@@ -458,17 +460,17 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 		client     func(*testing.T) resolvedClientConfig
 	}{
 		{
-			name:       "Messages effort-only model",
+			name:       "Messages model without reasoning controls",
 			path:       "/v1/messages",
-			body:       `{"model":"deepseek-ai/DeepSeek-V4-Pro","messages":[{"role":"user","content":"hello"}]}`,
+			body:       `{"model":"example/No-Control","messages":[{"role":"user","content":"hello"}]}`,
 			clientName: "claude-code",
 			client: func(t *testing.T) resolvedClientConfig {
-				rc := resolvedAnthropicBasetenDefaultReasoning(t)
-				rc.DefaultModel = "deepseek-ai/DeepSeek-V4-Pro"
+				rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
+				rc.DefaultModel = "example/No-Control"
 				rc.FallbackRoute = "anthropic"
 				rc.ModelOptions = config.ModelOptions{
-					pricing.ProviderBaseten: {
-						"deepseek-ai/DeepSeek-V4-Pro": {
+					pricing.ProviderOpenRouter: {
+						"example/No-Control": {
 							Reasoning: &config.ReasoningPolicy{
 								Mode: config.ReasoningOff,
 							},
@@ -484,10 +486,10 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 			body:       `{"model":"zai-org/GLM-5.2","messages":[{"role":"user","content":"hello"}]}`,
 			clientName: "opencode",
 			client: func(t *testing.T) resolvedClientConfig {
-				rc := resolvedOpenAIBaseten(t, "opencode", "baseten")
+				rc := resolvedOpenAIOpenRouter(t, "opencode", "openrouter")
 				rc.FallbackRoute = "openai"
 				rc.ModelOptions = config.ModelOptions{
-					pricing.ProviderBaseten: {
+					pricing.ProviderOpenRouter: {
 						"zai-org/GLM-5.2": {
 							Reasoning: &config.ReasoningPolicy{
 								Mode: config.ReasoningOff,
@@ -504,10 +506,10 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 			body:       `{"model":"zai-org/GLM-5.2","input":"hello"}`,
 			clientName: "codex",
 			client: func(t *testing.T) resolvedClientConfig {
-				rc := resolvedOpenAIBaseten(t, "codex", "baseten")
+				rc := resolvedOpenAIOpenRouter(t, "codex", "openrouter")
 				rc.FallbackRoute = "openai"
 				rc.ModelOptions = config.ModelOptions{
-					pricing.ProviderBaseten: {
+					pricing.ProviderOpenRouter: {
 						"zai-org/GLM-5.2": {
 							Reasoning: &config.ReasoningPolicy{
 								Mode: config.ReasoningOff,
@@ -524,11 +526,11 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 			body:       `{"model":"zai-org/GLM-5.2","thinking":{"type":"enabled","budget_tokens":32000},"messages":[{"role":"user","content":"hello"}]}`,
 			clientName: "claude-code",
 			client: func(t *testing.T) resolvedClientConfig {
-				rc := resolvedAnthropicBasetenDefaultReasoning(t)
+				rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 				rc.UpstreamShape = "openai"
 				rc.FallbackRoute = "anthropic"
 				rc.ModelOptions = config.ModelOptions{
-					pricing.ProviderBaseten: {
+					pricing.ProviderOpenRouter: {
 						"zai-org/GLM-5.2": {
 							Reasoning: &config.ReasoningPolicy{
 								Mode: config.ReasoningOff,
@@ -541,14 +543,14 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var basetenHits atomic.Int32
-			baseten := httptest.NewServer(http.HandlerFunc(
+			var openrouterHits atomic.Int32
+			openrouter := httptest.NewServer(http.HandlerFunc(
 				func(w http.ResponseWriter, _ *http.Request) {
-					basetenHits.Add(1)
+					openrouterHits.Add(1)
 					w.WriteHeader(http.StatusInternalServerError)
 				},
 			))
-			defer baseten.Close()
+			defer openrouter.Close()
 
 			var nativeHits atomic.Int32
 			native := httptest.NewServer(http.HandlerFunc(
@@ -559,7 +561,7 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 			))
 			defer native.Close()
 
-			cfg := testConfig(t, baseten.URL, native.URL)
+			cfg := testConfig(t, openrouter.URL, native.URL)
 			cfg.OpenAIURL = native.URL
 			g, adminListener, _ := newGateway(t, cfg, tc.client(t))
 			defer adminListener.Close()
@@ -598,10 +600,10 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 					responseBody,
 				)
 			}
-			if basetenHits.Load() != 0 || nativeHits.Load() != 0 {
+			if openrouterHits.Load() != 0 || nativeHits.Load() != 0 {
 				t.Fatalf(
-					"upstream hits = Baseten %d native %d, want 0/0",
-					basetenHits.Load(),
+					"upstream hits = OpenRouter %d native %d, want 0/0",
+					openrouterHits.Load(),
 					nativeHits.Load(),
 				)
 			}
@@ -610,14 +612,14 @@ func TestReasoningPolicyExplicitConfiguredUnsupportedOffStaysLocal(
 }
 
 func TestReasoningPolicyUnrecognizedHarnessControlContactsNoUpstream(t *testing.T) {
-	var basetenHits atomic.Int32
-	baseten := httptest.NewServer(http.HandlerFunc(
+	var openrouterHits atomic.Int32
+	openrouter := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) {
-			basetenHits.Add(1)
+			openrouterHits.Add(1)
 			w.WriteHeader(http.StatusInternalServerError)
 		},
 	))
-	defer baseten.Close()
+	defer openrouter.Close()
 
 	var nativeHits atomic.Int32
 	native := httptest.NewServer(http.HandlerFunc(
@@ -628,11 +630,11 @@ func TestReasoningPolicyUnrecognizedHarnessControlContactsNoUpstream(t *testing.
 	))
 	defer native.Close()
 
-	cfg := testConfig(t, baseten.URL, native.URL)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	cfg := testConfig(t, openrouter.URL, native.URL)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	rc.FallbackRoute = "anthropic"
 	rc.ModelOptions = config.ModelOptions{
-		"baseten": {
+		"openrouter": {
 			"zai-org/GLM-5.2": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -671,20 +673,20 @@ func TestReasoningPolicyUnrecognizedHarnessControlContactsNoUpstream(t *testing.
 			responseBody,
 		)
 	}
-	if basetenHits.Load() != 0 || nativeHits.Load() != 0 {
+	if openrouterHits.Load() != 0 || nativeHits.Load() != 0 {
 		t.Fatalf(
-			"upstream hits = Baseten %d native %d, want 0/0",
-			basetenHits.Load(),
+			"upstream hits = OpenRouter %d native %d, want 0/0",
+			openrouterHits.Load(),
 			nativeHits.Load(),
 		)
 	}
 }
 
 func TestReasoningPolicyChangesResolvedClientHash(t *testing.T) {
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	before := rc.hash()
 	rc.ModelOptions = config.ModelOptions{
-		"baseten": {
+		"openrouter": {
 			"zai-org/GLM-5.2": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -700,16 +702,16 @@ func TestReasoningPolicyChangesResolvedClientHash(t *testing.T) {
 func TestReasoningPolicyMappedOffRuntimeFallbackPreservesNativeBody(
 	t *testing.T,
 ) {
-	var basetenHits atomic.Int32
-	var basetenBody []byte
-	baseten := httptest.NewServer(http.HandlerFunc(
+	var openrouterHits atomic.Int32
+	var openrouterBody []byte
+	openrouter := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			basetenHits.Add(1)
-			basetenBody, _ = io.ReadAll(r.Body)
+			openrouterHits.Add(1)
+			openrouterBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusInternalServerError)
 		},
 	))
-	defer baseten.Close()
+	defer openrouter.Close()
 
 	var nativeBody []byte
 	native := httptest.NewServer(http.HandlerFunc(
@@ -728,8 +730,8 @@ func TestReasoningPolicyMappedOffRuntimeFallbackPreservesNativeBody(
 	))
 	defer native.Close()
 
-	cfg := testConfig(t, baseten.URL, native.URL)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	cfg := testConfig(t, openrouter.URL, native.URL)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	rc.FallbackRoute = "anthropic"
 	g, adminListener, _ := newGateway(t, cfg, rc)
 	defer adminListener.Close()
@@ -757,10 +759,10 @@ func TestReasoningPolicyMappedOffRuntimeFallbackPreservesNativeBody(
 		responseBody, _ := io.ReadAll(response.Body)
 		t.Fatalf("status = %d body = %s", response.StatusCode, responseBody)
 	}
-	if basetenHits.Load() != 1 {
-		t.Fatalf("Baseten hits = %d, want 1", basetenHits.Load())
+	if openrouterHits.Load() != 1 {
+		t.Fatalf("OpenRouter hits = %d, want 1", openrouterHits.Load())
 	}
-	assertGatewayThinkingDisabled(t, basetenBody)
+	assertGatewayThinkingDisabled(t, openrouterBody)
 	if !bytes.Equal(nativeBody, body) {
 		t.Fatalf(
 			"native fallback body changed\ngot:  %s\nwant: %s",
@@ -823,14 +825,14 @@ func TestReasoningPolicyConfiguredOffOpenAIShapesPreflightFallbackHTTP(
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var basetenHits atomic.Int32
-			baseten := httptest.NewServer(http.HandlerFunc(
+			var openrouterHits atomic.Int32
+			openrouter := httptest.NewServer(http.HandlerFunc(
 				func(w http.ResponseWriter, _ *http.Request) {
-					basetenHits.Add(1)
+					openrouterHits.Add(1)
 					w.WriteHeader(http.StatusInternalServerError)
 				},
 			))
-			defer baseten.Close()
+			defer openrouter.Close()
 
 			nativeBody := make(chan []byte, 1)
 			native := httptest.NewServer(http.HandlerFunc(
@@ -843,12 +845,12 @@ func TestReasoningPolicyConfiguredOffOpenAIShapesPreflightFallbackHTTP(
 			))
 			defer native.Close()
 
-			cfg := testConfig(t, baseten.URL, baseten.URL)
+			cfg := testConfig(t, openrouter.URL, openrouter.URL)
 			cfg.OpenAIURL = native.URL
-			rc := resolvedOpenAIBaseten(t, tc.clientName, "baseten")
+			rc := resolvedOpenAIOpenRouter(t, tc.clientName, "openrouter")
 			rc.FallbackRoute = "openai"
 			rc.ModelOptions = config.ModelOptions{
-				pricing.ProviderBaseten: {
+				pricing.ProviderOpenRouter: {
 					"zai-org/GLM-5.2": {
 						Reasoning: &config.ReasoningPolicy{
 							Mode: config.ReasoningOff,
@@ -881,8 +883,8 @@ func TestReasoningPolicyConfiguredOffOpenAIShapesPreflightFallbackHTTP(
 					responseBody,
 				)
 			}
-			if basetenHits.Load() != 0 {
-				t.Fatalf("Baseten hits = %d, want preflight 0", basetenHits.Load())
+			if openrouterHits.Load() != 0 {
+				t.Fatalf("OpenRouter hits = %d, want preflight 0", openrouterHits.Load())
 			}
 			if got := <-nativeBody; !bytes.Equal(got, tc.body) {
 				t.Fatalf(
@@ -905,28 +907,18 @@ func TestReasoningPolicyConfiguredOffOpenAIShapesPreflightFallbackHTTP(
 }
 
 func TestReasoningPolicyCatalogSnapshotStableAcrossRuntimeFallback(t *testing.T) {
-	const initialCatalog = `{
-		"anthropic":{"id":"anthropic","models":{"claude-opus-4-8":{"id":"claude-opus-4-8"}}},
-		"openai":{"id":"openai","models":{"gpt-5":{"id":"gpt-5"}}},
-		"baseten":{"id":"baseten","models":{"zai-org/GLM-5.2":{
-			"id":"zai-org/GLM-5.2",
-			"name":"GLM 5.2 initial",
-			"family":"glm",
-			"reasoning":true,
-			"reasoning_options":[{"type":"toggle"}]
-		}}}
-	}`
-	const changedCatalog = `{
-		"anthropic":{"id":"anthropic","models":{"claude-opus-4-8":{"id":"claude-opus-4-8"}}},
-		"openai":{"id":"openai","models":{"gpt-5":{"id":"gpt-5"}}},
-		"baseten":{"id":"baseten","models":{"zai-org/GLM-5.2":{
-			"id":"zai-org/GLM-5.2",
-			"name":"GLM 5.2 refreshed",
-			"family":"glm",
-			"reasoning":true,
-			"reasoning_options":[{"type":"toggle"}]
-		}}}
-	}`
+	initialCatalog := strings.Replace(
+		testOpenRouterAccountCatalog,
+		`"name":"GLM 5.2"`,
+		`"name":"GLM 5.2 initial"`,
+		1,
+	)
+	changedCatalog := strings.Replace(
+		testOpenRouterAccountCatalog,
+		`"prompt":"0.000001"`,
+		`"prompt":"0.000003"`,
+		1,
+	)
 
 	restorePublicCatalogTestGlobals(t)
 	publicCatalogFailure := httptest.NewServer(http.HandlerFunc(
@@ -939,21 +931,22 @@ func TestReasoningPolicyCatalogSnapshotStableAcrossRuntimeFallback(t *testing.T)
 
 	var catalog *pricing.Pricing
 	refreshResult := make(chan error, 1)
-	baseten := httptest.NewServer(http.HandlerFunc(
+	openrouter := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/messages" {
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			refreshResult <- catalog.ReplaceModelsDev(
+			refreshResult <- catalog.ReplaceOpenRouterCatalog(
 				[]byte(changedCatalog),
+				"openrouter_models_user",
 				time.Unix(200, 0).UTC(),
-				`"changed"`,
+				"",
 			)
 			w.WriteHeader(http.StatusInternalServerError)
 		},
 	))
-	defer baseten.Close()
+	defer openrouter.Close()
 
 	native := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) {
@@ -970,11 +963,11 @@ func TestReasoningPolicyCatalogSnapshotStableAcrossRuntimeFallback(t *testing.T)
 	))
 	defer native.Close()
 
-	cfg := testConfig(t, baseten.URL, native.URL)
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	cfg := testConfig(t, openrouter.URL, native.URL)
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	rc.FallbackRoute = "anthropic"
 	rc.ModelOptions = config.ModelOptions{
-		"baseten": {
+		"openrouter": {
 			"zai-org/GLM-5.2": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -985,15 +978,16 @@ func TestReasoningPolicyCatalogSnapshotStableAcrossRuntimeFallback(t *testing.T)
 	g, adminListener, _ := newGateway(t, cfg, rc)
 	defer adminListener.Close()
 	catalog = g.pricing
-	if err := catalog.ReplaceModelsDev(
+	if err := catalog.ReplaceOpenRouterCatalog(
 		[]byte(initialCatalog),
+		"openrouter_models_user",
 		time.Unix(100, 0).UTC(),
-		`"initial"`,
+		"",
 	); err != nil {
 		t.Fatal(err)
 	}
 	initialCapability, ok := catalog.Capture().ModelReasoning(
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		"zai-org/GLM-5.2",
 	)
 	if !ok || initialCapability.Provenance.Revision == "" {
@@ -1028,7 +1022,7 @@ func TestReasoningPolicyCatalogSnapshotStableAcrossRuntimeFallback(t *testing.T)
 		t.Fatalf("publish changed catalog: %v", err)
 	}
 	changedCapability, ok := catalog.Capture().ModelReasoning(
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		"zai-org/GLM-5.2",
 	)
 	if !ok || changedCapability.Provenance.Revision == initialRevision {
@@ -1068,7 +1062,7 @@ func TestReasoningPolicyMessagesSSEStreamsBeforeCompletion(t *testing.T) {
 	defer releaseOnce.Do(func() { close(releaseCompletion) })
 
 	requestBody := make(chan []byte, 1)
-	baseten := httptest.NewServer(http.HandlerFunc(
+	openrouter := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodPost || r.URL.Path != "/v1/messages" {
 				w.WriteHeader(http.StatusServiceUnavailable)
@@ -1093,12 +1087,12 @@ func TestReasoningPolicyMessagesSSEStreamsBeforeCompletion(t *testing.T) {
 			close(upstreamComplete)
 		},
 	))
-	defer baseten.Close()
+	defer openrouter.Close()
 
-	cfg := testConfig(t, baseten.URL, "http://anthropic.invalid")
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	cfg := testConfig(t, openrouter.URL, "http://anthropic.invalid")
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	rc.ModelOptions = config.ModelOptions{
-		"baseten": {
+		"openrouter": {
 			"zai-org/GLM-5.2": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -1205,27 +1199,27 @@ func TestReasoningPolicyMessagesSSEStreamsBeforeCompletion(t *testing.T) {
 	}
 }
 
-func TestReasoningPolicyTelemetryForSuccessfulBasetenAttempt(t *testing.T) {
+func TestReasoningPolicyTelemetryForSuccessfulOpenRouterAttempt(t *testing.T) {
 	upstreamBodies := make(chan []byte, 2)
-	baseten := httptest.NewServer(http.HandlerFunc(
+	openrouter := httptest.NewServer(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			upstreamBodies <- body
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{
-				"id":"msg_baseten",
+				"id":"msg_openrouter",
 				"type":"message",
 				"role":"assistant",
-				"content":[{"type":"text","text":"baseten"}],
+				"content":[{"type":"text","text":"openrouter"}],
 				"model":"zai-org/GLM-5.2",
 				"usage":{"input_tokens":1,"output_tokens":1}
 			}`))
 		},
 	))
-	defer baseten.Close()
+	defer openrouter.Close()
 
-	cfg := testConfig(t, baseten.URL, "http://anthropic.invalid")
-	rc := resolvedAnthropicBasetenDefaultReasoning(t)
+	cfg := testConfig(t, openrouter.URL, "http://anthropic.invalid")
+	rc := resolvedAnthropicOpenRouterDefaultReasoning(t)
 	g, adminListener, _ := newGateway(
 		t,
 		cfg,

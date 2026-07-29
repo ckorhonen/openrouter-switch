@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,7 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
 const liveCatalogFixture = `{
@@ -25,12 +27,24 @@ const liveCatalogFixture = `{
   ]
 }`
 
+const catalogTestKey = "sk-or-catalog-key"
+
+func serveCatalogTestKeyValidation(
+	w http.ResponseWriter,
+	r *http.Request,
+) bool {
+	if r.URL.Path != "/v1/key" {
+		return false
+	}
+	_, _ = w.Write([]byte(`{"data":{"label":"sk-or-...test"}}`))
+	return true
+}
+
 func catalogTestGateway(server *httptest.Server) *Gateway {
 	return &Gateway{
 		cfg: Config{
-			BasetenURL:     server.URL,
-			BasetenKey:     "catalog-key",
-			APIKeyFallback: true,
+			OpenRouterURL: server.URL,
+			OpenRouterKey: catalogTestKey,
 		},
 		pricing:        pricing.New(),
 		client:         server.Client(),
@@ -38,13 +52,85 @@ func catalogTestGateway(server *httptest.Server) *Gateway {
 	}
 }
 
+func TestCatalogRefreshPublishesSafeKeyMetadata(t *testing.T) {
+	const key = "sk-or-catalog-secret"
+	expiresAt := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer "+key {
+				t.Errorf("Authorization = %q", got)
+			}
+			switch r.URL.Path {
+			case "/v1/key":
+				_, _ = w.Write([]byte(`{"data":{
+					"label":"sk-or-...masked",
+					"limit":20,
+					"limit_remaining":12.5,
+					"limit_reset":"monthly",
+					"is_free_tier":true,
+					"is_management_key":false,
+					"is_provisioning_key":true,
+					"expires_at":"2027-01-02T03:04:05Z"
+				}}`))
+			case "/v1/models/user":
+				_, _ = w.Write([]byte(liveCatalogFixture))
+			default:
+				http.NotFound(w, r)
+			}
+		},
+	))
+	defer server.Close()
+
+	g := &Gateway{
+		cfg: Config{
+			OpenRouterURL:         server.URL,
+			OpenRouterKey:         key,
+			CredentialSource:      auth.SourceKeychain,
+			CredentialFingerprint: auth.CredentialFingerprint(key),
+		},
+		pricing:        pricing.New(),
+		client:         server.Client(),
+		catalogRefresh: newCatalogRefreshManager(),
+	}
+	g.refreshAuth()
+	g.refreshCatalogOnce(context.Background())
+
+	health := g.authHealth()
+	metadata := health.Metadata
+	if health.Health != "valid" ||
+		health.Source != auth.SourceKeychain ||
+		metadata.Label != "sk-or-...masked" ||
+		metadata.Limit == nil || *metadata.Limit != 20 ||
+		metadata.LimitRemaining == nil ||
+		*metadata.LimitRemaining != 12.5 ||
+		metadata.LimitReset == nil ||
+		*metadata.LimitReset != "monthly" ||
+		!metadata.IsFreeTier ||
+		metadata.IsManagementKey ||
+		!metadata.IsProvisioningKey ||
+		metadata.ExpiresAt == nil ||
+		!metadata.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("auth health = %+v", health)
+	}
+	encoded, err := json.Marshal(authStatusJSON(health))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), key) {
+		t.Fatalf("auth status leaked API key: %s", encoded)
+	}
+}
+
 func TestCatalogRefreshPublishesLiveSnapshotWithBearer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+		if serveCatalogTestKeyValidation(w, r) {
+			return
+		}
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models/user" {
 			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer catalog-key" {
-			t.Fatalf("Authorization = %q, want Bearer catalog-key", got)
+		if got := r.Header.Get("Authorization"); got != "Bearer "+catalogTestKey {
+			t.Fatalf("Authorization = %q, want Bearer %s", got, catalogTestKey)
 		}
 		if got := r.Header.Get("Accept"); got != "application/json" {
 			t.Fatalf("Accept = %q", got)
@@ -57,11 +143,11 @@ func TestCatalogRefreshPublishesLiveSnapshotWithBearer(t *testing.T) {
 	g.cfg.ConfigPath = filepath.Join(t.TempDir(), "gateway.yaml")
 	g.refreshCatalogOnce(context.Background())
 
-	metadata := g.pricing.Capture().BasetenMetadata()
-	if metadata.Source != "baseten_v1_models" || metadata.ModelCount != 1 {
+	metadata := g.pricing.Capture().OpenRouterMetadata()
+	if metadata.Source != "openrouter_models_user" || metadata.ModelCount != 1 {
 		t.Fatalf("metadata = %+v", metadata)
 	}
-	if got := g.pricing.BasetenPrice("new/model").Prompt; got != 2 {
+	if got := g.pricing.OpenRouterPrice("new/model").Prompt; got != 2 {
 		t.Fatalf("live prompt = %v, want 2", got)
 	}
 	health := g.catalogHealth()
@@ -70,38 +156,42 @@ func TestCatalogRefreshPublishesLiveSnapshotWithBearer(t *testing.T) {
 		t.Fatalf("health = %+v", health)
 	}
 	restored := pricing.New()
-	loadProviderCatalogCaches(restored, g.cfg.ConfigPath)
+	loadProviderCatalogCaches(
+		restored,
+		g.cfg.ConfigPath,
+		configCredentialFingerprint(g.cfg),
+	)
 	if quote := restored.Quote(
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		"new/model",
 	); !quote.Priced || quote.Price.Prompt != 2 {
-		t.Fatalf("restored Baseten quote = %+v", quote)
+		t.Fatalf("restored OpenRouter quote = %+v", quote)
 	}
-	restoredMetadata := restored.Capture().BasetenMetadata()
-	if restoredMetadata.Source != "baseten_v1_models" ||
+	restoredMetadata := restored.Capture().OpenRouterMetadata()
+	if restoredMetadata.Source != "openrouter_models_user" ||
 		restoredMetadata.Revision != metadata.Revision ||
 		restoredMetadata.ModelCount != 1 ||
 		restoredMetadata.PricedModelCount != 1 {
 		t.Fatalf(
-			"cache-restored Baseten metadata = %+v, live = %+v",
+			"cache-restored OpenRouter metadata = %+v, live = %+v",
 			restoredMetadata,
 			metadata,
 		)
 	}
-	if err := restored.CheckBasetenModel("new/model"); err != nil ||
-		restored.BasetenModelCount() != 1 ||
-		restored.BasetenCount() != 1 {
+	if err := restored.CheckOpenRouterModel("new/model"); err != nil ||
+		restored.OpenRouterModelCount() != 1 ||
+		restored.OpenRouterCount() != 1 {
 		t.Fatalf(
-			"cache-restored Baseten catalog APIs disagree: check=%v models=%d prices=%d",
+			"cache-restored OpenRouter catalog APIs disagree: check=%v models=%d prices=%d",
 			err,
-			restored.BasetenModelCount(),
-			restored.BasetenCount(),
+			restored.OpenRouterModelCount(),
+			restored.OpenRouterCount(),
 		)
 	}
 	restoredGateway := &Gateway{pricing: restored}
 	restoredHealth := restoredGateway.catalogHealth()
 	if !restoredHealth.LiveHydrated ||
-		restoredHealth.Source != "baseten_v1_models" ||
+		restoredHealth.Source != "openrouter_models_user" ||
 		restoredHealth.Revision != metadata.Revision ||
 		restoredHealth.ModelCount != 1 {
 		t.Fatalf(
@@ -109,16 +199,34 @@ func TestCatalogRefreshPublishesLiveSnapshotWithBearer(t *testing.T) {
 			restoredHealth,
 		)
 	}
+
+	otherCredential := pricing.New()
+	loadProviderCatalogCaches(
+		otherCredential,
+		g.cfg.ConfigPath,
+		configCredentialFingerprint(Config{
+			OpenRouterKey: "different-catalog-key",
+		}),
+	)
+	if metadata := otherCredential.Capture().OpenRouterMetadata(); metadata.ModelCount != 0 {
+		t.Fatalf(
+			"catalog cache crossed credential boundary: %+v",
+			metadata,
+		)
+	}
 }
 
 func TestCatalogRefreshFailureRetainsLastKnownGood(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCatalogTestKeyValidation(w, r) {
+			return
+		}
 		if calls.Add(1) == 1 {
 			_, _ = w.Write([]byte(liveCatalogFixture))
 			return
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"new/model","pricing":{"prompt":-1}}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"new/model","pricing":{"prompt":-2}}]}`))
 	}))
 	defer server.Close()
 
@@ -142,7 +250,10 @@ func TestCatalogRefreshFailureRetainsLastKnownGood(t *testing.T) {
 func TestCatalogRefreshLoopAttemptsImmediatelyAndRespondsToKick(t *testing.T) {
 	var calls atomic.Int32
 	callCh := make(chan struct{}, 4)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCatalogTestKeyValidation(w, r) {
+			return
+		}
 		calls.Add(1)
 		callCh <- struct{}{}
 		_, _ = w.Write([]byte(liveCatalogFixture))
@@ -170,7 +281,10 @@ func TestCatalogRefreshLoopAttemptsImmediatelyAndRespondsToKick(t *testing.T) {
 
 func TestCatalogRefreshStopCancelsInFlightRequest(t *testing.T) {
 	entered := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveCatalogTestKeyValidation(w, r) {
+			return
+		}
 		close(entered)
 		<-r.Context().Done()
 	}))

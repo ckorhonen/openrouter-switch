@@ -11,12 +11,12 @@ type Model struct {
 	DisplayName string
 }
 
-// ResolveBaseten preserves the raw served model ID and supplies a stable,
+// ResolveOpenRouter preserves the raw served model ID and supplies a stable,
 // server-owned display name.
-func ResolveBaseten(modelID string) Model {
+func ResolveOpenRouter(modelID string) Model {
 	return Model{
 		ID:          modelID,
-		DisplayName: basetenDisplayName(modelID),
+		DisplayName: openrouterDisplayName(modelID),
 	}
 }
 
@@ -33,7 +33,7 @@ func ResolveClaudeFamily(recordedFamily, requestedModel string) Model {
 	return Model{ID: familyID, DisplayName: titleASCII(familyID)}
 }
 
-func basetenDisplayName(modelID string) string {
+func openrouterDisplayName(modelID string) string {
 	leaf := modelID
 	if slash := strings.LastIndex(leaf, "/"); slash >= 0 {
 		leaf = leaf[slash+1:]

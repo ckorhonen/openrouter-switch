@@ -10,7 +10,7 @@ import (
 
 func glmInput() Input {
 	return Input{
-		Provider: "baseten", CanonicalModelID: "zai-org/GLM-5.2",
+		Provider: "openrouter", CanonicalModelID: "zai-org/GLM-5.2",
 		WireShape: WireAnthropicMessages,
 		Capability: Capability{
 			Known: true, Supported: true, Toggle: true,

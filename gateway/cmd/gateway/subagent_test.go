@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 // subagentAgentIDHeader mirrors the gateway const so tests stay
@@ -29,12 +29,12 @@ const subagentAgentIDHeaderTest = "x-claude-code-agent-id"
 // given route.
 func subagentClient(t *testing.T, rt, model, routing string) resolvedClientConfig {
 	t.Helper()
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = rt
-	rc.GlobalRoutingEnabled = rt == "baseten"
+	rc.GlobalRoutingEnabled = rt == "openrouter"
 	rc.ModelAliases = map[string]string{
-		"claude-baseten-glm-5-2": "zai-org/GLM-5.2",
-		"anthropic-baseten-kimi": "moonshotai/Kimi-K2.7-Code",
+		"claude-openrouter-glm-5-2": "zai-org/GLM-5.2",
+		"anthropic-openrouter-kimi": "moonshotai/Kimi-K2.7-Code",
 	}
 	rc.SubagentModel = model
 	rc.SubagentRouting = routing
@@ -84,9 +84,9 @@ func postMessagesRaw(t *testing.T, g *Gateway, body []byte, agentID string) (*ht
 	return resp, rb
 }
 
-// basetenStub returns an httptest server that records the model it
+// openrouterStub returns an httptest server that records the model it
 // received and replies with a 200 anthropic-shape message.
-func basetenStub(t *testing.T, gotModel chan string) *httptest.Server {
+func openrouterStub(t *testing.T, gotModel chan string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -96,7 +96,7 @@ func basetenStub(t *testing.T, gotModel chan string) *httptest.Server {
 			gotModel <- fmtString(m["model"])
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"VIA-BASETEN"}],"model":"zai-org/GLM-5.2","usage":{"input_tokens":5,"output_tokens":1}}`))
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"VIA-OPENROUTER"}],"model":"zai-org/GLM-5.2","usage":{"input_tokens":5,"output_tokens":1}}`))
 	}))
 }
 
@@ -141,34 +141,34 @@ func TestSubagentMatrix(t *testing.T) {
 	}{
 		// --- toggle ON, header present ---
 		{
-			name: "on/alias/baseten", header: "agent-1", model: "claude-baseten-glm-5-2", routing: "on",
-			route: "baseten", reqModel: "claude-opus-4-8",
-			wantUp: "zai-org/GLM-5.2", wantRoute: "baseten", wantEff: "",
-			wantSub: true, wantSubM: "claude-baseten-glm-5-2", wantReq: "claude-opus-4-8",
+			name: "on/alias/openrouter", header: "agent-1", model: "claude-openrouter-glm-5-2", routing: "on",
+			route: "openrouter", reqModel: "claude-opus-4-8",
+			wantUp: "zai-org/GLM-5.2", wantRoute: "openrouter", wantEff: "",
+			wantSub: true, wantSubM: "claude-openrouter-glm-5-2", wantReq: "claude-opus-4-8",
 		},
 		{
-			name: "on/alias/anthropic", header: "agent-1", model: "claude-baseten-glm-5-2", routing: "on",
+			name: "on/alias/anthropic", header: "agent-1", model: "claude-openrouter-glm-5-2", routing: "on",
 			route: "anthropic", reqModel: "claude-opus-4-8",
-			wantUp: "zai-org/GLM-5.2", wantRoute: "anthropic", wantEff: "baseten",
-			wantSub: true, wantSubM: "claude-baseten-glm-5-2", wantReq: "claude-opus-4-8",
+			wantUp: "zai-org/GLM-5.2", wantRoute: "anthropic", wantEff: "openrouter",
+			wantSub: true, wantSubM: "claude-openrouter-glm-5-2", wantReq: "claude-opus-4-8",
 		},
 		{
-			name: "on/slug/baseten", header: "agent-1", model: "moonshotai/Kimi-K2.7-Code", routing: "on",
-			route: "baseten", reqModel: "claude-opus-4-8",
-			wantUp: "moonshotai/Kimi-K2.7-Code", wantRoute: "baseten", wantEff: "",
+			name: "on/slug/openrouter", header: "agent-1", model: "moonshotai/Kimi-K2.7-Code", routing: "on",
+			route: "openrouter", reqModel: "claude-opus-4-8",
+			wantUp: "moonshotai/Kimi-K2.7-Code", wantRoute: "openrouter", wantEff: "",
 			wantSub: true, wantSubM: "moonshotai/Kimi-K2.7-Code", wantReq: "claude-opus-4-8",
 		},
 		{
 			name: "on/slug/anthropic", header: "agent-1", model: "moonshotai/Kimi-K2.7-Code", routing: "on",
 			route: "anthropic", reqModel: "claude-opus-4-8",
-			wantUp: "moonshotai/Kimi-K2.7-Code", wantRoute: "anthropic", wantEff: "baseten",
+			wantUp: "moonshotai/Kimi-K2.7-Code", wantRoute: "anthropic", wantEff: "openrouter",
 			wantSub: true, wantSubM: "moonshotai/Kimi-K2.7-Code", wantReq: "claude-opus-4-8",
 		},
 		{
-			name: "on/native/baseten", header: "agent-1", model: "claude-sonnet-4-6", routing: "on",
-			route: "baseten", reqModel: "claude-opus-4-8",
-			// Native target on Baseten route: default-model rewrite applies.
-			wantUp: "zai-org/GLM-5.2", wantRoute: "baseten", wantEff: "",
+			name: "on/native/openrouter", header: "agent-1", model: "claude-sonnet-4-6", routing: "on",
+			route: "openrouter", reqModel: "claude-opus-4-8",
+			// Native target on OpenRouter route: default-model rewrite applies.
+			wantUp: "zai-org/GLM-5.2", wantRoute: "openrouter", wantEff: "",
 			wantSub: true, wantSubM: "claude-sonnet-4-6", wantReq: "claude-opus-4-8",
 		},
 		{
@@ -180,14 +180,14 @@ func TestSubagentMatrix(t *testing.T) {
 		},
 		// --- toggle ON, header ABSENT (main thread) ---
 		{
-			name: "on/noheader/baseten", header: "", model: "claude-baseten-glm-5-2", routing: "on",
-			route: "baseten", reqModel: "claude-opus-4-8",
+			name: "on/noheader/openrouter", header: "", model: "claude-openrouter-glm-5-2", routing: "on",
+			route: "openrouter", reqModel: "claude-opus-4-8",
 			// No header: no subagent rewrite; the default model applies.
-			wantUp: "zai-org/GLM-5.2", wantRoute: "baseten", wantEff: "",
+			wantUp: "zai-org/GLM-5.2", wantRoute: "openrouter", wantEff: "",
 			wantSub: false, wantSubM: "", wantReq: "claude-opus-4-8",
 		},
 		{
-			name: "on/noheader/anthropic", header: "", model: "claude-baseten-glm-5-2", routing: "on",
+			name: "on/noheader/anthropic", header: "", model: "claude-openrouter-glm-5-2", routing: "on",
 			route: "anthropic", reqModel: "claude-opus-4-8",
 			// No header: passthrough of original model.
 			wantUp: "claude-opus-4-8", wantRoute: "anthropic", wantEff: "",
@@ -195,14 +195,14 @@ func TestSubagentMatrix(t *testing.T) {
 		},
 		// --- toggle OFF, header present ---
 		{
-			name: "off/header/baseten", header: "agent-1", model: "claude-baseten-glm-5-2", routing: "off",
-			route: "baseten", reqModel: "claude-opus-4-8",
+			name: "off/header/openrouter", header: "agent-1", model: "claude-openrouter-glm-5-2", routing: "off",
+			route: "openrouter", reqModel: "claude-opus-4-8",
 			// Toggle off: no subagent rewrite; the default model applies, but subagent flag remains set.
-			wantUp: "zai-org/GLM-5.2", wantRoute: "baseten", wantEff: "",
+			wantUp: "zai-org/GLM-5.2", wantRoute: "openrouter", wantEff: "",
 			wantSub: true, wantSubM: "", wantReq: "claude-opus-4-8",
 		},
 		{
-			name: "off/header/anthropic", header: "agent-1", model: "claude-baseten-glm-5-2", routing: "off",
+			name: "off/header/anthropic", header: "agent-1", model: "claude-openrouter-glm-5-2", routing: "off",
 			route: "anthropic", reqModel: "claude-opus-4-8",
 			// Toggle off, switch off: passthrough of original model.
 			wantUp: "claude-opus-4-8", wantRoute: "anthropic", wantEff: "",
@@ -210,22 +210,22 @@ func TestSubagentMatrix(t *testing.T) {
 		},
 		// --- toggle UNSET (absent = on), header present ---
 		{
-			name: "unset/header/baseten", header: "agent-1", model: "claude-baseten-glm-5-2", routing: "",
-			route: "baseten", reqModel: "claude-opus-4-8",
-			wantUp: "zai-org/GLM-5.2", wantRoute: "baseten", wantEff: "",
-			wantSub: true, wantSubM: "claude-baseten-glm-5-2", wantReq: "claude-opus-4-8",
+			name: "unset/header/openrouter", header: "agent-1", model: "claude-openrouter-glm-5-2", routing: "",
+			route: "openrouter", reqModel: "claude-opus-4-8",
+			wantUp: "zai-org/GLM-5.2", wantRoute: "openrouter", wantEff: "",
+			wantSub: true, wantSubM: "claude-openrouter-glm-5-2", wantReq: "claude-opus-4-8",
 		},
 		// --- subagent_model UNSET, header present (no rewrite) ---
 		{
-			name: "nomodel/header/baseten", header: "agent-1", model: "", routing: "",
-			route: "baseten", reqModel: "claude-opus-4-8",
-			wantUp: "zai-org/GLM-5.2", wantRoute: "baseten", wantEff: "",
+			name: "nomodel/header/openrouter", header: "agent-1", model: "", routing: "",
+			route: "openrouter", reqModel: "claude-opus-4-8",
+			wantUp: "zai-org/GLM-5.2", wantRoute: "openrouter", wantEff: "",
 			wantSub: true, wantSubM: "", wantReq: "claude-opus-4-8",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gotModel := make(chan string, 1)
-			basSrv := basetenStub(t, gotModel)
+			basSrv := openrouterStub(t, gotModel)
 			defer basSrv.Close()
 			antSrv := anthropicStub(t, gotModel, nil)
 			defer antSrv.Close()
@@ -287,8 +287,8 @@ func TestSubagentPassthroughByteIdentical(t *testing.T) {
 		model   string
 		routing string
 	}{
-		{"no header", "", "claude-baseten-glm-5-2", "on"},
-		{"header but toggle off", "agent-1", "claude-baseten-glm-5-2", "off"},
+		{"no header", "", "claude-openrouter-glm-5-2", "on"},
+		{"header but toggle off", "agent-1", "claude-openrouter-glm-5-2", "off"},
 		{"header but no model", "agent-1", "", ""},
 		{"no header no model", "", "", ""},
 	} {
@@ -328,7 +328,7 @@ func TestSubagentPassthroughByteIdentical(t *testing.T) {
 }
 
 // TestSubagentAliasNoSilentFallback extends TestAliasRequestNoSilentFallback:
-// an alias-target subagent rewrite is a single baseten attempt. It never
+// an alias-target subagent rewrite is a single openrouter attempt. It never
 // falls back to the configured fallback_route, and it bypasses an active
 // fallback cooldown. The cooldown is established between the two alias
 // requests by a native-model request (no agent-id header) that gets the
@@ -338,7 +338,9 @@ func TestSubagentPassthroughByteIdentical(t *testing.T) {
 func TestSubagentAliasNoSilentFallback(t *testing.T) {
 	var primaryHits, fbHits int32
 	basSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&primaryHits, 1)
+		if r.URL.Path == "/v1/messages" {
+			atomic.AddInt32(&primaryHits, 1)
+		}
 		w.WriteHeader(503)
 		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`))
 	}))
@@ -350,7 +352,7 @@ func TestSubagentAliasNoSilentFallback(t *testing.T) {
 	}))
 	defer antSrv.Close()
 	cfg := testConfig(t, basSrv.URL, antSrv.URL)
-	rc := subagentClient(t, "baseten", "claude-baseten-glm-5-2", "on")
+	rc := subagentClient(t, "openrouter", "claude-openrouter-glm-5-2", "on")
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -375,7 +377,7 @@ func TestSubagentAliasNoSilentFallback(t *testing.T) {
 		t.Fatalf("native request should have fallen back once, got %d", n)
 	}
 	// Subagent alias request during the now-active cooldown still goes to
-	// baseten: the explicit alias attempt returns before the fallbackActive
+	// openrouter: the explicit alias attempt returns before the fallbackActive
 	// check in resolveAttemptsLadder, so the cooldown is bypassed.
 	resp, _ = postMessagesWithAgent(t, g, "claude-opus-4-8", "agent-1")
 	if resp.StatusCode != 503 {
@@ -384,8 +386,8 @@ func TestSubagentAliasNoSilentFallback(t *testing.T) {
 	if n := atomic.LoadInt32(&fbHits); n != 1 {
 		t.Fatalf("subagent alias during cooldown must not fall back; fallback hits = %d", n)
 	}
-	if n := atomic.LoadInt32(&primaryHits); n != 3 {
-		t.Fatalf("primary hits = %d, want 3 (two subagent alias + one native)", n)
+	if n := atomic.LoadInt32(&primaryHits); n != 6 {
+		t.Fatalf("primary hits = %d, want 6 (three requests with immediate retries)", n)
 	}
 }
 
@@ -407,7 +409,7 @@ func TestSubagentNativeTargetFallbackWaterfall(t *testing.T) {
 	}))
 	defer antSrv.Close()
 	cfg := testConfig(t, basSrv.URL, antSrv.URL)
-	rc := subagentClient(t, "baseten", "claude-sonnet-4-6", "on")
+	rc := subagentClient(t, "openrouter", "claude-sonnet-4-6", "on")
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -440,7 +442,7 @@ func TestSubagentNativeTargetFallbackWaterfall(t *testing.T) {
 // listener). The subagent rewrite goes from inactive to active.
 func TestSubagentSIGHUPReloadFlipsRouting(t *testing.T) {
 	gotModel := make(chan string, 1)
-	basSrv := basetenStub(t, gotModel)
+	basSrv := openrouterStub(t, gotModel)
 	defer basSrv.Close()
 	antSrv := anthropicStub(t, gotModel, nil)
 	defer antSrv.Close()
@@ -450,7 +452,7 @@ func TestSubagentSIGHUPReloadFlipsRouting(t *testing.T) {
 	bindAddr := "127.0.0.1:" + itoa(port)
 	cfg.ConfigPath = filepath.Join(t.TempDir(), "gateway.yaml")
 
-	rc := subagentClient(t, "baseten", "anthropic-baseten-kimi", "off")
+	rc := subagentClient(t, "openrouter", "anthropic-openrouter-kimi", "off")
 	rc.BindAddr = bindAddr
 	writeSubagentYAML(t, cfg.ConfigPath, rc)
 
@@ -459,7 +461,7 @@ func TestSubagentSIGHUPReloadFlipsRouting(t *testing.T) {
 	stop := start(t, g)
 	defer stop()
 
-	// Before reload: toggle off, so the normal global Baseten mapping
+	// Before reload: toggle off, so the normal global OpenRouter mapping
 	// sends the request to GLM-5.2.
 	resp, _ := postMessagesWithAgent(t, g, "claude-opus-4-8", "agent-1")
 	if resp.StatusCode != 200 {
@@ -515,14 +517,14 @@ func TestSubagentSIGHUPReloadFlipsRouting(t *testing.T) {
 	if !last.Subagent {
 		t.Errorf("post-reload subagent flag should be true")
 	}
-	if valueOrZero(last.SubagentModel) != "anthropic-baseten-kimi" {
-		t.Errorf("post-reload subagent_model = %q, want anthropic-baseten-kimi", valueOrZero(last.SubagentModel))
+	if valueOrZero(last.SubagentModel) != "anthropic-openrouter-kimi" {
+		t.Errorf("post-reload subagent_model = %q, want anthropic-openrouter-kimi", valueOrZero(last.SubagentModel))
 	}
 	if last.RequestedModel != "claude-opus-4-8" {
 		t.Errorf("post-reload requested_model = %q, want original claude-opus-4-8", last.RequestedModel)
 	}
-	if last.EffectiveProvider != "baseten" {
-		t.Errorf("post-reload route_effective = %q, want baseten", last.EffectiveProvider)
+	if last.EffectiveProvider != "openrouter" {
+		t.Errorf("post-reload route_effective = %q, want openrouter", last.EffectiveProvider)
 	}
 }
 
@@ -534,10 +536,10 @@ func TestSubagentHashCoversSubagentFields(t *testing.T) {
 		Name:          "claude-code",
 		BindAddr:      "127.0.0.1:18081",
 		ProtocolShape: "anthropic",
-		Route:         "baseten",
+		Route:         "openrouter",
 	}
 	a := base
-	a.SubagentModel = "claude-baseten-glm-5-2"
+	a.SubagentModel = "claude-openrouter-glm-5-2"
 	if base.hash() == a.hash() {
 		t.Fatal("hash must change when subagent_model is set")
 	}
@@ -562,11 +564,11 @@ func TestSubagentHashCoversSubagentFields(t *testing.T) {
 // fields in both the config-readable and snapshot fallback branches.
 func TestSubagentAdminStatusFields(t *testing.T) {
 	t.Run("config readable", func(t *testing.T) {
-		basSrv := basetenStub(t, nil)
+		basSrv := openrouterStub(t, nil)
 		defer basSrv.Close()
 		cfg := testConfig(t, basSrv.URL, basSrv.URL)
 		cfg.ConfigPath = filepath.Join(t.TempDir(), "gateway.yaml")
-		rc := subagentClient(t, "baseten", "claude-baseten-glm-5-2", "on")
+		rc := subagentClient(t, "openrouter", "claude-openrouter-glm-5-2", "on")
 		writeSubagentYAML(t, cfg.ConfigPath, rc)
 		g, adminL, _ := newGateway(t, cfg, rc)
 		defer adminL.Close()
@@ -579,21 +581,21 @@ func TestSubagentAdminStatusFields(t *testing.T) {
 			t.Fatal("no clients in admin status")
 		}
 		c := clients[0].(map[string]any)
-		if c["subagent_model"] != "claude-baseten-glm-5-2" {
-			t.Errorf("subagent_model = %v, want claude-baseten-glm-5-2", c["subagent_model"])
+		if c["subagent_model"] != "claude-openrouter-glm-5-2" {
+			t.Errorf("subagent_model = %v, want claude-openrouter-glm-5-2", c["subagent_model"])
 		}
 		if c["subagent_routing"] != "on" {
 			t.Errorf("subagent_routing = %v, want on", c["subagent_routing"])
 		}
 	})
 	t.Run("snapshot fallback", func(t *testing.T) {
-		basSrv := basetenStub(t, nil)
+		basSrv := openrouterStub(t, nil)
 		defer basSrv.Close()
 		cfg := testConfig(t, basSrv.URL, basSrv.URL)
 		// Point ConfigPath at a nonexistent path so config.Load fails
 		// and adminStatus falls to the snapshot branch.
 		cfg.ConfigPath = filepath.Join(t.TempDir(), "nonexistent.yaml")
-		rc := subagentClient(t, "baseten", "claude-baseten-glm-5-2", "on")
+		rc := subagentClient(t, "openrouter", "claude-openrouter-glm-5-2", "on")
 		g, adminL, _ := newGateway(t, cfg, rc)
 		defer adminL.Close()
 		stop := start(t, g)
@@ -605,8 +607,8 @@ func TestSubagentAdminStatusFields(t *testing.T) {
 			t.Fatal("no clients in admin status")
 		}
 		c := clients[0].(map[string]any)
-		if c["subagent_model"] != "claude-baseten-glm-5-2" {
-			t.Errorf("subagent_model = %v, want claude-baseten-glm-5-2", c["subagent_model"])
+		if c["subagent_model"] != "claude-openrouter-glm-5-2" {
+			t.Errorf("subagent_model = %v, want claude-openrouter-glm-5-2", c["subagent_model"])
 		}
 		if c["subagent_routing"] != "on" {
 			t.Errorf("subagent_routing = %v, want on", c["subagent_routing"])
@@ -627,7 +629,7 @@ func TestSubagentConfigValidation(t *testing.T) {
 			BindAddr:      "127.0.0.1:0",
 			ProtocolShape: "anthropic",
 			DefaultModel:  "zai-org/GLM-5.2",
-			ModelAliases:  map[string]string{"claude-baseten-glm-5-2": "zai-org/GLM-5.2"},
+			ModelAliases:  map[string]string{"claude-openrouter-glm-5-2": "zai-org/GLM-5.2"},
 		}
 		mut(&c)
 		return &config.File{
@@ -643,7 +645,7 @@ func TestSubagentConfigValidation(t *testing.T) {
 		wantErr string
 	}{
 		{"valid alias", func(c *config.Client) {
-			c.SubagentModel = "claude-baseten-glm-5-2"
+			c.SubagentModel = "claude-openrouter-glm-5-2"
 		}, ""},
 		{"valid slug", func(c *config.Client) {
 			c.SubagentModel = "moonshotai/Kimi-K2.7-Code"
@@ -652,11 +654,11 @@ func TestSubagentConfigValidation(t *testing.T) {
 			c.SubagentModel = "claude-sonnet-4-6"
 		}, ""},
 		{"valid routing on", func(c *config.Client) {
-			c.SubagentModel = "claude-baseten-glm-5-2"
+			c.SubagentModel = "claude-openrouter-glm-5-2"
 			c.SubagentRouting = "on"
 		}, ""},
 		{"valid routing off", func(c *config.Client) {
-			c.SubagentModel = "claude-baseten-glm-5-2"
+			c.SubagentModel = "claude-openrouter-glm-5-2"
 			c.SubagentRouting = "off"
 		}, ""},
 		{"unset is ok", func(c *config.Client) {}, ""},
@@ -665,24 +667,24 @@ func TestSubagentConfigValidation(t *testing.T) {
 			// fire first (its own shape guard), so this case exercises that
 			// guard, not validateSubagentConfig's.
 			c.ProtocolShape = "openai"
-			c.SubagentModel = "claude-baseten-glm-5-2"
+			c.SubagentModel = "claude-openrouter-glm-5-2"
 		}, "protocol_shape anthropic"},
 		{"non-anthropic shape", func(c *config.Client) {
 			// Clear ModelAliases so validateModelAliases is a no-op and
 			// validateSubagentConfig's own shape guard is reached.
 			c.ModelAliases = map[string]string{}
 			c.ProtocolShape = "openai"
-			c.SubagentModel = "claude-baseten-glm-5-2"
+			c.SubagentModel = "claude-openrouter-glm-5-2"
 		}, "subagent_model requires protocol_shape anthropic"},
 		{"bad routing value", func(c *config.Client) {
-			c.SubagentModel = "claude-baseten-glm-5-2"
+			c.SubagentModel = "claude-openrouter-glm-5-2"
 			c.SubagentRouting = "maybe"
 		}, "must be"},
 		{"routing without model", func(c *config.Client) {
 			c.SubagentRouting = "on"
 		}, "subagent_model is empty"},
 		{"alias namespace absent from model_aliases", func(c *config.Client) {
-			c.SubagentModel = "claude-baseten-removed"
+			c.SubagentModel = "claude-openrouter-removed"
 		}, "absent from model_aliases"},
 		{"not any of three classes", func(c *config.Client) {
 			c.SubagentModel = "gpt-4-turbo"
@@ -723,13 +725,13 @@ func TestSubagentUnparseableBodySkipsRewrite(t *testing.T) {
 	}))
 	defer basSrv.Close()
 	cfg := testConfig(t, basSrv.URL, basSrv.URL)
-	rc := subagentClient(t, "baseten", "claude-baseten-glm-5-2", "on")
+	rc := subagentClient(t, "openrouter", "claude-openrouter-glm-5-2", "on")
 	// Keep this test focused on the subagent gate's malformed-body
 	// passthrough contract by selecting Follow Harness for the default
 	// toggle model. Default Off cannot rewrite malformed JSON.
 	rc.DefaultModel = "moonshotai/Kimi-K2.7-Code"
 	rc.ModelOptions = config.ModelOptions{
-		"baseten": {
+		"openrouter": {
 			"moonshotai/Kimi-K2.7-Code": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -768,10 +770,10 @@ func TestSubagentUnparseableBodySkipsRewrite(t *testing.T) {
 // telemetry is the original harness model even after the rewrite,
 // across target classes. This is the spec's telemetry invariant.
 func TestSubagentRequestedModelPreserved(t *testing.T) {
-	for _, target := range []string{"claude-baseten-glm-5-2", "moonshotai/Kimi-K2.7-Code", "claude-sonnet-4-6"} {
+	for _, target := range []string{"claude-openrouter-glm-5-2", "moonshotai/Kimi-K2.7-Code", "claude-sonnet-4-6"} {
 		t.Run(target, func(t *testing.T) {
 			gotModel := make(chan string, 1)
-			basSrv := basetenStub(t, gotModel)
+			basSrv := openrouterStub(t, gotModel)
 			defer basSrv.Close()
 			antSrv := anthropicStub(t, gotModel, nil)
 			defer antSrv.Close()
@@ -807,10 +809,10 @@ func TestSubagentRequestedModelPreserved(t *testing.T) {
 // request therefore uses the configured Sonnet family route.
 func TestSubagentNativeTargetFamilyRoute(t *testing.T) {
 	gotModel := make(chan string, 1)
-	basSrv := basetenStub(t, gotModel)
+	basSrv := openrouterStub(t, gotModel)
 	defer basSrv.Close()
 	cfg := testConfig(t, basSrv.URL, basSrv.URL)
-	rc := subagentClient(t, "baseten", "claude-sonnet-4-6", "on")
+	rc := subagentClient(t, "openrouter", "claude-sonnet-4-6", "on")
 	rc.ModelRoutes = map[string]string{"sonnet": "moonshotai/Kimi-K2.7-Code"}
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -843,7 +845,7 @@ func TestSubagentNativeTargetFamilyRoute(t *testing.T) {
 // including model_aliases, subagent_model, and subagent_routing.
 func writeSubagentYAML(t *testing.T, path string, rc resolvedClientConfig) {
 	t.Helper()
-	enabled := rc.Route == "baseten"
+	enabled := rc.Route == "openrouter"
 	f := config.File{Global: config.Global{
 		RoutingEnabled: &enabled,
 	}}

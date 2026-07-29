@@ -1,7 +1,7 @@
 // Package doorcli is the front door entrypoint, invoked as
-// `baseten-switch door`: a tiny static
+// `openrouter-switch door`: a tiny static
 // reverse proxy that owns the harness-facing ports, forwarding to the
-// Baseten Switch router process when healthy and to the native upstream when
+// OpenRouter Switch router process when healthy and to the native upstream when
 // tripped. Port specs come from gateway.yaml's door: section by
 // default; explicit --port flags override the config file. It absorbs
 // the lifecycle contract into the single public executable.
@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/door"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pidfile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/door"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pidfile"
 )
 
 type portList []door.PortSpec
@@ -42,7 +42,7 @@ func (p *portList) Set(s string) error {
 	return nil
 }
 
-// Options is the parsed flag surface of `baseten-switch door`: --config,
+// Options is the parsed flag surface of `openrouter-switch door`: --config,
 // --port, --cooldown, --probe-interval, --anthropic-url, and --openai-url.
 type Options struct {
 	Ports         []door.PortSpec
@@ -60,18 +60,18 @@ type Options struct {
 // ParseFlags parses the door flag surface without any side effects
 // beyond writing parse errors and usage to errOut.
 func ParseFlags(args []string, errOut io.Writer) (*Options, error) {
-	fs := flag.NewFlagSet("baseten-switch door", flag.ContinueOnError)
+	fs := flag.NewFlagSet("openrouter-switch door", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: baseten-switch door [--config PATH | --port PORT=shape:routerHost:routerPort ...] [flags]
+		fmt.Fprintf(fs.Output(), `Usage: openrouter-switch door [--config PATH | --port PORT=shape:routerHost:routerPort ...] [flags]
 
 Without --port flags, port specs come from the gateway.yaml door:
-section (--config, else $BASETEN_SWITCH_CONFIG_PATH, else %s)
+section (--config, else $OPENROUTER_SWITCH_CONFIG_PATH, else %s)
 and SIGHUP re-reads it. Explicit --port flags override the config file
 entirely; SIGHUP is then a no-op.
 
 Example (flags mode):
-  baseten-switch door \
+  openrouter-switch door \
     --port 45271=anthropic:127.0.0.1:45272
 
 Flags:
@@ -80,7 +80,7 @@ Flags:
 	}
 	var ports portList
 	fs.Var(&ports, "port", "listener spec PORT=shape:routerHost:routerPort (repeatable; shape: anthropic|openai; overrides --config)")
-	configPath := fs.String("config", "", "gateway.yaml with a door: section (default: $BASETEN_SWITCH_CONFIG_PATH, else the standard path)")
+	configPath := fs.String("config", "", "gateway.yaml with a door: section (default: $OPENROUTER_SWITCH_CONFIG_PATH, else the standard path)")
 	cooldown := fs.Duration("cooldown", door.DefaultCooldown, "after a trip, requests skip the router for this long (flags mode; config mode uses door.cooldown)")
 	probeInterval := fs.Duration("probe-interval", door.DefaultProbeInterval, "router /healthz probe interval (flags mode; config mode uses door.probe_interval)")
 	anthropicURL := fs.String("anthropic-url", door.DefaultAnthropicBase, "fallback base URL for anthropic-shape ports")
@@ -108,7 +108,7 @@ Flags:
 func BuildSpecs(opts *Options, errOut io.Writer) (specs []door.Config, cfgPath string, err error) {
 	dopts := door.SpecsOptions{AnthropicBase: opts.AnthropicURL, OpenAIBase: opts.OpenAIURL}
 	if len(opts.Ports) > 0 {
-		fmt.Fprintf(errOut, "[baseten-switch door] --port flags set; gateway.yaml config ignored\n")
+		fmt.Fprintf(errOut, "[openrouter-switch door] --port flags set; gateway.yaml config ignored\n")
 		if err := door.ValidatePortSpecs(opts.Ports); err != nil {
 			return nil, "", err
 		}
@@ -135,11 +135,11 @@ func BuildSpecs(opts *Options, errOut io.Writer) (specs []door.Config, cfgPath s
 		return specs, "", nil
 	}
 	if opts.Explicit["cooldown"] || opts.Explicit["probe-interval"] {
-		fmt.Fprintf(errOut, "[baseten-switch door] --cooldown/--probe-interval ignored in config mode; set door.cooldown / door.probe_interval\n")
+		fmt.Fprintf(errOut, "[openrouter-switch door] --cooldown/--probe-interval ignored in config mode; set door.cooldown / door.probe_interval\n")
 	}
 	cfgPath = opts.ConfigPath
 	if cfgPath == "" {
-		cfgPath = os.Getenv("BASETEN_SWITCH_CONFIG_PATH")
+		cfgPath = os.Getenv("OPENROUTER_SWITCH_CONFIG_PATH")
 	}
 	if cfgPath == "" {
 		cfgPath = config.DefaultPath()
@@ -152,14 +152,14 @@ func BuildSpecs(opts *Options, errOut io.Writer) (specs []door.Config, cfgPath s
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: %v (add a door: section to the config or pass --port flags)", cfgPath, err)
 	}
-	fmt.Fprintf(errOut, "[baseten-switch door] config %s: %d door port(s)\n", cfgPath, len(specs))
+	fmt.Fprintf(errOut, "[openrouter-switch door] config %s: %d door port(s)\n", cfgPath, len(specs))
 	return specs, cfgPath, nil
 }
 
-// Run is the `baseten-switch door` entrypoint. It serves until SIGTERM or
+// Run is the `openrouter-switch door` entrypoint. It serves until SIGTERM or
 // SIGINT; SIGHUP re-reads the config in config mode. It writes the
-// door pidfile (BASETEN_SWITCH_DOOR_PIDFILE, default ~/.config/baseten-switch/door.pid)
-// once every port is bound, so `baseten-switch down` can manage doors
+// door pidfile (OPENROUTER_SWITCH_DOOR_PIDFILE, default ~/.config/openrouter-switch/door.pid)
+// once every port is bound, so `openrouter-switch down` can manage doors
 // regardless of who started them.
 func Run(args []string) int {
 	opts, err := ParseFlags(args, os.Stderr)
@@ -167,7 +167,7 @@ func Run(args []string) int {
 		return 2
 	}
 	fail := func(msg string) int {
-		fmt.Fprintf(os.Stderr, "baseten-switch door: %s\n\n", msg)
+		fmt.Fprintf(os.Stderr, "openrouter-switch door: %s\n\n", msg)
 		opts.usage()
 		return 2
 	}
@@ -183,7 +183,7 @@ func Run(args []string) int {
 	for _, sp := range specs {
 		d, err := startOne(sp, serveErr)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "baseten-switch door: %v\n", err)
+			fmt.Fprintf(os.Stderr, "openrouter-switch door: %v\n", err)
 			shutdownAll(doors)
 			return 1
 		}
@@ -192,7 +192,7 @@ func Run(args []string) int {
 
 	pf := pidfile.DoorPath()
 	if err := pidfile.WriteAt(pf, os.Getpid()); err != nil {
-		fmt.Fprintf(os.Stderr, "baseten-switch door: write pidfile %s: %v\n", pf, err)
+		fmt.Fprintf(os.Stderr, "openrouter-switch door: write pidfile %s: %v\n", pf, err)
 		shutdownAll(doors)
 		return 1
 	}
@@ -205,17 +205,17 @@ func Run(args []string) int {
 		case sig := <-sc:
 			if sig == syscall.SIGHUP {
 				if flagsMode {
-					fmt.Fprintf(os.Stderr, "[baseten-switch door] SIGHUP ignored: ports came from --port flags, not a config file\n")
+					fmt.Fprintf(os.Stderr, "[openrouter-switch door] SIGHUP ignored: ports came from --port flags, not a config file\n")
 					continue
 				}
 				specs = reload(cfgPath, dopts, specs, doors, serveErr)
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "[baseten-switch door] %s: draining and shutting down\n", sig)
+			fmt.Fprintf(os.Stderr, "[openrouter-switch door] %s: draining and shutting down\n", sig)
 			shutdownAll(doors)
 			return 0
 		case err := <-serveErr:
-			fmt.Fprintf(os.Stderr, "baseten-switch door: %v\n", err)
+			fmt.Fprintf(os.Stderr, "openrouter-switch door: %v\n", err)
 			return 1
 		}
 	}
@@ -236,7 +236,7 @@ func startOne(cfg door.Config, serveErr chan<- error) (*door.Door, error) {
 			serveErr <- fmt.Errorf("%s: %w", cfg.ListenAddr, err)
 		}
 	}()
-	fmt.Fprintf(os.Stderr, "[baseten-switch door] listening on %s (%s) -> router %s, fallback %s\n",
+	fmt.Fprintf(os.Stderr, "[openrouter-switch door] listening on %s (%s) -> router %s, fallback %s\n",
 		d.Addr(), cfg.Shape, cfg.RouterTarget, describeFallback(cfg))
 	return d, nil
 }
@@ -258,17 +258,17 @@ func describeFallback(cfg door.Config) string {
 func reload(path string, opts door.SpecsOptions, current []door.Config, doors map[string]*door.Door, serveErr chan<- error) []door.Config {
 	f, err := config.Load(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[baseten-switch door] SIGHUP: %v; keeping current ports\n", err)
+		fmt.Fprintf(os.Stderr, "[openrouter-switch door] SIGHUP: %v; keeping current ports\n", err)
 		return current
 	}
 	next, err := door.SpecsFromConfig(f, opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[baseten-switch door] SIGHUP: %s: %v; keeping current ports\n", path, err)
+		fmt.Fprintf(os.Stderr, "[openrouter-switch door] SIGHUP: %s: %v; keeping current ports\n", path, err)
 		return current
 	}
 	added, removed, unchanged := door.DiffSpecs(current, next)
 	if len(added) == 0 && len(removed) == 0 {
-		fmt.Fprintf(os.Stderr, "[baseten-switch door] SIGHUP: config unchanged (%d port(s))\n", len(unchanged))
+		fmt.Fprintf(os.Stderr, "[openrouter-switch door] SIGHUP: config unchanged (%d port(s))\n", len(unchanged))
 		return current
 	}
 	// Removed ports shut down before added ones bind so a changed spec
@@ -282,19 +282,19 @@ func reload(path string, opts door.SpecsOptions, current []door.Config, doors ma
 		_ = d.Shutdown(ctx)
 		cancel()
 		delete(doors, sp.ListenAddr)
-		fmt.Fprintf(os.Stderr, "[baseten-switch door] SIGHUP: stopped %s (%s)\n", sp.ListenAddr, sp.Shape)
+		fmt.Fprintf(os.Stderr, "[openrouter-switch door] SIGHUP: stopped %s (%s)\n", sp.ListenAddr, sp.Shape)
 	}
 	result := unchanged
 	for _, sp := range added {
 		d, err := startOne(sp, serveErr)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[baseten-switch door] SIGHUP: start %s failed: %v\n", sp.ListenAddr, err)
+			fmt.Fprintf(os.Stderr, "[openrouter-switch door] SIGHUP: start %s failed: %v\n", sp.ListenAddr, err)
 			continue
 		}
 		doors[sp.ListenAddr] = d
 		result = append(result, sp)
 	}
-	fmt.Fprintf(os.Stderr, "[baseten-switch door] SIGHUP: %d unchanged, %d added, %d removed\n",
+	fmt.Fprintf(os.Stderr, "[openrouter-switch door] SIGHUP: %d unchanged, %d added, %d removed\n",
 		len(unchanged), len(added), len(removed))
 	return result
 }

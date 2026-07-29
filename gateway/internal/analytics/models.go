@@ -21,11 +21,11 @@ type Coverage struct {
 }
 
 type CostSummary struct {
-	ActualClaudeCostUSD              float64 `json:"actual_claude_cost_usd"`
-	ActualBasetenCostUSD             float64 `json:"actual_baseten_cost_usd"`
-	EstimatedNativeCostForBasetenUSD float64 `json:"estimated_native_cost_for_baseten_usd"`
-	SavedUSD                         float64 `json:"saved_usd"`
-	SavedPercent                     float64 `json:"saved_percent"`
+	ActualClaudeCostUSD                 float64 `json:"actual_claude_cost_usd"`
+	ActualOpenRouterCostUSD             float64 `json:"actual_openrouter_cost_usd"`
+	EstimatedNativeCostForOpenRouterUSD float64 `json:"estimated_native_cost_for_openrouter_usd"`
+	SavedUSD                            float64 `json:"saved_usd"`
+	SavedPercent                        float64 `json:"saved_percent"`
 }
 
 type CostGroup struct {
@@ -40,25 +40,25 @@ type CostGroup struct {
 }
 
 type SavingsModel struct {
-	ModelID                string  `json:"model_id"`
-	DisplayName            string  `json:"display_name"`
-	ActualBasetenCostUSD   float64 `json:"actual_baseten_cost_usd"`
-	EstimatedNativeCostUSD float64 `json:"estimated_native_cost_usd"`
-	SavedUSD               float64 `json:"saved_usd"`
-	SavedPercent           float64 `json:"saved_percent"`
+	ModelID                 string  `json:"model_id"`
+	DisplayName             string  `json:"display_name"`
+	ActualOpenRouterCostUSD float64 `json:"actual_openrouter_cost_usd"`
+	EstimatedNativeCostUSD  float64 `json:"estimated_native_cost_usd"`
+	SavedUSD                float64 `json:"saved_usd"`
+	SavedPercent            float64 `json:"saved_percent"`
 }
 
 type SavingsMapping struct {
-	BasetenModelID         string  `json:"baseten_model_id"`
-	BasetenDisplayName     string  `json:"baseten_display_name"`
-	RequestedClaudeFamily  string  `json:"requested_claude_family"`
-	ActualBasetenCostUSD   float64 `json:"actual_baseten_cost_usd"`
-	EstimatedNativeCostUSD float64 `json:"estimated_native_cost_usd"`
+	OpenRouterModelID       string  `json:"openrouter_model_id"`
+	OpenRouterDisplayName   string  `json:"openrouter_display_name"`
+	RequestedClaudeFamily   string  `json:"requested_claude_family"`
+	ActualOpenRouterCostUSD float64 `json:"actual_openrouter_cost_usd"`
+	EstimatedNativeCostUSD  float64 `json:"estimated_native_cost_usd"`
 }
 
 type Savings struct {
-	ByBasetenModel []SavingsModel   `json:"by_baseten_model"`
-	Mappings       []SavingsMapping `json:"mappings"`
+	ByOpenRouterModel []SavingsModel   `json:"by_openrouter_model"`
+	Mappings          []SavingsMapping `json:"mappings"`
 }
 
 type Cost struct {

@@ -25,7 +25,7 @@ import (
 )
 
 // scalarValueRe is the set of values SetClientScalars will write. It
-// admits "/" so raw Baseten slugs (e.g. "zai-org/GLM-5.2") are valid
+// admits "/" so raw OpenRouter slugs (e.g. "zai-org/GLM-5.2") are valid
 // plain YAML scalars.
 var scalarValueRe = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
 
@@ -169,8 +169,8 @@ func RemoveClientModelReasoningPolicy(
 }
 
 func validateReasoningEditTarget(provider, modelID string) error {
-	if provider != "baseten" {
-		return fmt.Errorf("unsupported reasoning provider %q (allowed: baseten)", provider)
+	if provider != "openrouter" {
+		return fmt.Errorf("unsupported reasoning provider %q (allowed: openrouter)", provider)
 	}
 	if strings.TrimSpace(modelID) == "" {
 		return fmt.Errorf("reasoning model id cannot be empty")

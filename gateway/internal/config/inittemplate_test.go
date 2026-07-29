@@ -9,7 +9,7 @@ import (
 
 // TestInitTemplateMatchesExampleConfig pins the go:embed copy
 // (internal/config/gateway.example.yaml) to the repo-level
-// config/gateway.example.yaml byte for byte, so 'baseten-switch config
+// config/gateway.example.yaml byte for byte, so 'openrouter-switch config
 // init' and the documented example can never drift apart. go:embed
 // cannot reach outside the module, hence the copy plus this test.
 func TestInitTemplateMatchesExampleConfig(t *testing.T) {
@@ -34,15 +34,18 @@ func TestInitTemplateLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("template does not load: %v", err)
 	}
-	if f.Global.RoutingEnabled == nil || !*f.Global.RoutingEnabled {
-		t.Errorf("global.routing_enabled = %v, want explicit true", f.Global.RoutingEnabled)
+	if f.Global.RoutingEnabled == nil || *f.Global.RoutingEnabled {
+		t.Errorf("global.routing_enabled = %v, want explicit false", f.Global.RoutingEnabled)
 	}
-	if f.Global.Auth["baseten"] != "${BASETEN_API_KEY}" {
-		t.Errorf("global.auth.baseten = %q, want ${BASETEN_API_KEY} reference", f.Global.Auth["baseten"])
+	if _, ok := f.Global.Auth["openrouter"]; ok {
+		t.Errorf("global.auth.openrouter must be absent; OpenRouter credentials come from Keychain or OPENROUTER_API_KEY")
+	}
+	if f.Global.Auth["anthropic"] != "${ANTHROPIC_API_KEY}" {
+		t.Errorf("global.auth.anthropic = %q, want ${ANTHROPIC_API_KEY} reference", f.Global.Auth["anthropic"])
 	}
 
 	// Only claude-code ships enabled; codex is a real client block
-	// parked with enabled: false so 'baseten-switch codex on' can un-park it
+	// parked with enabled: false so 'openrouter-switch codex on' can un-park it
 	// via the scalar editor (the Codex integration contract item 2.2).
 	if len(f.Clients) != 2 {
 		t.Fatalf("want 2 clients (claude-code enabled, codex parked), got %d", len(f.Clients))
@@ -63,15 +66,15 @@ func TestInitTemplateLoads(t *testing.T) {
 	if !cc.Enabled {
 		t.Errorf("enabled %t, want true", cc.Enabled)
 	}
-	if cc.DefaultModel != "zai-org/GLM-5.2" {
-		t.Errorf("claude-code default_model = %q, want zai-org/GLM-5.2", cc.DefaultModel)
+	if cc.DefaultModel != "" {
+		t.Errorf("claude-code default_model = %q, want empty until account selection", cc.DefaultModel)
 	}
 	cx := f.Clients[1]
 	if cx.Name != "codex" {
 		t.Fatalf("second client: got %q; want codex", cx.Name)
 	}
 	if cx.Enabled {
-		t.Errorf("codex enabled %t, want false (ships parked; un-parked by 'baseten-switch codex on')", cx.Enabled)
+		t.Errorf("codex enabled %t, want false (ships parked; un-parked by 'openrouter-switch codex on')", cx.Enabled)
 	}
 	if cx.BindAddr != "127.0.0.1:45272" {
 		t.Errorf("codex bind addr %q, want 127.0.0.1:45272 (shared listener, dispatch by path)", cx.BindAddr)
@@ -82,8 +85,8 @@ func TestInitTemplateLoads(t *testing.T) {
 	if cx.FallbackRoute != "openai" {
 		t.Errorf("codex fallback route %q, want openai", cx.FallbackRoute)
 	}
-	if cx.DefaultModel != "zai-org/GLM-5.2" {
-		t.Errorf("codex default_model = %q, want zai-org/GLM-5.2", cx.DefaultModel)
+	if cx.DefaultModel != "" {
+		t.Errorf("codex default_model = %q, want empty until account selection", cx.DefaultModel)
 	}
 	if len(cx.ResponsesStripToolTypes) != 0 {
 		t.Errorf("codex responses_strip_tool_types = %v, want empty (emergency override only)", cx.ResponsesStripToolTypes)
@@ -107,20 +110,13 @@ func TestInitTemplateLoads(t *testing.T) {
 			t.Errorf("CollectPlaceholders includes CODEX_AUTH_TOKEN from the parked codex client; disabled clients must be exempt from the scan")
 		}
 	}
-	// The canonical configuration keeps the supported gateway-discovery
-	// aliases live.
-	wantAliases := map[string]string{
-		"claude-baseten-glm-5-2":   "zai-org/GLM-5.2",
-		"claude-baseten-kimi-k2-7": "moonshotai/Kimi-K2.7-Code",
-		"claude-baseten-nemotron":  "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
+	// Picker aliases come from the authenticated account catalog. The
+	// canonical config must not expose a static model list.
+	if len(cc.ModelAliases) != 0 {
+		t.Errorf("model_aliases = %v, want none in the canonical config", cc.ModelAliases)
 	}
-	if len(cc.ModelAliases) != len(wantAliases) {
-		t.Errorf("model_aliases = %v, want %v", cc.ModelAliases, wantAliases)
-	}
-	for alias, slug := range wantAliases {
-		if cc.ModelAliases[alias] != slug {
-			t.Errorf("model_aliases[%s] = %q, want %q", alias, cc.ModelAliases[alias], slug)
-		}
+	if bytes.Contains(InitTemplate, []byte("model_aliases:")) {
+		t.Error("template contains a static model_aliases block")
 	}
 	// subagent_model/subagent_routing ship commented out next to
 	// model_aliases (the subagent-routing contract); the parsed client must
@@ -131,22 +127,14 @@ func TestInitTemplateLoads(t *testing.T) {
 	if !bytes.Contains(InitTemplate, []byte("# subagent_routing:")) {
 		t.Errorf("template lost the commented subagent_routing example; keep it next to model_aliases")
 	}
-	wantRoutes := map[string]string{
-		"fable":  "zai-org/GLM-5.2",
-		"opus":   "zai-org/GLM-5.2",
-		"sonnet": "zai-org/GLM-5.2",
-		"haiku":  "zai-org/GLM-5.2",
-	}
 	// responses_strip_tool_types belongs to the codex client only; an
 	// anthropic-shape client carrying it refuses the config at gateway
 	// resolve time.
 	if len(cc.ResponsesStripToolTypes) != 0 {
 		t.Errorf("claude-code must not carry responses_strip_tool_types, got %v", cc.ResponsesStripToolTypes)
 	}
-	for name, slug := range wantRoutes {
-		if cc.ModelRoutes[name] != slug {
-			t.Errorf("claude-code model_routes[%s] = %q, want %q", name, cc.ModelRoutes[name], slug)
-		}
+	if len(cc.ModelRoutes) != 0 {
+		t.Errorf("claude-code model_routes = %v, want none until account selection", cc.ModelRoutes)
 	}
 	if err := ValidateRoutingPolicy(f); err != nil {
 		t.Errorf("template routing policy is invalid: %v", err)

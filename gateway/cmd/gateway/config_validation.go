@@ -1,6 +1,6 @@
 package gateway
 
-import "github.com/basetenlabs/baseten-switch/gateway/internal/config"
+import "github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 
 // ValidateConfigFile runs the same resolver construction used by a live
 // gateway reload. CLI config mutations use it before replacing gateway.yaml

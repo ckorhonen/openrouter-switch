@@ -12,10 +12,19 @@ func TestValidate(t *testing.T) {
 			t.Fatalf("expected %q valid", r)
 		}
 	}
-	for _, bad := range []string{"", "bas ten", "Baseten", "banana", "anthr"} {
+	for _, bad := range []string{"", "bas ten", "OpenRouter", "banana", "anthr"} {
 		if Valid(bad) {
 			t.Fatalf("expected %q invalid", bad)
 		}
+	}
+}
+
+func TestRoutesUseOpenRouterProvider(t *testing.T) {
+	if !Valid("openrouter") {
+		t.Fatal("openrouter route must be valid")
+	}
+	if Valid("baseten") {
+		t.Fatal("legacy Baseten route must not remain valid")
 	}
 }
 

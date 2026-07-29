@@ -1,6 +1,6 @@
-// Package door implements the `baseten-switch door` front-door reverse proxy that
+// Package door implements the `openrouter-switch door` front-door reverse proxy that
 // owns the harness-facing ports in front of the router listeners.
-// Each Door binds one port and knows only static targets: the baseten-switch
+// Each Door binds one port and knows only static targets: the openrouter-switch
 // router's internal listener, and the native upstream(s) for the port's
 // protocol shape(s). Requests stream to the router while it is healthy
 // and fail over to the native upstream when tripped; a shared-shape port
@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/version"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/version"
 )
 
 type Shape string
@@ -352,7 +352,7 @@ func (d *Door) tripNow(reason string) {
 	}
 	d.mu.Unlock()
 	if change {
-		d.cfg.Logf("[baseten-switch door] port %d (%s): tripped, serving fallback %s (%s)",
+		d.cfg.Logf("[openrouter-switch door] port %d (%s): tripped, serving fallback %s (%s)",
 			d.port(), d.cfg.Shape, d.cfg.FallbackBase, reason)
 	}
 	// Rescue on every trip (not only transitions): a forward that
@@ -404,7 +404,7 @@ func (d *Door) clearTrip(how string) {
 	}
 	d.mu.Unlock()
 	if change {
-		d.cfg.Logf("[baseten-switch door] port %d (%s): recovered, serving router %s (%s)",
+		d.cfg.Logf("[openrouter-switch door] port %d (%s): recovered, serving router %s (%s)",
 			d.port(), d.cfg.Shape, d.cfg.RouterTarget, how)
 	}
 }
@@ -467,7 +467,7 @@ func (d *Door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil && r.Body != http.NoBody {
 		buf, err := io.ReadAll(io.LimitReader(r.Body, d.cfg.MaxReplay+1))
 		if err != nil {
-			d.writeError(w, "router", http.StatusBadRequest, "baseten-switch door: failed reading request body: "+err.Error())
+			d.writeError(w, "router", http.StatusBadRequest, "openrouter-switch door: failed reading request body: "+err.Error())
 			return
 		}
 		if int64(len(buf)) > d.cfg.MaxReplay {
@@ -506,7 +506,7 @@ func (d *Door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			d.serveFallback(w, r, bytes.NewReader(bodyBuf), int64(len(bodyBuf)))
 		} else {
 			d.writeError(w, "router", http.StatusBadGateway,
-				"baseten-switch door: router unreachable and request body exceeds the replay cap; no failover for this request")
+				"openrouter-switch door: router unreachable and request body exceeds the replay cap; no failover for this request")
 		}
 		return
 	}
@@ -539,7 +539,7 @@ func (d *Door) warnNoReplay() {
 	d.warnedNoReplay = true
 	d.mu.Unlock()
 	if !warned {
-		d.cfg.Logf("[baseten-switch door] port %d (%s): request body exceeds replay cap (%d bytes); such requests are router-only (no failover)",
+		d.cfg.Logf("[openrouter-switch door] port %d (%s): request body exceeds replay cap (%d bytes); such requests are router-only (no failover)",
 			d.port(), d.cfg.Shape, d.cfg.MaxReplay)
 	}
 }
@@ -548,12 +548,12 @@ func (d *Door) serveFallback(w http.ResponseWriter, r *http.Request, body io.Rea
 	base, ok := d.fallbackFor(r)
 	if !ok {
 		d.writeError(w, "fallback", http.StatusBadGateway,
-			fmt.Sprintf("baseten-switch door: router unavailable and path %q has no native fallback for shape %s", r.URL.Path, d.cfg.Shape))
+			fmt.Sprintf("openrouter-switch door: router unavailable and path %q has no native fallback for shape %s", r.URL.Path, d.cfg.Shape))
 		return
 	}
 	resp, err := d.forward(r.Context(), r, base, body, contentLength)
 	if err != nil {
-		d.writeError(w, "fallback", http.StatusBadGateway, "baseten-switch door: fallback upstream request failed: "+err.Error())
+		d.writeError(w, "fallback", http.StatusBadGateway, "openrouter-switch door: fallback upstream request failed: "+err.Error())
 		return
 	}
 	d.relay(w, resp, "fallback")
@@ -638,7 +638,7 @@ func (d *Door) relay(w http.ResponseWriter, resp *http.Response, via string) {
 			h.Add(k, v)
 		}
 	}
-	h.Set("X-Baseten-Switch-Door", via)
+	h.Set("X-OpenRouter-Switch-Door", via)
 	w.WriteHeader(resp.StatusCode)
 	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, 32<<10)
@@ -661,7 +661,7 @@ func (d *Door) relay(w http.ResponseWriter, resp *http.Response, via string) {
 func (d *Door) writeError(w http.ResponseWriter, via string, status int, msg string) {
 	body, _ := json.Marshal(map[string]any{
 		"error": map[string]any{
-			"type":    "baseten_switch_door_error",
+			"type":    "openrouter_switch_door_error",
 			"message": msg,
 		},
 		"door": map[string]any{
@@ -671,7 +671,7 @@ func (d *Door) writeError(w http.ResponseWriter, via string, status int, msg str
 	})
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
-	h.Set("X-Baseten-Switch-Door", via)
+	h.Set("X-OpenRouter-Switch-Door", via)
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

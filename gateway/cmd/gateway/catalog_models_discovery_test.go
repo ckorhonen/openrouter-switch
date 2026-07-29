@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
-func TestCatalogBackedClaudeModelsDiscoveryProjectsOnlyPricedModels(t *testing.T) {
+func TestAccountCatalogClaudeModelsDiscoveryMergesNativeModels(t *testing.T) {
 	var nativeHits atomic.Int32
 	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		nativeHits.Add(1)
@@ -30,7 +30,7 @@ func TestCatalogBackedClaudeModelsDiscoveryProjectsOnlyPricedModels(t *testing.T
 		route      string
 		wantNative bool
 	}{
-		{route: "baseten", wantNative: false},
+		{route: "openrouter", wantNative: false},
 		{route: "anthropic", wantNative: true},
 	} {
 		t.Run(test.route, func(t *testing.T) {
@@ -43,14 +43,22 @@ func TestCatalogBackedClaudeModelsDiscoveryProjectsOnlyPricedModels(t *testing.T
 			); err != nil {
 				t.Fatal(err)
 			}
+			if err := modelPricing.ReplaceOpenRouterCatalog(
+				[]byte(testOpenRouterAccountCatalog),
+				"openrouter_models_user",
+				time.Date(2026, time.July, 26, 12, 0, 0, 0, time.UTC),
+				"",
+			); err != nil {
+				t.Fatal(err)
+			}
+			cfg := testConfig(t, native.URL, native.URL)
 			g := &Gateway{
-				cfg: Config{
-					AnthropicURL: native.URL,
-					BasetenURL:   native.URL,
-				},
+				cfg:     cfg,
 				pricing: modelPricing,
 				client:  native.Client(),
 			}
+			g.authFingerprint = cfg.CredentialFingerprint
+			g.catalogFingerprint = cfg.CredentialFingerprint
 			client := &clientListener{cfg: aliasedClient(t, test.route)}
 			request := httptest.NewRequest(
 				http.MethodGet,
@@ -77,10 +85,8 @@ func TestCatalogBackedClaudeModelsDiscoveryProjectsOnlyPricedModels(t *testing.T
 			}
 			joined := strings.Join(ids, ",")
 			for _, required := range []string{
-				"anthropic-baseten-kimi",
-				"claude-baseten-glm-5-2",
-				"claude-newfamily-1",
-				"claude-opus-5",
+				"anthropic-openrouter-kimi",
+				"claude-openrouter-glm-5-2",
 			} {
 				if !strings.Contains(","+joined+",", ","+required+",") {
 					t.Fatalf("models %v omitted %q", ids, required)
@@ -88,9 +94,6 @@ func TestCatalogBackedClaudeModelsDiscoveryProjectsOnlyPricedModels(t *testing.T
 			}
 			if strings.Contains(joined, "claude-haiku-unpriced") {
 				t.Fatalf("unpriced catalog model was published: %v", ids)
-			}
-			if displayNames["claude-opus-5"] != "Claude Opus 5" {
-				t.Fatalf("catalog display name = %q", displayNames["claude-opus-5"])
 			}
 			family, ok := modelPricing.Capture().ModelFamily(
 				pricing.ProviderAnthropic,
@@ -122,17 +125,23 @@ func TestCatalogBackedClaudeModelsDiscoveryProjectsOnlyPricedModels(t *testing.T
 					t.Fatalf("native-route models omitted proxied native entry: %v", ids)
 				}
 				if countString(ids, "claude-opus-5") != 1 {
-					t.Fatalf("catalog/native duplicate was not removed: %v", ids)
+					t.Fatalf("native model count wrong: %v", ids)
+				}
+				if displayNames["claude-opus-5"] != "duplicate" {
+					t.Fatalf("native display name = %q", displayNames["claude-opus-5"])
 				}
 				if hits := nativeHits.Load(); hits != 1 {
 					t.Fatalf("native upstream hits = %d, want 1", hits)
 				}
 			} else {
+				if strings.Contains(","+joined+",", ",claude-opus-5,") {
+					t.Fatalf("OpenRouter route exposed native model: %v", ids)
+				}
 				if strings.Contains(joined, "claude-native-only") {
-					t.Fatalf("Baseten-route models included native-only entry: %v", ids)
+					t.Fatalf("OpenRouter-route models included native-only entry: %v", ids)
 				}
 				if hits := nativeHits.Load(); hits != 0 {
-					t.Fatalf("Baseten route contacted native upstream %d times", hits)
+					t.Fatalf("OpenRouter route contacted native upstream %d times", hits)
 				}
 			}
 		})

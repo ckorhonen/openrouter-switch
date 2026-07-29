@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pidfile"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/version"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pidfile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/version"
 )
 
 var (
@@ -54,6 +54,7 @@ func (g *Gateway) registerAdmin(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/admin/analytics", g.adminAnalytics)
 	mux.HandleFunc("/v1/admin/requests", g.adminRequests)
 	mux.HandleFunc("/v1/admin/auth/status", g.handleAuthStatus)
+	mux.HandleFunc("/v1/admin/auth/reload", g.handleAuthReload)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -121,8 +122,8 @@ func (g *Gateway) adminConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // activeConfigPath returns the path the gateway is currently reading
-// gateway.yaml from: cfg.ConfigPath when set (BASETEN_SWITCH_CONFIG_PATH), else
-// the default ~/.config/baseten-switch/gateway.yaml. Admin endpoints
+// gateway.yaml from: cfg.ConfigPath when set (OPENROUTER_SWITCH_CONFIG_PATH), else
+// the default ~/.config/openrouter-switch/gateway.yaml. Admin endpoints
 // always operate on this path so they reflect the live config rather
 // than the homedir default.
 func (g *Gateway) activeConfigPath() string {
@@ -132,17 +133,15 @@ func (g *Gateway) activeConfigPath() string {
 	return config.DefaultPath()
 }
 
-// applyConfigEnv expands global.auth values and exports them to the
-// process environment. Shared by the admin config PUT path and, via
-// applyGlobalAuth, by startup and SIGHUP reload.
+// applyConfigEnv expands native-provider global.auth values and exports them
+// to the process environment. OpenRouter credentials are intentionally
+// excluded: they come only from Keychain or OPENROUTER_API_KEY.
 func applyConfigEnv(f *config.File) {
 	for k, v := range f.Global.Auth {
 		if v != "" {
 			expanded := config.Expand(v)
 			if expanded != "" {
 				switch k {
-				case "baseten":
-					os.Setenv("BASETEN_API_KEY", expanded)
 				case "anthropic":
 					os.Setenv("ANTHROPIC_API_KEY", expanded)
 				}
@@ -234,7 +233,7 @@ type modelCatalogEntry struct {
 }
 
 // computeModelCatalog builds display metadata for one client's configured
-// Baseten targets: one entry per model_aliases entry, the default model when
+// OpenRouter targets: one entry per model_aliases entry, the default model when
 // not covered by an alias, and raw slugs saved in model_routes or
 // subagent_model. Including saved raw slugs keeps a live
 // catalog selection usable when the remote catalog is unavailable later. The
@@ -261,7 +260,7 @@ func computeModelCatalog(
 		}
 		seen[slug] = true
 		out = append(out, modelCatalogEntry{
-			Label:         basetenModelDisplayName(snapshot, slug),
+			Label:         openrouterModelDisplayName(snapshot, slug),
 			Slug:          slug,
 			StorageTarget: slug, Alias: alias, Available: true,
 		})
@@ -270,7 +269,7 @@ func computeModelCatalog(
 	if slug := rc.DefaultModel; slug != "" && !seen[slug] {
 		seen[slug] = true
 		out = append(out, modelCatalogEntry{
-			Label:         basetenModelDisplayName(snapshot, slug),
+			Label:         openrouterModelDisplayName(snapshot, slug),
 			Slug:          slug,
 			StorageTarget: slug, Available: true,
 		})
@@ -295,7 +294,7 @@ func computeModelCatalog(
 		}
 		seen[slug] = true
 		out = append(out, modelCatalogEntry{
-			Label:         basetenModelDisplayName(snapshot, slug),
+			Label:         openrouterModelDisplayName(snapshot, slug),
 			Slug:          slug,
 			StorageTarget: slug, Available: true,
 		})
@@ -354,8 +353,8 @@ func providerDisplayName(provider string) string {
 		return "Anthropic"
 	case "openai":
 		return "OpenAI"
-	case "baseten":
-		return "Baseten"
+	case "openrouter":
+		return "OpenRouter"
 	case "":
 		return "Native provider"
 	default:
@@ -371,12 +370,12 @@ func effectiveSummary(
 	if rc.globalRoutingOff() {
 		return "Native · " + providerDisplayName(config.NativeRoute(rc.ProtocolShape))
 	}
-	if rc.Route != "baseten" {
+	if rc.Route != "openrouter" {
 		return "Native · " + providerDisplayName(rc.Route)
 	}
 	model := ""
 	for _, family := range families {
-		if family.EffectiveRoute != "baseten" || family.EffectiveModel == "" {
+		if family.EffectiveRoute != "openrouter" || family.EffectiveModel == "" {
 			return "Custom routing"
 		}
 		if model == "" {
@@ -386,7 +385,7 @@ func effectiveSummary(
 		}
 	}
 	unmatched := resolveNativeModelPolicy(rc, "claude-unrecognized-model")
-	if unmatched.route != "baseten" || unmatched.model == "" {
+	if unmatched.route != "openrouter" || unmatched.model == "" {
 		return "Custom routing"
 	}
 	if model != "" && model != unmatched.model {
@@ -396,7 +395,7 @@ func effectiveSummary(
 	if len(snapshots) > 0 {
 		snapshot = snapshots[0]
 	}
-	return "Baseten · " + basetenModelDisplayName(snapshot, unmatched.model)
+	return "OpenRouter · " + openrouterModelDisplayName(snapshot, unmatched.model)
 }
 
 func resolvedStatusClient(f *config.File, c config.Client) resolvedClientConfig {
@@ -404,7 +403,7 @@ func resolvedStatusClient(f *config.File, c config.Client) resolvedClientConfig 
 	if shape == "" {
 		shape = "anthropic"
 	}
-	rt := "baseten"
+	rt := "openrouter"
 	globalEnabled := f.Global.RoutingEnabled != nil && *f.Global.RoutingEnabled
 	if !globalEnabled {
 		rt = config.NativeRoute(shape)
@@ -551,7 +550,6 @@ func (g *Gateway) adminStatus(w http.ResponseWriter, r *http.Request) {
 			globalEnabled = *state.file.Global.RoutingEnabled
 		}
 	}
-	signedIn, fallbackInUse := g.authState()
 	ah := g.authHealth()
 	writeJSON(w, 200, map[string]any{
 		"router_pid":          os.Getpid(),
@@ -573,38 +571,29 @@ func (g *Gateway) adminStatus(w http.ResponseWriter, r *http.Request) {
 		// config even while this router is healthy.
 		"config_path": g.activeConfigPath(),
 		"telemetry":   g.telemetryAdminHealth(runtimeCfg),
-		"baseten_catalog": sanitizedBasetenCatalogHealthJSON(
+		"openrouter_catalog": sanitizedOpenRouterCatalogHealthJSON(
 			g.catalogHealth(),
 		),
 		"model_catalog": g.modelCatalogHealthJSON(),
-		"auth": map[string]any{
-			"signed_in":             signedIn,
-			"health":                ah.Health,
-			"last_refresh_error":    ah.LastError,
-			"last_refresh_error_at": rfc3339OrEmpty(ah.LastErrorAt),
-			"last_refresh_ok_at":    rfc3339OrEmpty(ah.LastOKAt),
-			"profile":               runtimeCfg.OAuthProfile,
-			"fallback_enabled":      runtimeCfg.APIKeyFallback,
-			"fallback_in_use":       fallbackInUse,
-		},
-		"clients": clients,
+		"auth":          authStatusJSON(ah),
+		"clients":       clients,
 	})
 }
 
 // modelCatalogHealthJSON reports the active normalized catalog for each
-// supported provider. The active Baseten catalog can come from either the
-// public models.dev refresh or the authenticated Baseten /v1/models refresh.
+// supported provider. The active OpenRouter catalog can come from either the
+// public models.dev refresh or the authenticated OpenRouter /v1/models refresh.
 // In the latter case, use that refresh manager's timing and error state.
 func (g *Gateway) modelCatalogHealthJSON() map[string]any {
 	result := make(map[string]any, 3)
 	for _, provider := range []string{
 		pricing.ProviderAnthropic,
 		pricing.ProviderOpenAI,
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 	} {
 		health := g.publicCatalogProviderHealth(provider)
-		if provider == pricing.ProviderBaseten &&
-			isAuthenticatedBasetenCatalogSource(health.Source) {
+		if provider == pricing.ProviderOpenRouter &&
+			isAuthenticatedOpenRouterCatalogSource(health.Source) {
 			authenticated := g.catalogHealth()
 			health.LastAttemptAt = authenticated.LastAttemptAt
 			health.LastSuccessAt = authenticated.LastSuccessAt
@@ -618,16 +607,16 @@ func (g *Gateway) modelCatalogHealthJSON() map[string]any {
 	return result
 }
 
-func isAuthenticatedBasetenCatalogSource(source string) bool {
+func isAuthenticatedOpenRouterCatalogSource(source string) bool {
 	switch strings.TrimSpace(source) {
-	case "baseten_v1_models", "baseten-v1-models":
+	case "openrouter_models_user", "openrouter-models-user":
 		return true
 	default:
 		return false
 	}
 }
 
-func sanitizedBasetenCatalogHealthJSON(health catalogHealth) map[string]any {
+func sanitizedOpenRouterCatalogHealthJSON(health catalogHealth) map[string]any {
 	health.LastError = sanitizeCatalogDiagnosticError(health.LastError)
 	return catalogHealthJSON(health)
 }
@@ -730,13 +719,13 @@ func (g *Gateway) adminSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// adminEnvFilePath honors BASETEN_SWITCH_ENV_FILE for every runtime. Preview additionally
+// adminEnvFilePath honors OPENROUTER_SWITCH_ENV_FILE for every runtime. Preview additionally
 // requires the exact private env file beside its active config. This prevents a
 // misconfigured or symlinked Preview admin endpoint from reading or replacing
-// Stable's ~/.config/baseten-switch/env.
+// Stable's ~/.config/openrouter-switch/env.
 func (g *Gateway) adminEnvFilePath() (string, error) {
 	path := config.EnvFilePath()
-	if os.Getenv("BASETEN_SWITCH_PRIVATE_RUNTIME") != "1" {
+	if os.Getenv("OPENROUTER_SWITCH_PRIVATE_RUNTIME") != "1" {
 		return path, nil
 	}
 
@@ -801,8 +790,8 @@ func (g *Gateway) adminTelemetry(w http.ResponseWriter, r *http.Request) {
 		telemetry.DefaultTailReadMaxBytes,
 	)
 	if err != nil {
-		w.Header().Set("X-Baseten-Switch-Telemetry-Partial", "true")
-		w.Header().Set("Warning", `199 baseten-switch "telemetry history is partial"`)
+		w.Header().Set("X-OpenRouter-Switch-Telemetry-Partial", "true")
+		w.Header().Set("Warning", `199 openrouter-switch "telemetry history is partial"`)
 	}
 	if events == nil {
 		events = []telemetry.EventV1{}

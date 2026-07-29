@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/reasoning"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/reasoning"
 )
 
 type adminReasoningPreflightRequest struct {
@@ -167,7 +167,7 @@ func validateReasoningPreflightPolicy(
 	snapshot *pricing.Snapshot,
 	request adminReasoningPreflightRequest,
 ) error {
-	if request.Provider != pricing.ProviderBaseten {
+	if request.Provider != pricing.ProviderOpenRouter {
 		return fmt.Errorf(
 			"provider %q is unsupported",
 			request.Provider,
@@ -303,25 +303,25 @@ func reasoningTargetReachability(
 	canonicalID string,
 ) []string {
 	sources := map[string]bool{}
-	if canonical, ok := canonicalBasetenTarget(
+	if canonical, ok := canonicalOpenRouterTarget(
 		rc,
 		rc.DefaultModel,
 	); ok && canonical == canonicalID {
 		sources["default_model"] = true
 	}
 	for _, target := range rc.ModelRoutes {
-		if canonical, ok := canonicalBasetenTarget(rc, target); ok &&
+		if canonical, ok := canonicalOpenRouterTarget(rc, target); ok &&
 			canonical == canonicalID {
 			sources["family_mapping"] = true
 		}
 	}
 	for _, target := range rc.ModelAliases {
-		if canonical, ok := canonicalBasetenTarget(rc, target); ok &&
+		if canonical, ok := canonicalOpenRouterTarget(rc, target); ok &&
 			canonical == canonicalID {
 			sources["alias"] = true
 		}
 	}
-	if canonical, ok := canonicalBasetenTarget(
+	if canonical, ok := canonicalOpenRouterTarget(
 		rc,
 		rc.SubagentModel,
 	); ok && canonical == canonicalID {

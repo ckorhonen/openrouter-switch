@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 // resetStatsForTest clears the package-level stats cache and restores
@@ -147,7 +147,7 @@ func TestAdminStatsContract(t *testing.T) {
 	statsNow = func() time.Time { return now }
 	const since = int64(1783997880)
 
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -164,7 +164,7 @@ func TestAdminStatsContract(t *testing.T) {
 		// response) with no duration, via the subagent fallback path.
 		// Status 0 is deliberately not an HTTP error, so it
 		// counts as a request but not an error.
-		{TS: float64(since + 60), Client: "claude-code", Route: "baseten", RouteEffective: "anthropic", RequestedModel: "claude-haiku-4-5", UpstreamModel: "zai-org/GLM-5.2", Status: 0, Subagent: true},
+		{TS: float64(since + 60), Client: "claude-code", Route: "openrouter", RouteEffective: "anthropic", RequestedModel: "claude-haiku-4-5", UpstreamModel: "zai-org/GLM-5.2", Status: 0, Subagent: true},
 	}
 	for _, row := range rows {
 		appendStatsRow(t, cfg.TelemetryDir, row)
@@ -215,7 +215,7 @@ func TestAdminStatsContract(t *testing.T) {
 		t.Errorf("recent[0] (oldest) = %+v", first)
 	}
 	last := out.Recent[len(out.Recent)-1]
-	if last.Client != "claude-code" || last.Route != "baseten" ||
+	if last.Client != "claude-code" || last.Route != "openrouter" ||
 		last.RouteEffective != "anthropic" || last.RequestedModel != "claude-haiku-4-5" ||
 		last.UpstreamModel != "zai-org/GLM-5.2" || last.Status != 0 ||
 		last.DurationMs != 0 || !last.Subagent {

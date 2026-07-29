@@ -3,7 +3,7 @@ package gateway
 import (
 	"testing"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 func TestResponsesCompatibilityResolvesPerClient(t *testing.T) {
@@ -71,7 +71,7 @@ func TestResponsesCompatibilityParticipatesInResolvedHash(t *testing.T) {
 		Name:                   "codex",
 		BindAddr:               "127.0.0.1:18081",
 		ProtocolShape:          "openai",
-		Route:                  "baseten",
+		Route:                  "openrouter",
 		ResponsesCompatibility: off,
 	}
 	withDefaults := base

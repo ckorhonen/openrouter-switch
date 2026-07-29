@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/reasoning"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/requestprofile"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/usage"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/reasoning"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/requestprofile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/usage"
 )
 
 const telemetryModelFamilyRevisionV1 = "claude-family-v1"
@@ -241,10 +241,10 @@ func (request telemetryRequestCaptureV1) event(
 		attempt.quoteCapturedAt,
 		completion.usage,
 		completion.usageComplete,
-		attempt.effectiveProvider == pricing.ProviderBaseten,
+		attempt.effectiveProvider == pricing.ProviderOpenRouter,
 	)
 	var nativeCounterfactual *telemetry.CostSnapshotV1
-	if attempt.effectiveProvider == "baseten" {
+	if attempt.effectiveProvider == "openrouter" {
 		nativeQuote := request.nativeQuote
 		if request.nativePricingUnsupported {
 			nativeQuote = unpricedQuote(nativeQuote)

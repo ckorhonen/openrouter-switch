@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
 const anthropicAvailabilityFixture = `{
@@ -151,7 +151,7 @@ func TestAuthenticatedAnthropicAvailabilityPreservesPricingAndRestartsFromCache(
 	}
 
 	restarted := pricing.New()
-	loadProviderCatalogCaches(restarted, configPath)
+	loadProviderCatalogCaches(restarted, configPath, "")
 	restartedQuote := restarted.Capture().QuoteProfile(
 		pricing.ProviderAnthropic,
 		"claude-opus-5",
@@ -250,7 +250,7 @@ func TestAuthenticatedAnthropicAvailabilityFailuresPreserveSnapshotAndCache(t *t
 	}
 }
 
-func TestClaudeDiscoveryKeepsCachedPricedModelsWhenAnthropicFetchFails(t *testing.T) {
+func TestClaudeDiscoveryDoesNotTreatCachedPricingAsAvailability(t *testing.T) {
 	live := pricing.New()
 	if err := live.ReplaceModelsDev(
 		[]byte(publicCatalogGatewayFixture),
@@ -260,11 +260,11 @@ func TestClaudeDiscoveryKeepsCachedPricedModelsWhenAnthropicFetchFails(t *testin
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(t.TempDir(), "gateway.yaml")
-	if err := persistProviderCatalogCaches(live, configPath); err != nil {
+	if err := persistProviderCatalogCaches(live, configPath, ""); err != nil {
 		t.Fatal(err)
 	}
 	cached := pricing.New()
-	loadProviderCatalogCaches(cached, configPath)
+	loadProviderCatalogCaches(cached, configPath, "")
 
 	unavailable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -299,8 +299,8 @@ func TestClaudeDiscoveryKeepsCachedPricedModelsWhenAnthropicFetchFails(t *testin
 		ids = append(ids, entry.ID)
 	}
 	joined := "," + strings.Join(ids, ",") + ","
-	if !strings.Contains(joined, ",claude-opus-5,") {
-		t.Fatalf("cached priced model disappeared after native failure: %v", ids)
+	if strings.Contains(joined, ",claude-opus-5,") {
+		t.Fatalf("cached pricing was treated as current availability: %v", ids)
 	}
 	if strings.Contains(joined, ",claude-haiku-unpriced,") {
 		t.Fatalf("cached unpriced model was published: %v", ids)

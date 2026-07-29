@@ -10,24 +10,25 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 // aliasedClient returns an anthropic-shape resolved client with two
 // model_aliases configured, on the given route.
 func aliasedClient(t *testing.T, rt string) resolvedClientConfig {
 	t.Helper()
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = rt
-	rc.GlobalRoutingEnabled = rt == "baseten"
+	rc.GlobalRoutingEnabled = rt == "openrouter"
 	rc.ModelAliases = map[string]string{
-		"claude-baseten-glm-5-2": "zai-org/GLM-5.2",
-		"anthropic-baseten-kimi": "moonshotai/Kimi-K2.7-Code",
+		"claude-openrouter-glm-5-2": "zai-org/GLM-5.2",
+		"anthropic-openrouter-kimi": "moonshotai/Kimi-K2.7-Code",
 	}
 	return rc
 }
@@ -43,6 +44,27 @@ type modelsList struct {
 	FirstID *string `json:"first_id"`
 	LastID  *string `json:"last_id"`
 }
+
+var testAccountAliasIDs = func() []string {
+	ids := []string{
+		"anthropic-openrouter-kimi",
+		"claude-openrouter-glm-5-2",
+	}
+	for _, slug := range []string{
+		"zai-org/GLM-5.2",
+		"zai-org/FAMILY",
+		"zai-org/GLM-6",
+		"moonshotai/Kimi-K2.7-Code",
+		"moonshotai/Kimi-K3",
+		"deepseek-ai/DeepSeek-V4-Pro",
+		"example/No-Control",
+		"nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",
+	} {
+		ids = append(ids, dynamicOpenRouterAlias(slug))
+	}
+	sort.Strings(ids)
+	return ids
+}()
 
 func getModelsList(t *testing.T, g *Gateway, name, query string) (int, modelsList) {
 	t.Helper()
@@ -64,11 +86,11 @@ func getModelsList(t *testing.T, g *Gateway, name, query string) (int, modelsLis
 
 // TestAliasModelsSynthesisServedLocally: with model_aliases configured,
 // GET /v1/models is synthesized without contacting any upstream on the
-// baseten/monitor/openai routes, in the Anthropic list shape, sorted by
+// openrouter/monitor/openai routes, in the Anthropic list shape, sorted by
 // alias id, and every id survives the picker's claude/anthropic prefix
 // filter.
 func TestAliasModelsSynthesisServedLocally(t *testing.T) {
-	for _, rt := range []string{"baseten", "monitor", "openai"} {
+	for _, rt := range []string{"openrouter", "monitor", "openai"} {
 		t.Run(rt, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Errorf("upstream must not be contacted for alias /v1/models (route %s), got %s %s", rt, r.Method, r.URL.Path)
@@ -85,12 +107,13 @@ func TestAliasModelsSynthesisServedLocally(t *testing.T) {
 			if status != 200 {
 				t.Fatalf("GET /v1/models got %d", status)
 			}
-			if len(ml.Data) != 2 {
-				t.Fatalf("data has %d entries, want 2: %+v", len(ml.Data), ml.Data)
+			if len(ml.Data) != len(testAccountAliasIDs) {
+				t.Fatalf("data has %d entries, want %d: %+v", len(ml.Data), len(testAccountAliasIDs), ml.Data)
 			}
-			// Stable ordering: sorted by alias id.
-			if ml.Data[0].ID != "anthropic-baseten-kimi" || ml.Data[1].ID != "claude-baseten-glm-5-2" {
-				t.Fatalf("alias order wrong: %+v", ml.Data)
+			for i, want := range testAccountAliasIDs {
+				if ml.Data[i].ID != want {
+					t.Fatalf("alias order wrong at %d: got %q want %q", i, ml.Data[i].ID, want)
+				}
 			}
 			for _, e := range ml.Data {
 				if e.Type != "model" {
@@ -107,7 +130,8 @@ func TestAliasModelsSynthesisServedLocally(t *testing.T) {
 			if ml.HasMore {
 				t.Error("has_more should be false for the full list")
 			}
-			if ml.FirstID == nil || *ml.FirstID != "anthropic-baseten-kimi" || ml.LastID == nil || *ml.LastID != "claude-baseten-glm-5-2" {
+			if ml.FirstID == nil || *ml.FirstID != testAccountAliasIDs[0] ||
+				ml.LastID == nil || *ml.LastID != testAccountAliasIDs[len(testAccountAliasIDs)-1] {
 				t.Errorf("first_id/last_id wrong: %v %v", ml.FirstID, ml.LastID)
 			}
 		})
@@ -120,7 +144,7 @@ func TestAliasModelsRespectsLimit(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, aliasedClient(t, "baseten"))
+	g, adminL, _ := newGateway(t, cfg, aliasedClient(t, "openrouter"))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -129,13 +153,13 @@ func TestAliasModelsRespectsLimit(t *testing.T) {
 	if status != 200 {
 		t.Fatalf("GET /v1/models?limit=1 got %d", status)
 	}
-	if len(ml.Data) != 1 || ml.Data[0].ID != "anthropic-baseten-kimi" {
+	if len(ml.Data) != 1 || ml.Data[0].ID != "anthropic-openrouter-kimi" {
 		t.Fatalf("limit=1 data wrong: %+v", ml.Data)
 	}
 	if !ml.HasMore {
 		t.Error("has_more should be true when limit truncates")
 	}
-	if ml.FirstID == nil || *ml.FirstID != "anthropic-baseten-kimi" || ml.LastID == nil || *ml.LastID != "anthropic-baseten-kimi" {
+	if ml.FirstID == nil || *ml.FirstID != "anthropic-openrouter-kimi" || ml.LastID == nil || *ml.LastID != "anthropic-openrouter-kimi" {
 		t.Errorf("first_id/last_id wrong: %v %v", ml.FirstID, ml.LastID)
 	}
 
@@ -143,14 +167,14 @@ func TestAliasModelsRespectsLimit(t *testing.T) {
 		t,
 		g,
 		"claude-code",
-		"?limit=1&after_id=anthropic-baseten-kimi",
+		"?limit=1&after_id=anthropic-openrouter-kimi",
 	)
 	if status != 200 {
 		t.Fatalf("second page got %d", status)
 	}
 	if len(next.Data) != 1 ||
-		next.Data[0].ID != "claude-baseten-glm-5-2" ||
-		next.HasMore {
+		next.Data[0].ID != testAccountAliasIDs[1] ||
+		!next.HasMore {
 		t.Fatalf("second page = %+v", next)
 	}
 }
@@ -166,7 +190,7 @@ func TestAliasModelsNativeRouteMergesProxiedList(t *testing.T) {
 			gotKey <- r.Header.Get("X-Api-Key")
 			w.Header().Set("Content-Type", "application/json")
 			// One real model plus a duplicate of a configured alias id.
-			_, _ = w.Write([]byte(`{"data":[{"type":"model","id":"claude-opus-4-8","display_name":"Claude Opus 4.8","created_at":"2025-08-01T00:00:00Z"},{"type":"model","id":"claude-baseten-glm-5-2","display_name":"dupe","created_at":"2025-08-01T00:00:00Z"}],"has_more":false,"first_id":"claude-opus-4-8","last_id":"claude-baseten-glm-5-2"}`))
+			_, _ = w.Write([]byte(`{"data":[{"type":"model","id":"claude-opus-4-8","display_name":"Claude Opus 4.8","created_at":"2025-08-01T00:00:00Z"},{"type":"model","id":"claude-openrouter-glm-5-2","display_name":"dupe","created_at":"2025-08-01T00:00:00Z"}],"has_more":false,"first_id":"claude-opus-4-8","last_id":"claude-openrouter-glm-5-2"}`))
 		}))
 		defer antSrv.Close()
 		cfg := testConfig(t, antSrv.URL, antSrv.URL)
@@ -183,7 +207,7 @@ func TestAliasModelsNativeRouteMergesProxiedList(t *testing.T) {
 		for _, e := range ml.Data {
 			ids = append(ids, e.ID)
 		}
-		want := "anthropic-baseten-kimi,claude-baseten-glm-5-2,claude-opus-4-8"
+		want := strings.Join(append(append([]string{}, testAccountAliasIDs...), "claude-opus-4-8"), ",")
 		if strings.Join(ids, ",") != want {
 			t.Fatalf("merged ids = %v, want %s (aliases first, native deduped)", ids, want)
 		}
@@ -211,8 +235,8 @@ func TestAliasModelsNativeRouteMergesProxiedList(t *testing.T) {
 		if status != 200 {
 			t.Fatalf("GET /v1/models got %d, want 200 despite dead native upstream", status)
 		}
-		if len(ml.Data) != 2 {
-			t.Fatalf("data has %d entries, want the 2 aliases: %+v", len(ml.Data), ml.Data)
+		if len(ml.Data) != len(testAccountAliasIDs) {
+			t.Fatalf("data has %d entries, want the account aliases: %+v", len(ml.Data), ml.Data)
 		}
 	})
 }
@@ -234,30 +258,30 @@ func postMessages(t *testing.T, g *Gateway, model string) (*http.Response, strin
 }
 
 // TestAliasRoutingExplicitChoiceWins: a request naming a configured
-// alias is served via Baseten with the mapped slug regardless of the
+// alias is served via OpenRouter with the mapped slug regardless of the
 // switch position, and telemetry attributes it (requested_model =
-// alias, upstream_model = slug, route_effective = baseten when the
+// alias, upstream_model = slug, route_effective = openrouter when the
 // configured route differs).
 func TestAliasRoutingExplicitChoiceWins(t *testing.T) {
 	for _, tc := range []struct {
 		route         string
 		wantEffective string
 	}{
-		{"baseten", "baseten"},
-		{"anthropic", "baseten"},
+		{"openrouter", "openrouter"},
+		{"anthropic", "openrouter"},
 	} {
 		t.Run("route="+tc.route, func(t *testing.T) {
 			gotModel := make(chan string, 1)
 			basSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/v1/messages" {
-					t.Errorf("unexpected baseten path %q", r.URL.Path)
+					t.Errorf("unexpected openrouter path %q", r.URL.Path)
 				}
 				b, _ := io.ReadAll(r.Body)
 				var m map[string]any
 				_ = json.Unmarshal(b, &m)
 				gotModel <- fmtString(m["model"])
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"VIA-BASETEN"}],"model":"zai-org/GLM-5.2","usage":{"input_tokens":5,"output_tokens":1}}`))
+				_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"VIA-OPENROUTER"}],"model":"zai-org/GLM-5.2","usage":{"input_tokens":5,"output_tokens":1}}`))
 			}))
 			defer basSrv.Close()
 			antSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,21 +294,21 @@ func TestAliasRoutingExplicitChoiceWins(t *testing.T) {
 			stop := start(t, g)
 			defer stop()
 
-			resp, rb := postMessages(t, g, "claude-baseten-glm-5-2")
-			if resp.StatusCode != 200 || !strings.Contains(rb, "VIA-BASETEN") {
+			resp, rb := postMessages(t, g, "claude-openrouter-glm-5-2")
+			if resp.StatusCode != 200 || !strings.Contains(rb, "VIA-OPENROUTER") {
 				t.Fatalf("alias request got %d: %s", resp.StatusCode, rb)
 			}
 			select {
 			case m := <-gotModel:
 				if m != "zai-org/GLM-5.2" {
-					t.Fatalf("baseten upstream got model %q, want zai-org/GLM-5.2", m)
+					t.Fatalf("openrouter upstream got model %q, want zai-org/GLM-5.2", m)
 				}
 			case <-time.After(2 * time.Second):
-				t.Fatal("baseten upstream never received the request")
+				t.Fatal("openrouter upstream never received the request")
 			}
 			rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
 			row := rows[0]
-			if row.RequestedModel != "claude-baseten-glm-5-2" || row.ServedModel != "zai-org/GLM-5.2" {
+			if row.RequestedModel != "claude-openrouter-glm-5-2" || row.ServedModel != "zai-org/GLM-5.2" {
 				t.Fatalf("telemetry attribution wrong: %+v", row)
 			}
 			if row.ConfiguredRoute != tc.route || row.EffectiveProvider != tc.wantEffective {
@@ -294,8 +318,8 @@ func TestAliasRoutingExplicitChoiceWins(t *testing.T) {
 	}
 }
 
-// TestRawSlugRoutingSwitchOff: a raw Baseten slug (contains "/") on an
-// anthropic-shape client is honored verbatim to the baseten route even
+// TestRawSlugRoutingSwitchOff: a raw OpenRouter slug (contains "/") on an
+// anthropic-shape client is honored verbatim to the openrouter route even
 // with the switch off and without any model_aliases configured.
 func TestRawSlugRoutingSwitchOff(t *testing.T) {
 	gotModel := make(chan string, 1)
@@ -313,7 +337,7 @@ func TestRawSlugRoutingSwitchOff(t *testing.T) {
 	}))
 	defer antSrv.Close()
 	cfg := testConfig(t, basSrv.URL, antSrv.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = "anthropic" // switch OFF
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -327,23 +351,23 @@ func TestRawSlugRoutingSwitchOff(t *testing.T) {
 	select {
 	case m := <-gotModel:
 		if m != "zai-org/GLM-5.2" {
-			t.Fatalf("baseten upstream got model %q, want verbatim zai-org/GLM-5.2", m)
+			t.Fatalf("openrouter upstream got model %q, want verbatim zai-org/GLM-5.2", m)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("baseten upstream never received the request")
+		t.Fatal("openrouter upstream never received the request")
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
 	row := rows[0]
 	if row.RequestedModel != "zai-org/GLM-5.2" || row.ServedModel != "zai-org/GLM-5.2" {
 		t.Fatalf("telemetry attribution wrong: %+v", row)
 	}
-	if row.ConfiguredRoute != "anthropic" || row.EffectiveProvider != "baseten" {
-		t.Fatalf("telemetry route/effective = %q/%q, want anthropic/baseten", row.ConfiguredRoute, row.EffectiveProvider)
+	if row.ConfiguredRoute != "anthropic" || row.EffectiveProvider != "openrouter" {
+		t.Fatalf("telemetry route/effective = %q/%q, want anthropic/openrouter", row.ConfiguredRoute, row.EffectiveProvider)
 	}
 }
 
 // TestAliasRequestNoSilentFallback: an alias request is a single
-// baseten attempt. It never falls back to the configured
+// openrouter attempt. It never falls back to the configured
 // fallback_route (an alias sent to Anthropic would 404, and silent
 // substitution is what aliases remove), and it bypasses an active
 // fallback cooldown, while native model requests keep the existing
@@ -351,7 +375,9 @@ func TestRawSlugRoutingSwitchOff(t *testing.T) {
 func TestAliasRequestNoSilentFallback(t *testing.T) {
 	var primaryHits, fbHits int32
 	basSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&primaryHits, 1)
+		if r.URL.Path == "/v1/messages" {
+			atomic.AddInt32(&primaryHits, 1)
+		}
 		w.WriteHeader(503)
 		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}`))
 	}))
@@ -363,7 +389,7 @@ func TestAliasRequestNoSilentFallback(t *testing.T) {
 	}))
 	defer antSrv.Close()
 	cfg := testConfig(t, basSrv.URL, antSrv.URL)
-	rc := aliasedClient(t, "baseten")
+	rc := aliasedClient(t, "openrouter")
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -371,7 +397,7 @@ func TestAliasRequestNoSilentFallback(t *testing.T) {
 	defer stop()
 
 	// Alias request: 503 relayed, no fallback.
-	if resp, _ := postMessages(t, g, "claude-baseten-glm-5-2"); resp.StatusCode != 503 {
+	if resp, _ := postMessages(t, g, "claude-openrouter-glm-5-2"); resp.StatusCode != 503 {
 		t.Fatalf("alias request got %d, want the relayed 503", resp.StatusCode)
 	}
 	if n := atomic.LoadInt32(&fbHits); n != 0 {
@@ -384,19 +410,19 @@ func TestAliasRequestNoSilentFallback(t *testing.T) {
 	if n := atomic.LoadInt32(&fbHits); n != 1 {
 		t.Fatalf("native request should have fallen back once, got %d", n)
 	}
-	// Alias request during cooldown still goes to baseten, not fallback.
-	if resp, _ := postMessages(t, g, "claude-baseten-glm-5-2"); resp.StatusCode != 503 {
-		t.Fatalf("alias request during cooldown got %d, want 503 from baseten", resp.StatusCode)
+	// Alias request during cooldown still goes to openrouter, not fallback.
+	if resp, _ := postMessages(t, g, "claude-openrouter-glm-5-2"); resp.StatusCode != 503 {
+		t.Fatalf("alias request during cooldown got %d, want 503 from openrouter", resp.StatusCode)
 	}
 	if n := atomic.LoadInt32(&fbHits); n != 1 {
 		t.Fatalf("alias request during cooldown must not fall back; fallback hits = %d", n)
 	}
-	if n := atomic.LoadInt32(&primaryHits); n != 3 {
-		t.Fatalf("primary hits = %d, want 3 (two alias + one native)", n)
+	if n := atomic.LoadInt32(&primaryHits); n != 6 {
+		t.Fatalf("primary hits = %d, want 6 (three requests with immediate retries)", n)
 	}
 }
 
-// TestUnknownAliasLoud400: an unrecognized claude-baseten-*/anthropic-baseten-*
+// TestUnknownAliasLoud400: an unrecognized claude-openrouter-*/anthropic-openrouter-*
 // id is a 400 naming the id, the configured aliases, and the fix,
 // never a silent default-model route and never a pass-through to Anthropic.
 func TestUnknownAliasLoud400(t *testing.T) {
@@ -405,9 +431,9 @@ func TestUnknownAliasLoud400(t *testing.T) {
 		route   string
 		aliases bool
 	}{
-		{"switch on with aliases", "baseten", true},
+		{"switch on with aliases", "openrouter", true},
 		{"switch off with aliases", "anthropic", true},
-		{"all aliases removed", "baseten", false},
+		{"all aliases removed", "openrouter", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -419,7 +445,7 @@ func TestUnknownAliasLoud400(t *testing.T) {
 			if tc.aliases {
 				rc = aliasedClient(t, tc.route)
 			} else {
-				rc = resolvedAnthropicBaseten(t)
+				rc = resolvedAnthropicOpenRouter(t)
 				rc.Route = tc.route
 			}
 			g, adminL, _ := newGateway(t, cfg, rc)
@@ -427,17 +453,22 @@ func TestUnknownAliasLoud400(t *testing.T) {
 			stop := start(t, g)
 			defer stop()
 
-			resp, rb := postMessages(t, g, "claude-baseten-removed")
+			resp, rb := postMessages(t, g, "claude-openrouter-removed")
 			if resp.StatusCode != 400 {
 				t.Fatalf("got %d, want 400: %s", resp.StatusCode, rb)
 			}
-			for _, want := range []string{"claude-baseten-removed", "model_aliases", "gateway.yaml", "HUP"} {
+			for _, want := range []string{
+				"claude-openrouter-removed",
+				"eligible aliases",
+				"refresh OpenRouter credentials",
+				"account-scoped model picker",
+			} {
 				if !strings.Contains(rb, want) {
 					t.Errorf("400 body missing %q: %s", want, rb)
 				}
 			}
 			if tc.aliases {
-				for _, want := range []string{"anthropic-baseten-kimi", "claude-baseten-glm-5-2"} {
+				for _, want := range []string{"anthropic-openrouter-kimi", "claude-openrouter-glm-5-2"} {
 					if !strings.Contains(rb, want) {
 						t.Errorf("400 body should list configured alias %q: %s", want, rb)
 					}
@@ -460,7 +491,7 @@ func TestModelAliasConfigValidation(t *testing.T) {
 			BindAddr:      "127.0.0.1:0",
 			ProtocolShape: "anthropic",
 			DefaultModel:  "zai-org/GLM-5.2",
-			ModelAliases:  map[string]string{"claude-baseten-glm-5-2": "zai-org/GLM-5.2"},
+			ModelAliases:  map[string]string{"claude-openrouter-glm-5-2": "zai-org/GLM-5.2"},
 		}
 		mut(&c)
 		return &config.File{
@@ -476,14 +507,14 @@ func TestModelAliasConfigValidation(t *testing.T) {
 		wantErr string
 	}{
 		{"valid", func(c *config.Client) {}, ""},
-		{"anthropic-baseten namespace valid", func(c *config.Client) {
-			c.ModelAliases = map[string]string{"anthropic-baseten-kimi": "moonshotai/Kimi-K2.7-Code"}
+		{"anthropic-openrouter namespace valid", func(c *config.Client) {
+			c.ModelAliases = map[string]string{"anthropic-openrouter-kimi": "moonshotai/Kimi-K2.7-Code"}
 		}, ""},
 		{"openai shape rejected", func(c *config.Client) {
 			c.ProtocolShape = "openai"
 		}, "protocol_shape anthropic"},
 		{"picker filter", func(c *config.Client) {
-			c.ModelAliases = map[string]string{"glm-baseten-5-2": "zai-org/GLM-5.2"}
+			c.ModelAliases = map[string]string{"glm-openrouter-5-2": "zai-org/GLM-5.2"}
 		}, "discovery filter"},
 		{"real anthropic name", func(c *config.Client) {
 			c.ModelAliases = map[string]string{"claude-sonnet-4-6": "zai-org/GLM-5.2"}
@@ -497,8 +528,8 @@ func TestModelAliasConfigValidation(t *testing.T) {
 			c.ModelAliases = map[string]string{"claude-fable-5": "zai-org/GLM-5.2"}
 		}, "real Anthropic model names"},
 		{"empty slug", func(c *config.Client) {
-			c.ModelAliases = map[string]string{"claude-baseten-x": ""}
-		}, "empty Baseten slug"},
+			c.ModelAliases = map[string]string{"claude-openrouter-x": ""}
+		}, "empty OpenRouter slug"},
 		{"disabled client skipped", func(c *config.Client) {
 			c.Enabled = false
 			c.ModelAliases = map[string]string{"bad-id": "x"}
@@ -525,14 +556,14 @@ func TestModelAliasConfigValidation(t *testing.T) {
 // TestResolvedClientHashCoversModelAliases: an alias change must
 // respawn the listener on SIGHUP.
 func TestResolvedClientHashCoversModelAliases(t *testing.T) {
-	a := resolvedClientConfig{Name: "claude-code", BindAddr: "127.0.0.1:18081", ProtocolShape: "anthropic", Route: "baseten"}
+	a := resolvedClientConfig{Name: "claude-code", BindAddr: "127.0.0.1:18081", ProtocolShape: "anthropic", Route: "openrouter"}
 	b := a
-	b.ModelAliases = map[string]string{"claude-baseten-glm-5-2": "zai-org/GLM-5.2"}
+	b.ModelAliases = map[string]string{"claude-openrouter-glm-5-2": "zai-org/GLM-5.2"}
 	if a.hash() == b.hash() {
 		t.Fatal("hash must change when model_aliases change")
 	}
 	c := b
-	c.ModelAliases = map[string]string{"claude-baseten-glm-5-2": "other/slug"}
+	c.ModelAliases = map[string]string{"claude-openrouter-glm-5-2": "other/slug"}
 	if b.hash() == c.hash() {
 		t.Fatal("hash must change when an alias target changes")
 	}

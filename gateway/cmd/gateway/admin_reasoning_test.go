@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
 const adminReasoningCatalogFixture = `{
@@ -27,8 +27,8 @@ const adminReasoningCatalogFixture = `{
       "gpt-test": {"id": "gpt-test", "name": "GPT Test"}
     }
   },
-  "baseten": {
-    "id": "baseten",
+  "openrouter": {
+    "id": "openrouter",
     "models": {
       "zai-org/GLM-5.2": {
         "id": "zai-org/GLM-5.2",
@@ -80,6 +80,14 @@ func adminReasoningSnapshot(
 	); err != nil {
 		t.Fatal(err)
 	}
+	if err := catalog.ReplaceOpenRouterCatalog(
+		[]byte(testOpenRouterAccountCatalog),
+		"openrouter_models_user",
+		capturedAt,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
 	return catalog.Capture()
 }
 
@@ -88,19 +96,19 @@ func TestClientReasoningProjectionDeduplicatesReachableTargets(t *testing.T) {
 	rc := resolvedClientConfig{
 		Name:          "claude-code",
 		ProtocolShape: "anthropic",
-		Route:         "baseten",
+		Route:         "openrouter",
 		DefaultModel:  "zai-org/GLM-5.2",
 		ModelAliases: map[string]string{
-			"claude-baseten-glm":  "zai-org/GLM-5.2",
-			"claude-baseten-kimi": "moonshotai/Kimi-K2.7-Code",
+			"claude-openrouter-glm":  "zai-org/GLM-5.2",
+			"claude-openrouter-kimi": "moonshotai/Kimi-K2.7-Code",
 		},
 		ModelRoutes: map[string]string{
-			"opus":   "claude-baseten-glm",
+			"opus":   "claude-openrouter-glm",
 			"sonnet": "zai-org/GLM-5.2",
 		},
-		SubagentModel: "claude-baseten-glm",
+		SubagentModel: "claude-openrouter-glm",
 		ModelOptions: config.ModelOptions{
-			"baseten": {
+			"openrouter": {
 				"zai-org/GLM-5.2": {},
 				// An explicit raw slug is reachable on an Anthropic
 				// client even when it is not a current route surface.
@@ -109,7 +117,7 @@ func TestClientReasoningProjectionDeduplicatesReachableTargets(t *testing.T) {
 		},
 	}
 	got := computeClientModelOptions(rc, snapshot)
-	models := got[pricing.ProviderBaseten]
+	models := got[pricing.ProviderOpenRouter]
 	if len(models) != 3 {
 		t.Fatalf("models = %#v, want three unique canonical targets", models)
 	}
@@ -138,13 +146,13 @@ func TestClientReasoningProjectionDeduplicatesReachableTargets(t *testing.T) {
 	}
 	deepseek := models["deepseek-ai/DeepSeek-V4-Pro"].Reasoning
 	if deepseek == nil ||
-		deepseek.Effective.Mode != "passthrough" ||
-		deepseek.Source != "internal_passthrough" ||
+		deepseek.Effective.Mode != "off" ||
+		deepseek.Source != "compatibility_default" ||
 		!deepseek.Available ||
-		len(deepseek.AvailableModes) != 0 ||
+		!slices.Equal(deepseek.AvailableModes, []string{"off", "follow_harness"}) ||
 		deepseek.UnavailableReason != "" ||
 		deepseek.Error != "" {
-		t.Fatalf("adapter-less projection = %+v", deepseek)
+		t.Fatalf("DeepSeek projection = %+v", deepseek)
 	}
 }
 
@@ -181,11 +189,11 @@ func TestClientReasoningProjectionDefaultsFromCapabilityAndAdapter(
 			wantModes:  []string{"off", "follow_harness"},
 		},
 		{
-			name:       "effort only is read-only passthrough",
+			name:       "DeepSeek toggle",
 			model:      "deepseek-ai/DeepSeek-V4-Pro",
-			wantMode:   "passthrough",
-			wantSource: "internal_passthrough",
-			wantModes:  []string{},
+			wantMode:   "off",
+			wantSource: "compatibility_default",
+			wantModes:  []string{"off", "follow_harness"},
 		},
 		{
 			name:       "no controls is read-only passthrough",
@@ -206,13 +214,13 @@ func TestClientReasoningProjectionDefaultsFromCapabilityAndAdapter(
 			rc := resolvedClientConfig{
 				Name:          "claude-code",
 				ProtocolShape: "anthropic",
-				Route:         "baseten",
+				Route:         "openrouter",
 				DefaultModel:  tc.model,
 			}
 			status := computeClientModelOptions(
 				rc,
 				snapshot,
-			)[pricing.ProviderBaseten][tc.model].Reasoning
+			)[pricing.ProviderOpenRouter][tc.model].Reasoning
 			if status == nil ||
 				status.Configured.Mode != "default" ||
 				status.Effective.Mode != tc.wantMode ||
@@ -227,16 +235,16 @@ func TestClientReasoningProjectionDefaultsFromCapabilityAndAdapter(
 	}
 }
 
-func TestClientReasoningProjectionRejectsSavedUnsupportedOff(t *testing.T) {
+func TestClientReasoningProjectionRejectsSavedOffWithoutControls(t *testing.T) {
 	snapshot := adminReasoningSnapshot(t, time.Now().UTC())
 	rc := resolvedClientConfig{
 		Name:          "claude-code",
 		ProtocolShape: "anthropic",
-		Route:         "baseten",
-		DefaultModel:  "deepseek-ai/DeepSeek-V4-Pro",
+		Route:         "openrouter",
+		DefaultModel:  "example/No-Control",
 		ModelOptions: config.ModelOptions{
-			pricing.ProviderBaseten: {
-				"deepseek-ai/DeepSeek-V4-Pro": {
+			pricing.ProviderOpenRouter: {
+				"example/No-Control": {
 					Reasoning: &config.ReasoningPolicy{
 						Mode: config.ReasoningOff,
 					},
@@ -247,12 +255,12 @@ func TestClientReasoningProjectionRejectsSavedUnsupportedOff(t *testing.T) {
 	status := computeClientModelOptions(
 		rc,
 		snapshot,
-	)[pricing.ProviderBaseten]["deepseek-ai/DeepSeek-V4-Pro"].Reasoning
+	)[pricing.ProviderOpenRouter]["example/No-Control"].Reasoning
 	if status == nil ||
 		status.Configured.Mode != "off" ||
 		status.Effective.Mode != "off" ||
 		status.Available ||
-		status.UnavailableReason != reasoningUnavailableAdapter ||
+		status.UnavailableReason != reasoningUnavailableCatalogUnknown ||
 		status.Error == "" {
 		t.Fatalf("saved unsupported Off projection = %+v", status)
 	}
@@ -263,10 +271,10 @@ func TestClientReasoningProjectionPreservesUnavailableSavedEffort(t *testing.T) 
 	rc := resolvedClientConfig{
 		Name:          "claude-code",
 		ProtocolShape: "anthropic",
-		Route:         "baseten",
+		Route:         "openrouter",
 		DefaultModel:  "deepseek-ai/DeepSeek-V4-Pro",
 		ModelOptions: config.ModelOptions{
-			"baseten": {
+			"openrouter": {
 				"deepseek-ai/DeepSeek-V4-Pro": {
 					Reasoning: &config.ReasoningPolicy{
 						Mode:   config.ReasoningFixed,
@@ -279,7 +287,7 @@ func TestClientReasoningProjectionPreservesUnavailableSavedEffort(t *testing.T) 
 	status := computeClientModelOptions(
 		rc,
 		snapshot,
-	)[pricing.ProviderBaseten]["deepseek-ai/DeepSeek-V4-Pro"].Reasoning
+	)[pricing.ProviderOpenRouter]["deepseek-ai/DeepSeek-V4-Pro"].Reasoning
 	if status == nil ||
 		status.Configured.Mode != "fixed" ||
 		status.Configured.Effort != "xhigh" ||
@@ -302,13 +310,13 @@ func TestClientReasoningProjectionStaleRemainsUsableAndUnknownIsLoud(
 	rc := resolvedClientConfig{
 		Name:          "claude-code",
 		ProtocolShape: "anthropic",
-		Route:         "baseten",
+		Route:         "openrouter",
 		DefaultModel:  "zai-org/GLM-5.2",
 	}
 	stale := computeClientModelOptions(
 		rc,
 		staleSnapshot,
-	)[pricing.ProviderBaseten]["zai-org/GLM-5.2"].Reasoning
+	)[pricing.ProviderOpenRouter]["zai-org/GLM-5.2"].Reasoning
 	if stale == nil ||
 		!stale.Available ||
 		len(stale.AvailableModes) != 2 ||
@@ -323,7 +331,7 @@ func TestClientReasoningProjectionStaleRemainsUsableAndUnknownIsLoud(
 	unknown := computeClientModelOptions(
 		rc,
 		staleSnapshot,
-	)[pricing.ProviderBaseten]["zai-org/GLM-6"].Reasoning
+	)[pricing.ProviderOpenRouter]["zai-org/GLM-6"].Reasoning
 	if unknown == nil ||
 		unknown.Effective.Mode != "passthrough" ||
 		unknown.Source != "internal_passthrough" ||
@@ -340,7 +348,7 @@ func TestClientReasoningProjectionUsesEachClientAdapter(
 ) {
 	snapshot := adminReasoningSnapshot(t, time.Now().UTC())
 	options := config.ModelOptions{
-		"baseten": {
+		"openrouter": {
 			"zai-org/GLM-5.2": {
 				Reasoning: &config.ReasoningPolicy{
 					Mode: config.ReasoningFollowHarness,
@@ -351,25 +359,25 @@ func TestClientReasoningProjectionUsesEachClientAdapter(
 	claude := resolvedClientConfig{
 		Name:          "claude-code",
 		ProtocolShape: "anthropic",
-		Route:         "baseten",
+		Route:         "openrouter",
 		DefaultModel:  "zai-org/GLM-5.2",
 		ModelOptions:  options,
 	}
 	codex := resolvedClientConfig{
 		Name:          "codex",
 		ProtocolShape: "openai",
-		Route:         "baseten",
+		Route:         "openrouter",
 		DefaultModel:  "zai-org/GLM-5.2",
 		ModelOptions:  options,
 	}
 	claudeStatus := computeClientModelOptions(
 		claude,
 		snapshot,
-	)[pricing.ProviderBaseten]["zai-org/GLM-5.2"].Reasoning
+	)[pricing.ProviderOpenRouter]["zai-org/GLM-5.2"].Reasoning
 	codexStatus := computeClientModelOptions(
 		codex,
 		snapshot,
-	)[pricing.ProviderBaseten]["zai-org/GLM-5.2"].Reasoning
+	)[pricing.ProviderOpenRouter]["zai-org/GLM-5.2"].Reasoning
 	if claudeStatus == nil || !claudeStatus.Available {
 		t.Fatalf("Claude projection = %+v", claudeStatus)
 	}
@@ -395,7 +403,7 @@ func TestAdminStatusIncludesDisabledClientReasoningProjection(t *testing.T) {
 			ProtocolShape: "anthropic",
 			DefaultModel:  "zai-org/GLM-5.2",
 			ModelOptions: config.ModelOptions{
-				"baseten": {
+				"openrouter": {
 					"zai-org/GLM-5.2": {
 						Reasoning: &config.ReasoningPolicy{
 							Mode: config.ReasoningFollowHarness,
@@ -410,6 +418,14 @@ func TestAdminStatusIncludesDisabledClientReasoningProjection(t *testing.T) {
 		[]byte(adminReasoningCatalogFixture),
 		time.Now().UTC(),
 		`"reasoning-status"`,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.ReplaceOpenRouterCatalog(
+		[]byte(testOpenRouterAccountCatalog),
+		"openrouter_models_user",
+		time.Now().UTC(),
+		"",
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +461,7 @@ func TestAdminStatusIncludesDisabledClientReasoningProjection(t *testing.T) {
 		response.Clients[0].Enabled {
 		t.Fatalf("clients = %+v", response.Clients)
 	}
-	status := response.Clients[0].ModelOptions[pricing.ProviderBaseten]["zai-org/GLM-5.2"].Reasoning
+	status := response.Clients[0].ModelOptions[pricing.ProviderOpenRouter]["zai-org/GLM-5.2"].Reasoning
 	if status == nil ||
 		status.Configured.Mode != "follow_harness" ||
 		status.Effective.Mode != "follow_harness" ||
@@ -484,6 +500,14 @@ func TestReasoningPreflightChecksOnlyRequestedClient(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	if err := catalog.ReplaceOpenRouterCatalog(
+		[]byte(testOpenRouterAccountCatalog),
+		"openrouter_models_user",
+		time.Now().UTC(),
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
 	g := &Gateway{
 		cfg:              Config{},
 		pricing:          catalog,
@@ -491,7 +515,7 @@ func TestReasoningPreflightChecksOnlyRequestedClient(t *testing.T) {
 	}
 	body := `{
 		"client":"parked-claude",
-		"provider":"baseten",
+		"provider":"openrouter",
 		"model":"moonshotai/Kimi-K2.7-Code",
 		"policy":{"mode":"off"}
 	}`
@@ -569,7 +593,7 @@ func TestReasoningPreflightRejectsInvalidPolicyStructure(t *testing.T) {
 				http.MethodPost,
 				"/v1/admin/reasoning/preflight",
 				strings.NewReader(
-					`{"client":"claude-code","provider":"baseten","model":"zai-org/GLM-5.2","policy":`+
+					`{"client":"claude-code","provider":"openrouter","model":"zai-org/GLM-5.2","policy":`+
 						test.policy+`}`,
 				),
 			)

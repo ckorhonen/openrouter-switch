@@ -105,18 +105,18 @@ type Client struct {
 	ProtocolShape string     `yaml:"protocol_shape,omitempty" json:"protocol_shape,omitempty"`
 	AuthToken     *AuthToken `yaml:"auth_token,omitempty" json:"auth_token,omitempty"`
 	DefaultModel  string     `yaml:"default_model,omitempty" json:"default_model,omitempty"`
-	// ModelAliases maps picker-visible model ids to Baseten slugs for
+	// ModelAliases maps picker-visible model ids to OpenRouter slugs for
 	// Claude Code's gateway model discovery (the model-discovery contract).
 	// Anthropic-shape clients only. Alias ids must begin with "claude"
 	// or "anthropic" (the picker drops everything else before caching)
 	// and must not shadow real Anthropic model names;
 	// violations are config-load errors. While global routing is On, a
-	// request naming an alias is an explicit Baseten choice. While Off,
-	// the request fails locally without consulting Baseten.
+	// request naming an alias is an explicit OpenRouter choice. While Off,
+	// the request fails locally without consulting OpenRouter.
 	ModelAliases map[string]string `yaml:"model_aliases,omitempty" json:"model_aliases,omitempty"`
 	// SubagentModel is the rewrite target for Claude Code sidechain
 	// (subagent) requests on an anthropic-shape client: a gateway alias
-	// (must exist in this client's model_aliases), a raw Baseten slug
+	// (must exist in this client's model_aliases), a raw OpenRouter slug
 	// (contains "/"), or a native claude-*/anthropic-* id. Empty means
 	// no rewrite. See the subagent-routing contract.
 	SubagentModel string `yaml:"subagent_model,omitempty" json:"subagent_model,omitempty"`
@@ -129,7 +129,7 @@ type Client struct {
 	// ModelRoutes pins per-family routing for an anthropic-shape client,
 	// overriding the switch for the matched traffic. Keys are the bare
 	// family words fable, opus, sonnet, and haiku; values are "native", a
-	// gateway alias (must exist in model_aliases), or a raw Baseten slug
+	// gateway alias (must exist in model_aliases), or a raw OpenRouter slug
 	// (contains "/"). See config/schema.md.
 	ModelRoutes map[string]string `yaml:"model_routes,omitempty" json:"model_routes,omitempty"`
 	// ModelOptions contains client-scoped provider/model behavior.
@@ -143,20 +143,19 @@ type Client struct {
 	// protocol_shape.
 	FallbackRoute string `yaml:"fallback_route,omitempty" json:"fallback_route,omitempty"`
 	// UpstreamShape overrides the wire shape used toward the upstream on
-	// the baseten route. Setting "openai" on an anthropic listener makes
+	// the openrouter route. Setting "openai" on an anthropic listener makes
 	// the gateway translate /v1/messages traffic to /v1/chat/completions
-	// (Claude Code on an openai-only Baseten model). Empty = listener shape.
+	// (Claude Code on an openai-only OpenRouter model). Empty = listener shape.
 	UpstreamShape string `yaml:"upstream_shape,omitempty" json:"upstream_shape,omitempty"`
 	// ResponsesStripToolTypes lists tools[] entry types the gateway
-	// strips from /v1/responses bodies before a baseten-route attempt
-	// (codex emits tool_search, which inference.baseten.co rejects with
-	// a 400; see the Responses compatibility contract). Openai-shape clients
+	// strips from /v1/responses bodies before an OpenRouter attempt when a
+	// selected model rejects a harness-specific tool type. OpenAI-shape clients
 	// only; the field on an anthropic-shape client is a config-load
 	// error. The native fallback attempt keeps the original body. No
 	// tool types are baked into the gateway; empty strips nothing.
 	ResponsesStripToolTypes []string `yaml:"responses_strip_tool_types,omitempty" json:"responses_strip_tool_types,omitempty"`
 	// ResponsesCompatibility configures Responses API request and stream
-	// safeguards for Baseten attempts. A missing block disables every optional
+	// safeguards for OpenRouter attempts. A missing block disables every optional
 	// normalization rule. OpenAI-shape clients only.
 	ResponsesCompatibility *ResponsesCompatibility `yaml:"responses_compatibility,omitempty" json:"responses_compatibility,omitempty"`
 	// TTFTTimeout overrides global.ttft_timeout for this harness: the
@@ -176,7 +175,7 @@ type DoorPort struct {
 	RouterAddr string `yaml:"router_addr" json:"router_addr"`
 }
 
-// Door configures the `baseten-switch door` front-door process. When present,
+// Door configures the `openrouter-switch door` front-door process. When present,
 // the process derives its port map from this section instead of launch flags, so
 // gateway.yaml stays the single source of truth for the whole request
 // path. Durations use Go syntax ("15s").
@@ -249,7 +248,7 @@ func TelemetryRetentionDays(global Global) int {
 
 func DefaultTelemetryDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "baseten-switch", "telemetry")
+	return filepath.Join(home, ".config", "openrouter-switch", "telemetry")
 }
 
 type File struct {
@@ -286,6 +285,28 @@ func ValidModelRouteKey(key string) bool {
 func ValidateRoutingPolicy(f *File) error {
 	if f == nil {
 		return fmt.Errorf("routing policy: nil config")
+	}
+	authKeys := make([]string, 0, len(f.Global.Auth))
+	for key := range f.Global.Auth {
+		authKeys = append(authKeys, key)
+	}
+	sort.Strings(authKeys)
+	for _, key := range authKeys {
+		switch key {
+		case "anthropic":
+		case "openrouter":
+			return fmt.Errorf(
+				"routing policy: global.auth.openrouter is unsupported; " +
+					"store OpenRouter API keys in Keychain with " +
+					"'openrouter-switch auth set-key'",
+			)
+		default:
+			return fmt.Errorf(
+				"routing policy: global.auth key %q is unsupported "+
+					"(allowed: anthropic)",
+				key,
+			)
+		}
 	}
 	if f.Global.RoutingEnabled == nil {
 		return fmt.Errorf("routing policy: global.routing_enabled must be explicitly true or false")
@@ -324,8 +345,11 @@ func ValidateRoutingPolicy(f *File) error {
 			continue
 		}
 		target := c.DefaultModel
-		if target == "" || !strings.Contains(target, "/") {
-			return fmt.Errorf("routing policy: enabled client %q requires a Baseten default_model target", c.Name)
+		routingEnabled := f.Global.RoutingEnabled != nil &&
+			*f.Global.RoutingEnabled
+		if routingEnabled &&
+			(target == "" || !strings.Contains(target, "/")) {
+			return fmt.Errorf("routing policy: enabled client %q requires an OpenRouter default_model target before routing can be enabled", c.Name)
 		}
 	}
 	return nil
@@ -341,9 +365,9 @@ func validateModelOptions(
 	}
 	sort.Strings(providers)
 	for _, provider := range providers {
-		if provider != "baseten" {
+		if provider != "openrouter" {
 			return fmt.Errorf(
-				"routing policy: %s provider %q is unsupported (allowed: baseten)",
+				"routing policy: %s provider %q is unsupported (allowed: openrouter)",
 				path,
 				provider,
 			)
@@ -499,26 +523,26 @@ func Marshal(f *File) ([]byte, error) {
 // lifecycle commands both use it so the user sees one message with one
 // fix everywhere (the lifecycle contract, no-config landmine).
 func MissingConfigMessage(path string) string {
-	return fmt.Sprintf("no gateway config at %s. Fix: run 'baseten-switch config init' to generate the default config there (reference: config/gateway.example.yaml and config/schema.md in the baseten-switch repo), or set BASETEN_SWITCH_CONFIG_PATH to an existing config", path)
+	return fmt.Sprintf("no gateway config at %s. Fix: run 'openrouter-switch config init' to generate the default config there (reference: config/gateway.example.yaml and config/schema.md in the openrouter-switch repo), or set OPENROUTER_SWITCH_CONFIG_PATH to an existing config", path)
 }
 
 // MalformedConfigMessage is the shared hard-refusal text for a config
 // file that exists but does not load.
 func MalformedConfigMessage(path string, err error) string {
-	return fmt.Sprintf("gateway config %s is malformed: %v. Fix: repair the file (reference: config/schema.md and config/gateway.example.yaml in the baseten-switch repo)", path, err)
+	return fmt.Sprintf("gateway config %s is malformed: %v. Fix: repair the file (reference: config/schema.md and config/gateway.example.yaml in the openrouter-switch repo)", path, err)
 }
 
 func DefaultPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "baseten-switch", "gateway.yaml")
+	return filepath.Join(home, ".config", "openrouter-switch", "gateway.yaml")
 }
 
 func EnvFilePath() string {
-	if path := os.Getenv("BASETEN_SWITCH_ENV_FILE"); path != "" {
+	if path := os.Getenv("OPENROUTER_SWITCH_ENV_FILE"); path != "" {
 		return path
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "baseten-switch", "env")
+	return filepath.Join(home, ".config", "openrouter-switch", "env")
 }
 
 func (f *File) CollectPlaceholders() []string {

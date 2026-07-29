@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
 func TestModelCatalogHealthJSONReportsEveryProvider(t *testing.T) {
@@ -33,7 +33,6 @@ func TestModelCatalogHealthJSONReportsEveryProvider(t *testing.T) {
 	for _, provider := range []string{
 		pricing.ProviderAnthropic,
 		pricing.ProviderOpenAI,
-		pricing.ProviderBaseten,
 	} {
 		raw, ok := result[provider]
 		if !ok {
@@ -73,6 +72,12 @@ func TestModelCatalogHealthJSONReportsEveryProvider(t *testing.T) {
 			t.Errorf("%s last_error = %v, want null", provider, health["last_error"])
 		}
 	}
+	openrouter := result[pricing.ProviderOpenRouter].(map[string]any)
+	if openrouter["source"] != "" ||
+		openrouter["loaded_from"] != "" ||
+		openrouter["model_count"] != 0 {
+		t.Fatalf("models.dev became OpenRouter authority: %+v", openrouter)
+	}
 
 	anthropic := result[pricing.ProviderAnthropic].(map[string]any)
 	if anthropic["model_count"] != 3 ||
@@ -83,7 +88,7 @@ func TestModelCatalogHealthJSONReportsEveryProvider(t *testing.T) {
 	}
 }
 
-func TestModelCatalogHealthReportsSanitizedReasoningDiagnostics(
+func TestModelCatalogHealthIgnoresModelsDevOpenRouterDiagnostics(
 	t *testing.T,
 ) {
 	fixture := strings.Replace(
@@ -107,11 +112,9 @@ func TestModelCatalogHealthReportsSanitizedReasoningDiagnostics(
 		pricing:              p,
 		publicCatalogRefresh: newPublicCatalogRefreshManager(),
 	}
-	health := g.modelCatalogHealthJSON()[pricing.ProviderBaseten].(map[string]any)
+	health := g.modelCatalogHealthJSON()[pricing.ProviderOpenRouter].(map[string]any)
 	diagnostics, ok := health["diagnostics"].([]string)
-	if !ok || len(diagnostics) != 1 ||
-		diagnostics[0] !=
-			"ignored 1 unknown reasoning option type(s)" {
+	if !ok || len(diagnostics) != 0 {
 		t.Fatalf("diagnostics = %#v", health["diagnostics"])
 	}
 	encoded, err := json.Marshal(health)
@@ -124,7 +127,7 @@ func TestModelCatalogHealthReportsSanitizedReasoningDiagnostics(
 	}
 }
 
-func TestModelCatalogHealthJSONUsesAuthenticatedBasetenRefreshState(t *testing.T) {
+func TestModelCatalogHealthJSONUsesAuthenticatedOpenRouterRefreshState(t *testing.T) {
 	publicAt := time.Date(2026, time.July, 27, 8, 0, 0, 0, time.UTC)
 	authAt := publicAt.Add(time.Hour)
 	p := pricing.New()
@@ -135,9 +138,9 @@ func TestModelCatalogHealthJSONUsesAuthenticatedBasetenRefreshState(t *testing.T
 	); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.ReplaceBasetenCatalog(
+	if err := p.ReplaceOpenRouterCatalog(
 		[]byte(liveCatalogFixture),
-		"baseten_v1_models",
+		"openrouter_models_user",
 		authAt,
 		"",
 	); err != nil {
@@ -164,17 +167,17 @@ func TestModelCatalogHealthJSONUsesAuthenticatedBasetenRefreshState(t *testing.T
 	}
 
 	result := g.modelCatalogHealthJSON()
-	baseten := result[pricing.ProviderBaseten].(map[string]any)
-	if baseten["source"] != "baseten_v1_models" {
-		t.Fatalf("Baseten source = %v", baseten["source"])
+	openrouter := result[pricing.ProviderOpenRouter].(map[string]any)
+	if openrouter["source"] != "openrouter_models_user" {
+		t.Fatalf("OpenRouter source = %v", openrouter["source"])
 	}
-	if baseten["last_attempt_at"] != rfc3339OrEmpty(authManager.lastAttempt) ||
-		baseten["last_success_at"] != rfc3339OrEmpty(authManager.lastSuccess) ||
-		baseten["next_refresh_at"] != rfc3339OrEmpty(authManager.nextAt) {
-		t.Fatalf("Baseten refresh timing = %+v", baseten)
+	if openrouter["last_attempt_at"] != rfc3339OrEmpty(authManager.lastAttempt) ||
+		openrouter["last_success_at"] != rfc3339OrEmpty(authManager.lastSuccess) ||
+		openrouter["next_refresh_at"] != rfc3339OrEmpty(authManager.nextAt) {
+		t.Fatalf("OpenRouter refresh timing = %+v", openrouter)
 	}
-	if baseten["last_error"] != "catalog cache operation failed" {
-		t.Fatalf("Baseten last_error = %v", baseten["last_error"])
+	if openrouter["last_error"] != "catalog cache operation failed" {
+		t.Fatalf("OpenRouter last_error = %v", openrouter["last_error"])
 	}
 	if anthropic := result[pricing.ProviderAnthropic].(map[string]any); anthropic["last_attempt_at"] != rfc3339OrEmpty(publicManager.lastAttempt) {
 		t.Fatalf("Anthropic refresh timing = %+v", anthropic)

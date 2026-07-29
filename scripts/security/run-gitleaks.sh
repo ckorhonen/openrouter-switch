@@ -34,11 +34,11 @@ esac
 [[ "$expected_sha256" =~ ^[0-9a-f]{64}$ ]] \
     || fail "invalid pinned SHA-256 for $platform"
 
-tool_root="$(mktemp -d "${TMPDIR:-/tmp}/baseten-switch-gitleaks.XXXXXX")"
+tool_root="$(mktemp -d "${TMPDIR:-/tmp}/openrouter-switch-gitleaks.XXXXXX")"
 cleanup() {
     if [[ -n "${tool_root:-}" &&
           -d "$tool_root" &&
-          "$(basename "$tool_root")" == baseten-switch-gitleaks.* ]]; then
+          "$(basename "$tool_root")" == openrouter-switch-gitleaks.* ]]; then
         rm -rf -- "$tool_root"
     fi
 }
@@ -47,10 +47,19 @@ trap cleanup EXIT
 asset="gitleaks_${version}_${platform}.tar.gz"
 archive="$tool_root/$asset"
 url="https://github.com/gitleaks/gitleaks/releases/download/v${version}/${asset}"
-curl --fail --silent --show-error --location \
+if ! curl --fail --silent --show-error --location \
     --proto '=https' --tlsv1.2 \
     --output "$archive" \
-    "$url"
+    "$url"; then
+    command -v gh >/dev/null 2>&1 \
+        || fail "download failed and gh is unavailable"
+    rm -f -- "$archive"
+    gh release download "v${version}" \
+        --repo gitleaks/gitleaks \
+        --pattern "$asset" \
+        --dir "$tool_root" \
+        || fail "download failed with curl and gh"
+fi
 
 actual_sha256="$(shasum -a 256 "$archive" | awk '{print $1}')"
 [[ "$actual_sha256" == "$expected_sha256" ]] \
