@@ -18,15 +18,15 @@ const (
 )
 
 var (
-	ErrNotSignedIn     = errors.New("baseten-switch: not signed in. Run 'baseten auth login'")
-	errNoLocator       = errors.New("baseten-switch: no save locator (cannot persist credential)")
+	ErrNotSignedIn     = errors.New("openrouter-switch: not signed in. Run 'baseten auth login'")
+	errNoLocator       = errors.New("openrouter-switch: no save locator (cannot persist credential)")
 	errKeyringNotFound = errors.New("keyring: not found")
 
 	// ErrAPIKeyProfile is the sentinel matched by errors.Is when the
 	// resolved profile authenticates with an API key rather than OAuth.
 	// The concrete error is *APIKeyProfileError, which carries the
 	// resolved profile name and (when readable) the key itself.
-	ErrAPIKeyProfile = errors.New("baseten-switch: profile uses api_key auth (not OAuth)")
+	ErrAPIKeyProfile = errors.New("openrouter-switch: profile uses api_key auth (not OAuth)")
 )
 
 // APIKeyProfileError reports that the resolved profile's auth_type is
@@ -39,7 +39,7 @@ type APIKeyProfileError struct {
 }
 
 func (e *APIKeyProfileError) Error() string {
-	return fmt.Sprintf("baseten-switch: profile %q uses api_key auth (not OAuth)", e.Profile)
+	return fmt.Sprintf("openrouter-switch: profile %q uses api_key auth (not OAuth)", e.Profile)
 }
 
 // Is makes errors.Is(err, ErrAPIKeyProfile) match.
@@ -92,10 +92,10 @@ type credentialProfile struct {
 }
 
 // ProfilePath returns the path to the baseten CLI's auth.json:
-// $BASETEN_SWITCH_AUTH_FILE (test override, full path) > $BASETEN_CONFIG_DIR/auth.json >
+// $OPENROUTER_SWITCH_AUTH_FILE (test override, full path) > $BASETEN_CONFIG_DIR/auth.json >
 // os.UserConfigDir()/baseten/auth.json.
 func ProfilePath() string {
-	if v := os.Getenv("BASETEN_SWITCH_AUTH_FILE"); v != "" {
+	if v := os.Getenv("OPENROUTER_SWITCH_AUTH_FILE"); v != "" {
 		return v
 	}
 	dir := os.Getenv("BASETEN_CONFIG_DIR")
@@ -109,7 +109,7 @@ func ProfilePath() string {
 	return filepath.Join(dir, authFileName)
 }
 
-func keyringDisabled() bool { return os.Getenv("BASETEN_SWITCH_AUTH_NO_KEYRING") != "" }
+func keyringDisabled() bool { return os.Getenv("OPENROUTER_SWITCH_AUTH_NO_KEYRING") != "" }
 
 func keyringGet(service, account string) (string, error) {
 	if keyringDisabled() {
@@ -275,7 +275,7 @@ func Save(loc *SaveLocator, tok *StoredToken) error {
 		return errNoLocator
 	}
 	if tok == nil {
-		return errors.New("baseten-switch: cannot save nil token")
+		return errors.New("openrouter-switch: cannot save nil token")
 	}
 	s := storedOAuthCredential{
 		AccessToken:  tok.AccessToken,

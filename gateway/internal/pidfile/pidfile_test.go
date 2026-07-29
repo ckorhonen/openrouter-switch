@@ -118,7 +118,7 @@ func TestDoorPidfilePath(t *testing.T) {
 		fn      func() string
 		defName string
 	}{
-		{"door", "BASETEN_SWITCH_DOOR_PIDFILE", DoorPath, "door.pid"},
+		{"door", "OPENROUTER_SWITCH_DOOR_PIDFILE", DoorPath, "door.pid"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestDoorPidfilePath(t *testing.T) {
 				t.Fatalf("default basename: got %q want %q", got, tc.defName)
 			}
 			if home, err := os.UserHomeDir(); err == nil {
-				want := filepath.Join(home, ".config", "baseten-switch", tc.defName)
+				want := filepath.Join(home, ".config", "openrouter-switch", tc.defName)
 				if got != want {
 					t.Fatalf("default path: got %q want %q", got, want)
 				}
@@ -146,7 +146,7 @@ func TestDoorPidfilePath(t *testing.T) {
 // orchestrator relies on for the second process.
 func TestDoorPidfileWriteRead(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "door.pid")
-	t.Setenv("BASETEN_SWITCH_DOOR_PIDFILE", p)
+	t.Setenv("OPENROUTER_SWITCH_DOOR_PIDFILE", p)
 	if err := WriteAt(DoorPath(), os.Getpid()); err != nil {
 		t.Fatal(err)
 	}

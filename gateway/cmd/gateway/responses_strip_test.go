@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/proxy"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/proxy"
 )
 
 // TestResponsesStripToolTypesConfigLoad: the knob parses from YAML into

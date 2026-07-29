@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/responsescompat"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/responsescompat"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 const responsesGuardPollInterval = 100 * time.Millisecond

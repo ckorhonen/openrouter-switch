@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pidfile"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/version"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pidfile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/version"
 )
 
 var (
@@ -121,8 +121,8 @@ func (g *Gateway) adminConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // activeConfigPath returns the path the gateway is currently reading
-// gateway.yaml from: cfg.ConfigPath when set (BASETEN_SWITCH_CONFIG_PATH), else
-// the default ~/.config/baseten-switch/gateway.yaml. Admin endpoints
+// gateway.yaml from: cfg.ConfigPath when set (OPENROUTER_SWITCH_CONFIG_PATH), else
+// the default ~/.config/openrouter-switch/gateway.yaml. Admin endpoints
 // always operate on this path so they reflect the live config rather
 // than the homedir default.
 func (g *Gateway) activeConfigPath() string {
@@ -730,13 +730,13 @@ func (g *Gateway) adminSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// adminEnvFilePath honors BASETEN_SWITCH_ENV_FILE for every runtime. Preview additionally
+// adminEnvFilePath honors OPENROUTER_SWITCH_ENV_FILE for every runtime. Preview additionally
 // requires the exact private env file beside its active config. This prevents a
 // misconfigured or symlinked Preview admin endpoint from reading or replacing
-// Stable's ~/.config/baseten-switch/env.
+// Stable's ~/.config/openrouter-switch/env.
 func (g *Gateway) adminEnvFilePath() (string, error) {
 	path := config.EnvFilePath()
-	if os.Getenv("BASETEN_SWITCH_PRIVATE_RUNTIME") != "1" {
+	if os.Getenv("OPENROUTER_SWITCH_PRIVATE_RUNTIME") != "1" {
 		return path, nil
 	}
 
@@ -802,7 +802,7 @@ func (g *Gateway) adminTelemetry(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		w.Header().Set("X-Baseten-Switch-Telemetry-Partial", "true")
-		w.Header().Set("Warning", `199 baseten-switch "telemetry history is partial"`)
+		w.Header().Set("Warning", `199 openrouter-switch "telemetry history is partial"`)
 	}
 	if events == nil {
 		events = []telemetry.EventV1{}

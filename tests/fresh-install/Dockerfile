@@ -1,7 +1,7 @@
 # Fresh-install simulation image: a minimal stand-in for a brand-new
 # Linux machine. Debian slim plus curl and CA certificates, one
 # non-root user with a home directory, nothing else. The single
-# baseten-switch binary is staged in /opt/dist (NOT on PATH);
+# openrouter-switch binary is staged in /opt/dist (NOT on PATH);
 # install-inside.sh places it on PATH, standing in for the go-build step that
 # run.sh performs on the host.
 #
@@ -15,7 +15,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --shell /bin/bash release-user
 
-COPY build/baseten-switch /opt/dist/
+COPY build/openrouter-switch /opt/dist/
 COPY install-inside.sh /opt/fresh-install/install-inside.sh
 
 USER release-user

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/auth"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
 )
 
 func (g *Gateway) handleAuthStatus(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
-# Contributing to Baseten Switch
+# Contributing to OpenRouter Switch
 
-Baseten Switch runs in the credential and prompt path of supported coding
+OpenRouter Switch runs in the credential and prompt path of supported coding
 harnesses. Changes must preserve that trust boundary and keep the runtime
 small and auditable.
 
@@ -12,7 +12,7 @@ small and auditable.
 
 ## Dependency policy
 
-Baseten Switch runs in the credential and prompt path, so dependency changes
+OpenRouter Switch runs in the credential and prompt path, so dependency changes
 receive security review.
 
 - Use the Go standard library and Apple system frameworks first.

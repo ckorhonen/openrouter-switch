@@ -2,7 +2,7 @@ package config
 
 import _ "embed"
 
-// InitTemplate is the default gateway.yaml written by 'baseten-switch
+// InitTemplate is the default gateway.yaml written by 'openrouter-switch
 // config init': the single-port door topology (front door on
 // 127.0.0.1:45271 forwarding to the shared router listener on
 // 127.0.0.1:45272, one global routing gate, Claude Code defaulting

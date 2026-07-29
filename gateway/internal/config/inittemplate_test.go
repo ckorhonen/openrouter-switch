@@ -9,7 +9,7 @@ import (
 
 // TestInitTemplateMatchesExampleConfig pins the go:embed copy
 // (internal/config/gateway.example.yaml) to the repo-level
-// config/gateway.example.yaml byte for byte, so 'baseten-switch config
+// config/gateway.example.yaml byte for byte, so 'openrouter-switch config
 // init' and the documented example can never drift apart. go:embed
 // cannot reach outside the module, hence the copy plus this test.
 func TestInitTemplateMatchesExampleConfig(t *testing.T) {
@@ -42,7 +42,7 @@ func TestInitTemplateLoads(t *testing.T) {
 	}
 
 	// Only claude-code ships enabled; codex is a real client block
-	// parked with enabled: false so 'baseten-switch codex on' can un-park it
+	// parked with enabled: false so 'openrouter-switch codex on' can un-park it
 	// via the scalar editor (the Codex integration contract item 2.2).
 	if len(f.Clients) != 2 {
 		t.Fatalf("want 2 clients (claude-code enabled, codex parked), got %d", len(f.Clients))
@@ -71,7 +71,7 @@ func TestInitTemplateLoads(t *testing.T) {
 		t.Fatalf("second client: got %q; want codex", cx.Name)
 	}
 	if cx.Enabled {
-		t.Errorf("codex enabled %t, want false (ships parked; un-parked by 'baseten-switch codex on')", cx.Enabled)
+		t.Errorf("codex enabled %t, want false (ships parked; un-parked by 'openrouter-switch codex on')", cx.Enabled)
 	}
 	if cx.BindAddr != "127.0.0.1:45272" {
 		t.Errorf("codex bind addr %q, want 127.0.0.1:45272 (shared listener, dispatch by path)", cx.BindAddr)

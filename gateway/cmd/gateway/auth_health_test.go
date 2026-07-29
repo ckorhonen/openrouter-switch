@@ -51,7 +51,7 @@ func newDeadTokenServer(t *testing.T) *deadTokenServer {
 }
 
 // writeOAuthProfile writes a v0.2.x auth.json at the already-set
-// BASETEN_SWITCH_AUTH_FILE with an EXPIRED access token, so the first use forces a
+// OPENROUTER_SWITCH_AUTH_FILE with an EXPIRED access token, so the first use forces a
 // refresh round trip against remoteURL.
 func writeOAuthProfile(t *testing.T, remoteURL, refreshToken string) {
 	t.Helper()
@@ -63,9 +63,9 @@ func writeOAuthProfile(t *testing.T, remoteURL, refreshToken string) {
 // not trigger any refresh traffic.
 func writeOAuthProfileExpiry(t *testing.T, remoteURL, refreshToken string, expiry time.Time) {
 	t.Helper()
-	path := os.Getenv("BASETEN_SWITCH_AUTH_FILE")
+	path := os.Getenv("OPENROUTER_SWITCH_AUTH_FILE")
 	if path == "" {
-		t.Fatal("BASETEN_SWITCH_AUTH_FILE not set (call testConfig first)")
+		t.Fatal("OPENROUTER_SWITCH_AUTH_FILE not set (call testConfig first)")
 	}
 	blob := fmt.Sprintf(`{
   "version": 1,

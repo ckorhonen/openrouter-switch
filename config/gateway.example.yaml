@@ -1,7 +1,7 @@
-# gateway.yaml -- Baseten Switch gateway config ('baseten-switch config init' writes exactly this file).
+# gateway.yaml -- OpenRouter Switch gateway config ('openrouter-switch config init' writes exactly this file).
 # Field reference: config/schema.md.
 # Topology: harness -> door 127.0.0.1:45271 -> router 127.0.0.1:45272.
-# ${VAR} resolves from the environment, then ~/.config/baseten-switch/env (mode 0600); no secrets live here.
+# ${VAR} resolves from the environment, then ~/.config/openrouter-switch/env (mode 0600); no secrets live here.
 
 global:
   # One global switch. Off is absolute native passthrough; On applies saved routing policy.
@@ -13,7 +13,7 @@ global:
     anthropic: ${ANTHROPIC_API_KEY}
 
   # Private segmented JSONL request store; the dashboards read it.
-  telemetry_dir: ~/.config/baseten-switch/telemetry
+  telemetry_dir: ~/.config/openrouter-switch/telemetry
   telemetry_enabled: true
   telemetry_retention_days: 90
 
@@ -47,13 +47,13 @@ clients:
       claude-baseten-glm-5-2:   zai-org/GLM-5.2
       claude-baseten-kimi-k2-7: moonshotai/Kimi-K2.7-Code
       claude-baseten-nemotron:  nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B
-    # Route Claude Code subagent (sidechain) traffic to a model; toggle with 'baseten-switch claude subagents'. See the subagent-routing contract.
+    # Route Claude Code subagent (sidechain) traffic to a model; toggle with 'openrouter-switch claude subagents'. See the subagent-routing contract.
     # subagent_model: claude-baseten-glm-5-2
     # subagent_routing: on
     # Tried when baseten is unreachable, returns 429/5xx, or ttft_timeout expires (30s cooldown).
     fallback_route: anthropic
 
-  # codex ships parked (enabled: false; no listener bound); 'baseten-switch codex on' offers to
+  # codex ships parked (enabled: false; no listener bound); 'openrouter-switch codex on' offers to
   # enable it, or set enabled: true and SIGHUP the router yourself.
   - name: codex
     enabled: false

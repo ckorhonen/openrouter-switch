@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 func ttftPost(t *testing.T, g *Gateway, body string) (*http.Response, string) {

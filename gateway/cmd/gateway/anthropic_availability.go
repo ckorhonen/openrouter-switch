@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 )
 
 const anthropicAvailabilitySource = "anthropic_v1_models"

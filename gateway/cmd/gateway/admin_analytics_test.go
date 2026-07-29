@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/analytics"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/analytics"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 func analyticsGateway(t *testing.T, now time.Time) (*Gateway, string) {

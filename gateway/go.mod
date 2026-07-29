@@ -1,4 +1,4 @@
-module github.com/basetenlabs/baseten-switch/gateway
+module github.com/ckorhonen/openrouter-switch/gateway
 
 go 1.26
 

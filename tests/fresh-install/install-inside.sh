@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # install-inside.sh: runs INSIDE the fresh-install container as the
-# non-root user. Places the single baseten-switch binary on PATH, generates
+# non-root user. Places the single openrouter-switch binary on PATH, generates
 # gateway.yaml with
-# `baseten-switch config init` (single-port door topology, route baseten),
-# write the env file 0600, start the system with `baseten-switch up`
-# (router + door), then verify: `baseten-switch status` exit 0, preflight
+# `openrouter-switch config init` (single-port door topology, route baseten),
+# write the env file 0600, start the system with `openrouter-switch up`
+# (router + door), then verify: `openrouter-switch status` exit 0, preflight
 # output, a routed request through the DOOR port, and a telemetry row.
 #
 # Keyed mode (BASETEN_API_KEY set): the routed request must return 200 with
@@ -23,11 +23,11 @@ FAILED=()
 ok()   { PASS+=("$1");   printf 'PASS: %s\n' "$1"; }
 bad()  { FAILED+=("$1"); printf 'FAIL: %s\n' "$1"; }
 
-GW_LOG="$HOME/.config/baseten-switch/logs/router.log"
-DOOR_LOG="$HOME/.config/baseten-switch/logs/door.log"
-TELEMETRY_DIR="$HOME/.config/baseten-switch/telemetry"
-CFG="$HOME/.config/baseten-switch/gateway.yaml"
-ENV_FILE="$HOME/.config/baseten-switch/env"
+GW_LOG="$HOME/.config/openrouter-switch/logs/router.log"
+DOOR_LOG="$HOME/.config/openrouter-switch/logs/door.log"
+TELEMETRY_DIR="$HOME/.config/openrouter-switch/telemetry"
+CFG="$HOME/.config/openrouter-switch/gateway.yaml"
+ENV_FILE="$HOME/.config/openrouter-switch/env"
 
 NO_KEY=0
 if [[ "${FRESH_INSTALL_NO_KEY:-}" == "1" || -z "${BASETEN_API_KEY:-}" ]]; then
@@ -53,19 +53,19 @@ wait_http() { # url substring tries
 # ---------------------------------------------------- 1. binary on PATH
 step "install the single binary onto PATH (~/.local/bin)"
 mkdir -p "$HOME/.local/bin"
-cp /opt/dist/baseten-switch "$HOME/.local/bin/"
-chmod +x "$HOME/.local/bin/baseten-switch"
+cp /opt/dist/openrouter-switch "$HOME/.local/bin/"
+chmod +x "$HOME/.local/bin/openrouter-switch"
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
 export PATH="$HOME/.local/bin:$PATH"
-if command -v baseten-switch >/dev/null; then
-    ok "baseten-switch on PATH"
+if command -v openrouter-switch >/dev/null; then
+    ok "openrouter-switch on PATH"
 else
-    bad "baseten-switch on PATH"
+    bad "openrouter-switch on PATH"
 fi
 
 # ---------------------------------------------------- 2. gateway.yaml
-step "generate gateway.yaml with 'baseten-switch config init' (single-port door topology)"
-if baseten-switch config init; then
+step "generate gateway.yaml with 'openrouter-switch config init' (single-port door topology)"
+if openrouter-switch config init; then
     ok "config init wrote the default config"
 else
     bad "config init failed"
@@ -81,7 +81,7 @@ else
     bad "gateway.yaml mode is $(stat -c %a "$CFG"), expected 600"
 fi
 # A second init must refuse over the existing file (no --force).
-if baseten-switch config init > /tmp/init2.out 2>&1; then
+if openrouter-switch config init > /tmp/init2.out 2>&1; then
     bad "second config init overwrote an existing config instead of refusing"
 else
     ok "second config init refused over the existing file"
@@ -107,8 +107,8 @@ umask 177
     if [[ "$NO_KEY" == 0 ]]; then
         printf 'BASETEN_API_KEY=%s\n' "$BASETEN_API_KEY"
     fi
-    printf 'BASETEN_SWITCH_API_KEY_FALLBACK=1\n'
-    printf 'ANTHROPIC_AUTH_TOKEN=baseten-switch-fresh-install-local-token\n'
+    printf 'OPENROUTER_SWITCH_API_KEY_FALLBACK=1\n'
+    printf 'ANTHROPIC_AUTH_TOKEN=openrouter-switch-fresh-install-local-token\n'
 } > "$ENV_FILE"
 umask 022
 chmod 600 "$ENV_FILE"
@@ -122,19 +122,19 @@ fi
 unset BASETEN_API_KEY 2>/dev/null || true
 
 # ---------------------------------------------------- 4. start the system
-step "start the system: baseten-switch up (router + door)"
-if baseten-switch up; then
-    ok "baseten-switch up started router + door and reported healthy"
+step "start the system: openrouter-switch up (router + door)"
+if openrouter-switch up; then
+    ok "openrouter-switch up started router + door and reported healthy"
 else
-    bad "baseten-switch up failed"
+    bad "openrouter-switch up failed"
     echo "--- $GW_LOG ---"; cat "$GW_LOG" 2>/dev/null
     echo "--- $DOOR_LOG ---"; cat "$DOOR_LOG" 2>/dev/null
 fi
 
-if baseten-switch status > /tmp/status.out 2>&1; then
-    ok "baseten-switch status exit 0 with both components up"
+if openrouter-switch status > /tmp/status.out 2>&1; then
+    ok "openrouter-switch status exit 0 with both components up"
 else
-    bad "baseten-switch status exited nonzero after up"
+    bad "openrouter-switch status exited nonzero after up"
 fi
 cat /tmp/status.out
 if grep -q 'Router:  up' /tmp/status.out && grep -q 'Door:    up' /tmp/status.out; then
@@ -142,7 +142,7 @@ if grep -q 'Router:  up' /tmp/status.out && grep -q 'Door:    up' /tmp/status.ou
 else
     bad "status output missing Router/Door up lines"
 fi
-if [[ -f "$HOME/.config/baseten-switch/door.pid" ]]; then
+if [[ -f "$HOME/.config/openrouter-switch/door.pid" ]]; then
     ok "door pidfile written"
 else
     bad "door pidfile missing"
@@ -184,8 +184,8 @@ fi
 
 # Informational only: print the same aggregate health view recommended by the
 # install guide.
-echo "--- baseten-switch status ---"
-baseten-switch status || true
+echo "--- openrouter-switch status ---"
+openrouter-switch status || true
 
 # ---------------------------------------------------- 6. routed request
 REQ_BODY='{"model":"claude-opus-4-8","max_tokens":128,"messages":[{"role":"user","content":"Reply with the single word: pong"}]}'
@@ -195,7 +195,7 @@ post_messages() { # port outfile hdrfile
         -X POST "http://127.0.0.1:$1/v1/messages" \
         -H 'content-type: application/json' \
         -H 'anthropic-version: 2023-06-01' \
-        -H 'Authorization: Bearer baseten-switch-fresh-install-local-token' \
+        -H 'Authorization: Bearer openrouter-switch-fresh-install-local-token' \
         -d "$REQ_BODY" 2>/dev/null
 }
 
@@ -230,7 +230,7 @@ else
     # the door working as designed, see internal/door), so the
     # deterministic keyless assertion targets the router directly.
     CODE="$(post_messages 45272 /tmp/resp.json /tmp/resp.hdr)"
-    if [[ "$CODE" == "503" ]] && grep -qi '^x-baseten-switch: needs-login' /tmp/resp.hdr; then
+    if [[ "$CODE" == "503" ]] && grep -qi '^x-openrouter-switch: needs-login' /tmp/resp.hdr; then
         ok "keyless request rejected with 503 needs-login on the router"
     else
         bad "expected 503 with X-Baseten-Switch: needs-login from the router; got HTTP $CODE ($(head -c 200 /tmp/resp.json))"
@@ -241,7 +241,7 @@ else
     # it with a 4xx while the door stamps the response as fallback-served.
     DCODE="$(post_messages 45271 /tmp/door.json /tmp/door.hdr)"
     if [[ "$DCODE" =~ ^4[0-9][0-9]$ ]] &&
-        grep -qi '^x-baseten-switch-door: fallback' /tmp/door.hdr; then
+        grep -qi '^x-openrouter-switch-door: fallback' /tmp/door.hdr; then
         ok "door replayed the keyless request to native fallback (HTTP $DCODE)"
     else
         bad "expected native fallback 4xx with X-Baseten-Switch-Door: fallback; got HTTP $DCODE ($(head -c 200 /tmp/door.json))"

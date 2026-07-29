@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/requestcapability"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/upstreamerror"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/requestcapability"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/upstreamerror"
 )
 
 type requestMultimodalState struct {

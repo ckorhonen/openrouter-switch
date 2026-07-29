@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/auth"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
 
 	"golang.org/x/oauth2"
 	"time"
@@ -213,7 +213,7 @@ func TestAuthTickStopsOnShutdown(t *testing.T) {
 //   - generation: a refresh in flight across a refreshAuth swap completes
 //     against the OLD client; its outcome (failure OR success) must not
 //     touch the new lineage's state. Without the guard, a stale
-//     invalid_grant landing just after 'baseten-switch auth login' marks the
+//     invalid_grant landing just after 'openrouter-switch auth login' marks the
 //     NEW fingerprint dead and permanently disarms the store-watch
 //     self-heal (store fp == deadFP).
 //   - fingerprint: a successful refresh advances authCredFP to the token
@@ -326,7 +326,7 @@ func TestAuthRotatedDeathDoesNotFlapHealth(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	// Emulate CachingTokenSource's rotation persistence: Save is a
-	// keyring write and the hermetic store runs with BASETEN_SWITCH_AUTH_NO_KEYRING,
+	// keyring write and the hermetic store runs with OPENROUTER_SWITCH_AUTH_NO_KEYRING,
 	// so mirror what a keyring-enabled Save does and put the rotated
 	// token in the store before the death.
 	writeOAuthProfile(t, tokenSrv.srv.URL, "rt-rotated")

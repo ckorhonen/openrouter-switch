@@ -34,11 +34,11 @@ esac
 [[ "$expected_sha256" =~ ^[0-9a-f]{64}$ ]] \
     || fail "invalid pinned SHA-256 for $platform"
 
-tool_root="$(mktemp -d "${TMPDIR:-/tmp}/baseten-switch-gitleaks.XXXXXX")"
+tool_root="$(mktemp -d "${TMPDIR:-/tmp}/openrouter-switch-gitleaks.XXXXXX")"
 cleanup() {
     if [[ -n "${tool_root:-}" &&
           -d "$tool_root" &&
-          "$(basename "$tool_root")" == baseten-switch-gitleaks.* ]]; then
+          "$(basename "$tool_root")" == openrouter-switch-gitleaks.* ]]; then
         rm -rf -- "$tool_root"
     fi
 }

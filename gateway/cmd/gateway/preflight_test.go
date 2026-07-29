@@ -7,15 +7,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 // noAuthStore points the auth loader at an empty temp store so preflight
 // sees "no OAuth credential" regardless of the developer's real keychain.
 func noAuthStore(t *testing.T) {
 	t.Helper()
-	t.Setenv("BASETEN_SWITCH_AUTH_NO_KEYRING", "1")
-	t.Setenv("BASETEN_SWITCH_AUTH_FILE", filepath.Join(t.TempDir(), "auth.json"))
+	t.Setenv("OPENROUTER_SWITCH_AUTH_NO_KEYRING", "1")
+	t.Setenv("OPENROUTER_SWITCH_AUTH_FILE", filepath.Join(t.TempDir(), "auth.json"))
 }
 
 func writeYAML(t *testing.T, content string) string {
@@ -74,9 +74,9 @@ func TestUnresolvedPlaceholders(t *testing.T) {
 // ${VAR} key set via global.auth in gateway.yaml lands in the process env
 // and on cfg.BasetenKey without an admin PUT.
 func TestApplyGlobalAuthAtStartup(t *testing.T) {
-	t.Setenv("TEST_PF_BASETEN_SWITCH_KEY", "sk-boot-42")
+	t.Setenv("TEST_PF_OPENROUTER_SWITCH_KEY", "sk-boot-42")
 	t.Setenv("BASETEN_API_KEY", "")
-	path := writeYAML(t, "global:\n  auth:\n    baseten: ${TEST_PF_BASETEN_SWITCH_KEY}\nclients: []\n")
+	path := writeYAML(t, "global:\n  auth:\n    baseten: ${TEST_PF_OPENROUTER_SWITCH_KEY}\nclients: []\n")
 	cfg := Config{ConfigPath: path}
 	applyGlobalAuth(&cfg)
 	if got := os.Getenv("BASETEN_API_KEY"); got != "sk-boot-42" {
@@ -180,7 +180,7 @@ func TestRunPreflightBanner(t *testing.T) {
 				if err := os.WriteFile(path, []byte(tc.authJSON), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				t.Setenv("BASETEN_SWITCH_AUTH_FILE", path)
+				t.Setenv("OPENROUTER_SWITCH_AUTH_FILE", path)
 			}
 			cfg := Config{
 				ConfigPath: filepath.Join(t.TempDir(), "no-such.yaml"),

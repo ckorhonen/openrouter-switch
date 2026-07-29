@@ -176,7 +176,7 @@ type DoorPort struct {
 	RouterAddr string `yaml:"router_addr" json:"router_addr"`
 }
 
-// Door configures the `baseten-switch door` front-door process. When present,
+// Door configures the `openrouter-switch door` front-door process. When present,
 // the process derives its port map from this section instead of launch flags, so
 // gateway.yaml stays the single source of truth for the whole request
 // path. Durations use Go syntax ("15s").
@@ -249,7 +249,7 @@ func TelemetryRetentionDays(global Global) int {
 
 func DefaultTelemetryDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "baseten-switch", "telemetry")
+	return filepath.Join(home, ".config", "openrouter-switch", "telemetry")
 }
 
 type File struct {
@@ -499,26 +499,26 @@ func Marshal(f *File) ([]byte, error) {
 // lifecycle commands both use it so the user sees one message with one
 // fix everywhere (the lifecycle contract, no-config landmine).
 func MissingConfigMessage(path string) string {
-	return fmt.Sprintf("no gateway config at %s. Fix: run 'baseten-switch config init' to generate the default config there (reference: config/gateway.example.yaml and config/schema.md in the baseten-switch repo), or set BASETEN_SWITCH_CONFIG_PATH to an existing config", path)
+	return fmt.Sprintf("no gateway config at %s. Fix: run 'openrouter-switch config init' to generate the default config there (reference: config/gateway.example.yaml and config/schema.md in the openrouter-switch repo), or set OPENROUTER_SWITCH_CONFIG_PATH to an existing config", path)
 }
 
 // MalformedConfigMessage is the shared hard-refusal text for a config
 // file that exists but does not load.
 func MalformedConfigMessage(path string, err error) string {
-	return fmt.Sprintf("gateway config %s is malformed: %v. Fix: repair the file (reference: config/schema.md and config/gateway.example.yaml in the baseten-switch repo)", path, err)
+	return fmt.Sprintf("gateway config %s is malformed: %v. Fix: repair the file (reference: config/schema.md and config/gateway.example.yaml in the openrouter-switch repo)", path, err)
 }
 
 func DefaultPath() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "baseten-switch", "gateway.yaml")
+	return filepath.Join(home, ".config", "openrouter-switch", "gateway.yaml")
 }
 
 func EnvFilePath() string {
-	if path := os.Getenv("BASETEN_SWITCH_ENV_FILE"); path != "" {
+	if path := os.Getenv("OPENROUTER_SWITCH_ENV_FILE"); path != "" {
 		return path
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "baseten-switch", "env")
+	return filepath.Join(home, ".config", "openrouter-switch", "env")
 }
 
 func (f *File) CollectPlaceholders() []string {

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/reasoning"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/requestprofile"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/usage"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/reasoning"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/requestprofile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/usage"
 )
 
 const telemetryVariantPricingFixture = `{

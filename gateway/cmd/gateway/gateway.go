@@ -25,19 +25,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/analytics"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/auth"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pidfile"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/proxy"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/reasoning"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/requestprofile"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/responsescompat"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/sanitize"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/translate"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/usage"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/analytics"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pidfile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/proxy"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/reasoning"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/requestprofile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/responsescompat"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/sanitize"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/translate"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/usage"
 )
 
 const (
@@ -51,7 +51,7 @@ const (
 	// request shape validated against Baseten. It is a routing sentinel, not
 	// an upstream model: global routing On resolves it through default_model,
 	// and it is never sent to a native OpenAI fallback.
-	CodexCompatibilityModel = "baseten-switch-compat-v1"
+	CodexCompatibilityModel = "openrouter-switch-compat-v1"
 	// subagentAgentIDHeader is the Claude Code sidechain identity header.
 	// Main-thread requests omit it; sidechain (subagent) requests carry
 	// it. The gateway gates the subagent rewrite on its presence. See
@@ -95,10 +95,10 @@ func homeJoin(parts ...string) string {
 func LoadConfig() Config {
 	loadDotEnv()
 	pf := pidfile.Path()
-	oauthProfile := os.Getenv("BASETEN_SWITCH_OAUTH_PROFILE")
+	oauthProfile := os.Getenv("OPENROUTER_SWITCH_OAUTH_PROFILE")
 	oauthHost := auth.DefaultHost()
 	apiKeyFallback := false
-	switch strings.ToLower(os.Getenv("BASETEN_SWITCH_API_KEY_FALLBACK")) {
+	switch strings.ToLower(os.Getenv("OPENROUTER_SWITCH_API_KEY_FALLBACK")) {
 	case "1", "true", "yes":
 		apiKeyFallback = true
 	}
@@ -115,13 +115,13 @@ func LoadConfig() Config {
 		OAuthProfile:           oauthProfile,
 		OAuthHost:              oauthHost,
 		APIKeyFallback:         apiKeyFallback,
-		AdminAddr:              env("BASETEN_SWITCH_ADMIN_ADDR", DefaultAdminAddr),
-		ConfigPath:             env("BASETEN_SWITCH_CONFIG_PATH", config.DefaultPath()),
+		AdminAddr:              env("OPENROUTER_SWITCH_ADMIN_ADDR", DefaultAdminAddr),
+		ConfigPath:             env("OPENROUTER_SWITCH_CONFIG_PATH", config.DefaultPath()),
 	}
 }
 
 func loadDotEnv() {
-	path := env("BASETEN_SWITCH_ENV_FILE", homeJoin(".config", "baseten-switch", "env"))
+	path := env("OPENROUTER_SWITCH_ENV_FILE", homeJoin(".config", "openrouter-switch", "env"))
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return
@@ -890,7 +890,7 @@ func (g *Gateway) noteAuthRefresh(gen int, fp string, err error) {
 	if code := auth.RefreshErrorCode(err); code != "" {
 		if !g.authDead {
 			fmt.Fprintf(os.Stderr,
-				"[gateway] auth: token refresh rejected (%s); the stored Baseten credential is dead and baseten-routed requests will fail. Fix: 'baseten auth login', then SIGHUP the gateway (or 'baseten-switch up')\n",
+				"[gateway] auth: token refresh rejected (%s); the stored Baseten credential is dead and baseten-routed requests will fail. Fix: 'baseten auth login', then SIGHUP the gateway (or 'openrouter-switch up')\n",
 				code)
 			// Nudge the tick loop onto the dead cadence now: the timer
 			// may be mid-way through a healthy-interval arm, and the
@@ -2295,7 +2295,7 @@ func stripAndRewriteResponses(body []byte, types []string, target string) (proxy
 // offering aliases after they are removed from config.
 var aliasNamespacePrefixes = []string{"claude-baseten-", "anthropic-baseten-"}
 
-// InAliasNamespace is exported so the baseten-switch claude adapter
+// InAliasNamespace is exported so the openrouter-switch claude adapter
 // (`claude subagents`) shares this one namespace resolution instead of
 // re-implementing the prefix list (same rule as config.NativeRoute).
 func InAliasNamespace(id string) bool {
@@ -2311,7 +2311,7 @@ func InAliasNamespace(id string) bool {
 // the fix, so a request for a removed alias is actionable instead of
 // a silent default-model route.
 func unknownAliasError(rc resolvedClientConfig, id string) error {
-	fix := fmt.Sprintf("add it to model_aliases for client %q in gateway.yaml and reload the gateway (kill -HUP $(cat ~/.config/baseten-switch/gateway.pid)), or pick another model; Claude Code refreshes its cached picker list (~/.claude/cache/gateway-models.json) at next launch", rc.Name)
+	fix := fmt.Sprintf("add it to model_aliases for client %q in gateway.yaml and reload the gateway (kill -HUP $(cat ~/.config/openrouter-switch/gateway.pid)), or pick another model; Claude Code refreshes its cached picker list (~/.claude/cache/gateway-models.json) at next launch", rc.Name)
 	if len(rc.ModelAliases) == 0 {
 		return fmt.Errorf("unknown gateway model %q: client %q has no model_aliases configured. Fix: %s", id, rc.Name, fix)
 	}
@@ -4396,7 +4396,7 @@ func Run(cfg Config) error {
 	}
 	defer pidfile.UnlinkAt(cfg.PidFile)
 	// Record which config file this process resolved so a later
-	// `gateway start` without an explicit BASETEN_SWITCH_CONFIG_PATH reuses it
+	// `gateway start` without an explicit OPENROUTER_SWITCH_CONFIG_PATH reuses it
 	// instead of silently switching configs. Deliberately not removed
 	// on shutdown: it is memory of last intent, not a lock.
 	if err := pidfile.WriteConfigState(cfg.PidFile, cfg.ConfigPath); err != nil {

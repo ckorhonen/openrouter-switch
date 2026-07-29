@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 const (

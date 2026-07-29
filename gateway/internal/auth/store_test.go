@@ -12,8 +12,8 @@ import (
 func setAuthFile(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "auth.json")
-	t.Setenv("BASETEN_SWITCH_AUTH_FILE", path)
-	t.Setenv("BASETEN_SWITCH_AUTH_NO_KEYRING", "1")
+	t.Setenv("OPENROUTER_SWITCH_AUTH_FILE", path)
+	t.Setenv("OPENROUTER_SWITCH_AUTH_NO_KEYRING", "1")
 	return path
 }
 
@@ -41,7 +41,7 @@ func sampleStoredOAuthCredential() *storedOAuthCredential {
 
 // TestLoadAuthFileRoundtrip writes the current auth.json contract with an
 // OAuth credential, loads the profile, and verifies the StoredToken fields
-// round-trip losslessly. With BASETEN_SWITCH_AUTH_NO_KEYRING=1 Save is a no-op,
+// round-trip losslessly. With OPENROUTER_SWITCH_AUTH_NO_KEYRING=1 Save is a no-op,
 // so we also verify it does not error and that a re-Load still reads the file.
 func TestLoadAuthFileRoundtrip(t *testing.T) {
 	dir := t.TempDir()
@@ -152,7 +152,7 @@ func TestLoadMissingReturnsNil(t *testing.T) {
 
 // TestLoadEmptyProfileResolvesCurrent verifies that Load("") falls back to the
 // auth.json `current` field when no profile name is supplied, mirroring how the
-// gateway now invokes Load when BASETEN_SWITCH_OAUTH_PROFILE is unset.
+// gateway now invokes Load when OPENROUTER_SWITCH_OAUTH_PROFILE is unset.
 func TestLoadEmptyProfileResolvesCurrent(t *testing.T) {
 	dir := t.TempDir()
 	path := setAuthFile(t, dir)

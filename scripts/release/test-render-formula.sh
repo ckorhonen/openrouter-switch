@@ -11,8 +11,8 @@ fail() {
     exit 1
 }
 
-formula="$TMP_ROOT/Formula/baseten-switch.rb"
-patch="$TMP_ROOT/baseten-switch_1.2.3_homebrew.patch"
+formula="$TMP_ROOT/Formula/openrouter-switch.rb"
+patch="$TMP_ROOT/openrouter-switch_1.2.3_homebrew.patch"
 checksum="0123456789abcdef0123456789abcdef0123456789abcdef0123456789ABCDEF"
 "$RENDERER" \
     --tag v1.2.3 \
@@ -31,34 +31,34 @@ mkdir -p "$tap_checkout"
 git -C "$tap_checkout" init -q
 git -C "$tap_checkout" apply "$patch" \
     || fail "rendered tap patch does not apply to a clean checkout"
-cmp "$formula" "$tap_checkout/Formula/baseten-switch.rb" \
+cmp "$formula" "$tap_checkout/Formula/openrouter-switch.rb" \
     || fail "tap patch does not produce the rendered formula"
 
 grep -Fqx '# typed: strict' "$formula" \
     || fail "formula omitted the Homebrew Sorbet sigil"
 grep -Fqx '# frozen_string_literal: true' "$formula" \
     || fail "formula omitted the frozen string literal directive"
-grep -Fqx 'class BasetenSwitch < Formula' "$formula" \
-    || fail "formula class is not BasetenSwitch"
+grep -Fqx 'class OpenRouterSwitch < Formula' "$formula" \
+    || fail "formula class is not OpenRouterSwitch"
 if grep -Eq '^[[:space:]]*version[[:space:]]' "$formula"; then
     fail "formula contains a redundant explicit version stanza"
 fi
 if command -v brew >/dev/null 2>&1; then
     derived_version="$(
         brew ruby -e \
-            'require "formulary"; path = Pathname(ARGV.fetch(0)); puts Formulary.from_contents("baseten-switch", path, path.read).version' \
+            'require "formulary"; path = Pathname(ARGV.fetch(0)); puts Formulary.from_contents("openrouter-switch", path, path.read).version' \
             "$formula"
     )"
     [[ "$derived_version" == "1.2.3" ]] \
         || fail "Homebrew derived version '$derived_version' instead of 1.2.3"
 fi
 grep -Fqx \
-    '    assert_match "baseten-switch v#{version}", shell_output("#{bin}/baseten-switch --version")' \
+    '    assert_match "openrouter-switch v#{version}", shell_output("#{bin}/openrouter-switch --version")' \
     "$formula" || fail "formula test does not use Homebrew's derived version"
 grep -Fqx '  license "MIT"' "$formula" \
     || fail "formula license does not use the explicit approved SPDX input"
 grep -Fqx \
-    '  url "https://github.com/basetenlabs/baseten-switch/releases/download/v1.2.3/baseten-switch_1.2.3_darwin_universal.zip"' \
+    '  url "https://github.com/basetenlabs/openrouter-switch/releases/download/v1.2.3/openrouter-switch_1.2.3_darwin_universal.zip"' \
     "$formula" || fail "formula URL is not canonical"
 grep -Fqx \
     '  sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"' \
@@ -70,7 +70,7 @@ grep -Fqx '  depends_on :macos' "$formula" \
 grep -Fqx '    depends_on macos: :ventura' "$formula" \
     || fail "formula does not require Ventura"
 for caveat in \
-    'Baseten Switch is beta software. The bundled Mac app is ad-hoc signed' \
+    'OpenRouter Switch is beta software. The bundled Mac app is ad-hoc signed' \
     'and is not notarized by Apple.' \
     'If macOS blocks the app, try to open it once, then open System Settings >' \
     'Privacy & Security and click Open Anyway. Managed Macs may prohibit this' \
@@ -79,8 +79,8 @@ for caveat in \
         || fail "formula omitted beta caveat: $caveat"
 done
 for payload in \
-    'bin.install "bin/baseten-switch"' \
-    'pkgshare.install "Baseten Switch.app.zip"' \
+    'bin.install "bin/openrouter-switch"' \
+    'pkgshare.install "OpenRouter Switch.app.zip"' \
     'pkgshare.install "LICENSE", "THIRD_PARTY_NOTICES.md"'; do
     grep -Fqx "    $payload" "$formula" \
         || fail "formula omitted install contract: $payload"

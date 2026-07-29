@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/requestprofile"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/requestprofile"
 )
 
 const variantOtherBeta = "context-1m-2025-08-07"

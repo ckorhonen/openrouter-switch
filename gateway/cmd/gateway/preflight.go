@@ -9,8 +9,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/auth"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 // preflightConfigPath mirrors Gateway.activeConfigPath for a bare Config.
@@ -38,7 +38,7 @@ func applyGlobalAuth(cfg *Config) {
 
 // UnresolvedPlaceholders returns the ${VAR} placeholder names referenced
 // by the config that are not set in the process environment. Exported
-// for `baseten-switch doctor`, which runs the same detection out of process
+// for `openrouter-switch doctor`, which runs the same detection out of process
 // (and additionally consults the gateway's env file, which the gateway
 // itself loads into its environment before this check runs).
 func UnresolvedPlaceholders(f *config.File) []string {

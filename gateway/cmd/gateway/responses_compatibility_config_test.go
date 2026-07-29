@@ -3,7 +3,7 @@ package gateway
 import (
 	"testing"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
 func TestResponsesCompatibilityResolvesPerClient(t *testing.T) {

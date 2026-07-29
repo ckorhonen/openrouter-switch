@@ -53,7 +53,7 @@ grep -Fq 'git describe --tags --exact-match HEAD' "$WORKFLOW" \
     || fail "workflow does not require an exact tag checkout"
 grep -Fq 'scripts/release/build-artifacts.sh' "$WORKFLOW" \
     || fail "workflow does not invoke the strict artifact builder"
-grep -Fq 'BASETEN_SWITCH_RELEASE_SIGNING_MODE: adhoc' "$WORKFLOW" \
+grep -Fq 'OPENROUTER_SWITCH_RELEASE_SIGNING_MODE: adhoc' "$WORKFLOW" \
     || fail "workflow does not explicitly select ad-hoc beta signing"
 grep -Fq 'scripts/release/render-formula.sh' "$WORKFLOW" \
     || fail "workflow does not invoke the canonical formula renderer"
@@ -69,7 +69,7 @@ grep -Eq '^[[:space:]]+--prerelease[[:space:]]+\\$' "$WORKFLOW" \
     || fail "release creation is not marked as a prerelease"
 grep -Fq 'release already exists for %s; refusing to replace or add assets' "$WORKFLOW" \
     || fail "workflow does not refuse existing releases"
-grep -Fq '"dist/baseten-switch_${version}_darwin_universal.zip"' "$WORKFLOW" \
+grep -Fq '"dist/openrouter-switch_${version}_darwin_universal.zip"' "$WORKFLOW" \
     || fail "release does not upload the universal ZIP"
 grep -Fq '"dist/checksums.txt"' "$WORKFLOW" \
     || fail "release does not upload checksums"

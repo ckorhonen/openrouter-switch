@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 // resetStatsForTest clears the package-level stats cache and restores

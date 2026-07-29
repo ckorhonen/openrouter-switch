@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PACKAGER="$SCRIPT_DIR/build-artifacts.sh"
-CANONICAL_INSTALL="brew install basetenlabs/baseten/baseten-switch"
+CANONICAL_INSTALL="brew install basetenlabs/baseten/openrouter-switch"
 INSTALL_SURFACES=(
   "$REPO_DIR/README.md"
   "$REPO_DIR/scripts/release/INSTALL.md"
@@ -30,12 +30,12 @@ if grep -F 'basetenlabs/baseten/baseten ' "${INSTALL_SURFACES[@]}"; then
 fi
 
 dry_output="$(
-  BASETEN_SWITCH_RELEASE_TAG=v1.2.3 \
+  OPENROUTER_SWITCH_RELEASE_TAG=v1.2.3 \
     "$PACKAGER" --dry-run
 )"
-grep -q 'baseten-switch_1.2.3_darwin_universal.zip' <<<"$dry_output" \
+grep -q 'openrouter-switch_1.2.3_darwin_universal.zip' <<<"$dry_output" \
   || fail "dry run omitted the canonical artifact name"
-grep -q 'Baseten Switch.app.zip' <<<"$dry_output" \
+grep -q 'OpenRouter Switch.app.zip' <<<"$dry_output" \
   || fail "dry run omitted the nested app ZIP"
 grep -q 'checksums.txt (final ZIP)' <<<"$dry_output" \
   || fail "dry run omitted the checksum contract"
@@ -49,34 +49,34 @@ grep -q 'this script never uploads' <<<"$dry_output" \
 missing_credentials_log="$(mktemp)"
 trap 'rm -f "$missing_credentials_log"' EXIT
 if env \
-  -u BASETEN_SWITCH_BUILD_NUMBER \
-  -u BASETEN_SWITCH_RELEASE_SIGNING_MODE \
-  BASETEN_SWITCH_RELEASE_TAG=v1.2.3 \
+  -u OPENROUTER_SWITCH_BUILD_NUMBER \
+  -u OPENROUTER_SWITCH_RELEASE_SIGNING_MODE \
+  OPENROUTER_SWITCH_RELEASE_TAG=v1.2.3 \
   "$PACKAGER" >"$missing_credentials_log" 2>&1; then
   fail "release build accepted missing credentials"
 fi
-grep -q 'BASETEN_SWITCH_BUILD_NUMBER' "$missing_credentials_log" \
+grep -q 'OPENROUTER_SWITCH_BUILD_NUMBER' "$missing_credentials_log" \
   || fail "missing release credentials did not produce an actionable error"
 
 if env \
-  -u BASETEN_SWITCH_RELEASE_SIGNING_MODE \
-  BASETEN_SWITCH_BUILD_NUMBER=42 \
-  BASETEN_SWITCH_RELEASE_TAG=v1.2.3 \
+  -u OPENROUTER_SWITCH_RELEASE_SIGNING_MODE \
+  OPENROUTER_SWITCH_BUILD_NUMBER=42 \
+  OPENROUTER_SWITCH_RELEASE_TAG=v1.2.3 \
   "$PACKAGER" >"$missing_credentials_log" 2>&1; then
   fail "release build accepted an implicit signing mode"
 fi
-grep -q 'BASETEN_SWITCH_RELEASE_SIGNING_MODE' "$missing_credentials_log" \
+grep -q 'OPENROUTER_SWITCH_RELEASE_SIGNING_MODE' "$missing_credentials_log" \
   || fail "missing release signing mode did not produce an actionable error"
 
 if env \
-  -u BASETEN_SWITCH_MARKETING_VERSION \
-  -u BASETEN_SWITCH_BUILD_NUMBER \
-  BASETEN_SWITCH_RELEASE_SIGNING_MODE=adhoc \
+  -u OPENROUTER_SWITCH_MARKETING_VERSION \
+  -u OPENROUTER_SWITCH_BUILD_NUMBER \
+  OPENROUTER_SWITCH_RELEASE_SIGNING_MODE=adhoc \
   "$REPO_DIR/scripts/build-menubar.sh" --release \
   >"$missing_credentials_log" 2>&1; then
   fail "menubar release build accepted missing version inputs"
 fi
-grep -q 'BASETEN_SWITCH_MARKETING_VERSION' "$missing_credentials_log" \
+grep -q 'OPENROUTER_SWITCH_MARKETING_VERSION' "$missing_credentials_log" \
   || fail "menubar release build did not identify its missing version input"
 
 if grep -En -- \
@@ -87,7 +87,7 @@ if grep -En -- \
 fi
 
 if grep -En -- \
-  'BASETEN_SWITCH_SIGNING_IDENTITY|BASETEN_SWITCH_TEAM_ID|BASETEN_SWITCH_NOTARY_PROFILE|BASETEN_SWITCH_SBOM_GENERATOR|Developer ID Application|notarytool|stapler|spctl|--timestamp|CycloneDX' \
+  'OPENROUTER_SWITCH_SIGNING_IDENTITY|OPENROUTER_SWITCH_TEAM_ID|OPENROUTER_SWITCH_NOTARY_PROFILE|OPENROUTER_SWITCH_SBOM_GENERATOR|Developer ID Application|notarytool|stapler|spctl|--timestamp|CycloneDX' \
   "$REPO_DIR/scripts/build-menubar.sh" \
   "$PACKAGER" \
   "$SCRIPT_DIR/install.sh"; then

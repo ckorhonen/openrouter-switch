@@ -1,5 +1,5 @@
 // Package reasoning resolves semantic model reasoning policy and applies the
-// small set of provider request transforms that Baseten Switch has reviewed.
+// small set of provider request transforms that OpenRouter Switch has reviewed.
 //
 // Catalog data supplies capabilities, never provider field names. Wire
 // mappings remain explicit, standard-library code in this package.

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# run.sh: fresh-install container simulation for baseten-switch.
+# run.sh: fresh-install container simulation for openrouter-switch.
 #
 # Cross-compiles the single linux binary from the current tree, builds
 # a minimal Debian image simulating a brand-new machine (non-root user,
 # curl, ca certificates, nothing else), then runs install-inside.sh in
 # the container. install-inside.sh exercises the source-build lifecycle
-# (baseten-switch up starts router + door) and verifies a routed
+# (openrouter-switch up starts router + door) and verifies a routed
 # request plus a telemetry row. It is the end-to-end proof of the
 # the lifecycle contract orchestrator on a clean system.
 #
 # Usage: tests/fresh-install/run.sh [--no-key]
 #
 # Key sourcing (never printed): BASETEN_API_KEY from the host environment,
-# else parsed from ~/.config/baseten-switch/env. With no
+# else parsed from ~/.config/openrouter-switch/env. With no
 # key (or --no-key) the routed-request step is replaced by a stub check
 # that still proves the door -> router -> telemetry plumbing.
 #
@@ -23,8 +23,8 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GW_DIR="$(cd "$HERE/../../gateway" && pwd)"
-IMAGE=baseten-switch-fresh-install
-CONTAINER=baseten-switch-fresh-install-run
+IMAGE=openrouter-switch-fresh-install
+CONTAINER=openrouter-switch-fresh-install-run
 
 MODE=keyed
 [[ "${1:-}" == "--no-key" ]] && MODE=no-key
@@ -46,15 +46,15 @@ PLATFORM="linux/$GOARCH"
 
 # ------------------------------------------------------------ key
 # Resolve the Baseten API key without ever echoing it.
-BASETEN_SWITCH_KEY="${BASETEN_API_KEY:-}"
-if [[ "$MODE" == keyed && -z "$BASETEN_SWITCH_KEY" ]]; then
-    ENV_FILE="$HOME/.config/baseten-switch/env"
+OPENROUTER_SWITCH_KEY="${BASETEN_API_KEY:-}"
+if [[ "$MODE" == keyed && -z "$OPENROUTER_SWITCH_KEY" ]]; then
+    ENV_FILE="$HOME/.config/openrouter-switch/env"
     if [[ -r "$ENV_FILE" ]]; then
-        BASETEN_SWITCH_KEY="$(sed -n 's/^BASETEN_API_KEY=//p' "$ENV_FILE" | head -1 | sed -e "s/^[\"']//" -e "s/[\"']\$//")"
+        OPENROUTER_SWITCH_KEY="$(sed -n 's/^BASETEN_API_KEY=//p' "$ENV_FILE" | head -1 | sed -e "s/^[\"']//" -e "s/[\"']\$//")"
     fi
 fi
-if [[ "$MODE" == keyed && -z "$BASETEN_SWITCH_KEY" ]]; then
-    echo "NOTICE: no Baseten API key in the host env or ~/.config/baseten-switch/env."
+if [[ "$MODE" == keyed && -z "$OPENROUTER_SWITCH_KEY" ]]; then
+    echo "NOTICE: no Baseten API key in the host env or ~/.config/openrouter-switch/env."
     echo "NOTICE: falling back to --no-key mode (routed-request step will be skipped)."
     MODE=no-key
 fi
@@ -64,8 +64,8 @@ step "cross-compile linux/$GOARCH binary from the current tree"
 mkdir -p "$HERE/build"
 (cd "$GW_DIR" && \
     CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" go build -trimpath \
-        -o "$HERE/build/baseten-switch" ./cmd/baseten-switch)
-echo "ok (build/baseten-switch; single binary, the door is 'baseten-switch door')"
+        -o "$HERE/build/openrouter-switch" ./cmd/openrouter-switch)
+echo "ok (build/openrouter-switch; single binary, the door is 'openrouter-switch door')"
 
 step "build image $IMAGE ($PLATFORM)"
 docker build --platform "$PLATFORM" -t "$IMAGE" "$HERE"
@@ -78,7 +78,7 @@ RUN_ARGS=(--rm --name "$CONTAINER" --platform "$PLATFORM")
 if [[ "$MODE" == keyed ]]; then
     # -e NAME (no value) copies from this process's environment, so the
     # key never appears in the docker argv or in any image layer.
-    export BASETEN_API_KEY="$BASETEN_SWITCH_KEY"
+    export BASETEN_API_KEY="$OPENROUTER_SWITCH_KEY"
     RUN_ARGS+=(-e BASETEN_API_KEY)
 else
     RUN_ARGS+=(-e FRESH_INSTALL_NO_KEY=1)

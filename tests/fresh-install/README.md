@@ -11,16 +11,16 @@ tests/fresh-install/run.sh --no-key   # plumbing-only stub checks
 ## What it simulates
 
 - A clean Debian machine: non-root user, curl, CA certificates,
-  nothing preinstalled. `run.sh` cross-compiles the single `baseten-switch`
+  nothing preinstalled. `run.sh` cross-compiles the single `openrouter-switch`
   binary from the current tree and stages it off PATH. `install-inside.sh`
   then puts the binary in `~/.local/bin`, writes
   `gateway.yaml` with the single-port door topology (door 45271, router
   45272, route baseten), env file written 0600 with `BASETEN_API_KEY` and
-  `BASETEN_SWITCH_API_KEY_FALLBACK=1`, then `baseten-switch up` to start router + door
+  `OPENROUTER_SWITCH_API_KEY_FALLBACK=1`, then `openrouter-switch up` to start router + door
   (the end-to-end proof of the lifecycle contract).
-- Verification, all inside the container: `baseten-switch status` exit 0
+- Verification, all inside the container: `openrouter-switch status` exit 0
   with both components up, startup preflight output in the router log
-  (`~/.config/baseten-switch/logs/router.log`), a POST through the DOOR
+  (`~/.config/openrouter-switch/logs/router.log`), a POST through the DOOR
   port to `/v1/messages` with a `claude-*` model returning 200 with
   real content, and a telemetry row with `route=baseten` and status
   200.
@@ -37,7 +37,7 @@ tests/fresh-install/run.sh --no-key   # plumbing-only stub checks
 ## Key handling
 
 The Baseten API key is read from the host environment (`BASETEN_API_KEY`),
-falling back to parsing `~/.config/baseten-switch/env`.
+falling back to parsing `~/.config/openrouter-switch/env`.
 It enters the container only as a `docker run` environment variable; it
 is never printed, never written to any image layer, and the in-container
 env file is created mode 0600. With no key available (or `--no-key`),
@@ -53,6 +53,6 @@ the router, so the keyed lane remains the telemetry proof.
 - No container ports are published to the host; the simulation cannot
   collide with the live gateway/door running on this machine.
 - Containers are removed after each run (`--rm`); the image
-  `baseten-switch-fresh-install` stays cached for fast reruns.
+  `openrouter-switch-fresh-install` stays cached for fast reruns.
 - The image platform follows the host arch (linux/arm64 on Apple
   Silicon) to avoid emulation.

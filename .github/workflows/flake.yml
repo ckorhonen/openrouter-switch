@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # nix build runs the cmd/baseten-switch Go tests inside the sandbox (no
+  # nix build runs the cmd/openrouter-switch Go tests inside the sandbox (no
   # HOME, no network beyond loopback), which is what keeps them honest
   # about host-state leaks. -L streams those test logs into the CI log.
   build:
@@ -31,10 +31,10 @@ jobs:
           use-flakehub: false
 
       - name: Build and test
-        run: nix build -L .#baseten-switch
+        run: nix build -L .#openrouter-switch
 
       - name: Version stamp
-        run: ./result/bin/baseten-switch --version
+        run: ./result/bin/openrouter-switch --version
 
   build-darwin:
     runs-on: macos-latest
@@ -48,10 +48,10 @@ jobs:
           use-flakehub: false
 
       - name: Build and test
-        run: nix build -L .#baseten-switch
+        run: nix build -L .#openrouter-switch
 
       - name: Version stamp
-        run: ./result/bin/baseten-switch --version
+        run: ./result/bin/openrouter-switch --version
 
   # aarch64-linux has no runner here; evaluating every declared system
   # still catches flake-level breakage (a dropped platform, a bad attr)

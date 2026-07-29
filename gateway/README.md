@@ -1,6 +1,6 @@
-# Baseten Switch gateway
+# OpenRouter Switch gateway
 
-This Go module builds the `baseten-switch` CLI, local router, admin API, and
+This Go module builds the `openrouter-switch` CLI, local router, admin API, and
 front door. See the repository [README.md](../README.md) for installation and
 [TESTING.md](../TESTING.md) for validation.
 
@@ -16,26 +16,26 @@ Or build the CLI directly:
 
 ```sh
 cd gateway
-go build -o bin/baseten-switch ./cmd/baseten-switch
+go build -o bin/openrouter-switch ./cmd/openrouter-switch
 ```
 
 ## Start a development instance
 
 ```sh
-bin/baseten-switch config init
-bin/baseten-switch up
-bin/baseten-switch status
+bin/openrouter-switch config init
+bin/openrouter-switch up
+bin/openrouter-switch status
 ```
 
 Use the adapters instead of editing harness configuration by hand:
 
 ```sh
-bin/baseten-switch claude on
-bin/baseten-switch codex on
+bin/openrouter-switch claude on
+bin/openrouter-switch codex on
 ```
 
 The generated configuration lives at
-`~/.config/baseten-switch/gateway.yaml`. Runtime state, logs, and telemetry
+`~/.config/openrouter-switch/gateway.yaml`. Runtime state, logs, and telemetry
 use the same configuration directory.
 
 ## Main commands
@@ -51,13 +51,13 @@ gateway start|stop|restart|status
 door
 ```
 
-Run `baseten-switch <command> --help` for the current flags and environment
+Run `openrouter-switch <command> --help` for the current flags and environment
 overrides.
 
 ## Module layout
 
 ```text
-cmd/baseten-switch/   CLI and lifecycle commands
+cmd/openrouter-switch/   CLI and lifecycle commands
 cmd/gateway/          router, admin API, and request handling
 internal/auth/        Baseten CLI credential reader and OAuth transport
 internal/config/      configuration parsing and editing

@@ -2,12 +2,12 @@
 # Build the immutable public macOS release assets.
 #
 # Outputs:
-#   dist/baseten-switch_<version>_darwin_universal.zip
+#   dist/openrouter-switch_<version>_darwin_universal.zip
 #   dist/checksums.txt
 #
 # The outer ZIP contains:
-#   bin/baseten-switch
-#   Baseten Switch.app.zip
+#   bin/openrouter-switch
+#   OpenRouter Switch.app.zip
 #   install.sh
 #   LICENSE
 #   THIRD_PARTY_NOTICES.md
@@ -31,9 +31,9 @@ usage() {
 Usage: scripts/release/build-artifacts.sh [--dry-run]
 
 Required for a release build:
-  BASETEN_SWITCH_RELEASE_TAG          Exact tag, for example v0.2.0
-  BASETEN_SWITCH_BUILD_NUMBER         Period-separated integers, for example 42
-  BASETEN_SWITCH_RELEASE_SIGNING_MODE Must be "adhoc"
+  OPENROUTER_SWITCH_RELEASE_TAG          Exact tag, for example v0.2.0
+  OPENROUTER_SWITCH_BUILD_NUMBER         Period-separated integers, for example 42
+  OPENROUTER_SWITCH_RELEASE_SIGNING_MODE Must be "adhoc"
 
 The script writes checksums.txt for the final ZIP. Beta artifacts are
 ad-hoc signed and are not Apple-notarized.
@@ -57,15 +57,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-release_tag="${BASETEN_SWITCH_RELEASE_TAG:-}"
+release_tag="${OPENROUTER_SWITCH_RELEASE_TAG:-}"
 if [[ "$dry_run" == 1 && -z "$release_tag" ]]; then
   release_tag="v0.0.0"
 fi
 [[ "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-  || fail "BASETEN_SWITCH_RELEASE_TAG must match v<major>.<minor>.<patch>"
+  || fail "OPENROUTER_SWITCH_RELEASE_TAG must match v<major>.<minor>.<patch>"
 marketing_version="${release_tag#v}"
-build_number="${BASETEN_SWITCH_BUILD_NUMBER:-}"
-artifact_name="baseten-switch_${marketing_version}_darwin_universal.zip"
+build_number="${OPENROUTER_SWITCH_BUILD_NUMBER:-}"
+artifact_name="openrouter-switch_${marketing_version}_darwin_universal.zip"
 dist_dir="$REPO_DIR/dist"
 artifact="$dist_dir/$artifact_name"
 checksums="$dist_dir/checksums.txt"
@@ -76,8 +76,8 @@ if [[ "$dry_run" == 1 ]]; then
   printf 'marketing:       %s\n' "$marketing_version"
   printf 'build number:    %s\n' "${build_number:-<required for build>}"
   printf 'artifact:         %s\n' "$artifact"
-  printf 'archive entries:  bin/baseten-switch\n'
-  printf '                  Baseten Switch.app.zip\n'
+  printf 'archive entries:  bin/openrouter-switch\n'
+  printf '                  OpenRouter Switch.app.zip\n'
   printf '                  install.sh, LICENSE, THIRD_PARTY_NOTICES.md, README.md\n'
   printf 'checksums:        %s (final ZIP)\n' "$checksums"
   printf 'signing:          explicit ad-hoc beta signatures\n'
@@ -87,11 +87,11 @@ if [[ "$dry_run" == 1 ]]; then
 fi
 
 [[ "$build_number" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
-  || fail "BASETEN_SWITCH_BUILD_NUMBER must contain period-separated integers"
+  || fail "OPENROUTER_SWITCH_BUILD_NUMBER must contain period-separated integers"
 
-release_signing_mode="${BASETEN_SWITCH_RELEASE_SIGNING_MODE:-}"
+release_signing_mode="${OPENROUTER_SWITCH_RELEASE_SIGNING_MODE:-}"
 [[ "$release_signing_mode" == "adhoc" ]] \
-  || fail "BASETEN_SWITCH_RELEASE_SIGNING_MODE must be 'adhoc' for beta releases"
+  || fail "OPENROUTER_SWITCH_RELEASE_SIGNING_MODE must be 'adhoc' for beta releases"
 [[ "$(uname -s)" == "Darwin" ]] || fail "release builds require macOS"
 
 for command in go lipo codesign plutil ditto zip unzip shasum; do
@@ -142,25 +142,25 @@ for goarch in arm64 amd64; do
     cd "$REPO_DIR/gateway"
     env GOOS=darwin GOARCH="$goarch" CGO_ENABLED=0 \
       go build -trimpath \
-        -ldflags "-s -w -X github.com/basetenlabs/baseten-switch/gateway/internal/version.Version=${release_tag}" \
-        -o "$stage_root/baseten-switch-$goarch" ./cmd/baseten-switch
+        -ldflags "-s -w -X github.com/ckorhonen/openrouter-switch/gateway/internal/version.Version=${release_tag}" \
+        -o "$stage_root/openrouter-switch-$goarch" ./cmd/openrouter-switch
   )
 done
-lipo -create -output "$stage/bin/baseten-switch" \
-  "$stage_root/baseten-switch-arm64" \
-  "$stage_root/baseten-switch-amd64"
-chmod 0755 "$stage/bin/baseten-switch"
-codesign --force --sign - "$stage/bin/baseten-switch"
-verify_adhoc_signature "$stage/bin/baseten-switch"
-[[ "$("$stage/bin/baseten-switch" --version)" == "baseten-switch $release_tag" ]] \
+lipo -create -output "$stage/bin/openrouter-switch" \
+  "$stage_root/openrouter-switch-arm64" \
+  "$stage_root/openrouter-switch-amd64"
+chmod 0755 "$stage/bin/openrouter-switch"
+codesign --force --sign - "$stage/bin/openrouter-switch"
+verify_adhoc_signature "$stage/bin/openrouter-switch"
+[[ "$("$stage/bin/openrouter-switch" --version)" == "openrouter-switch $release_tag" ]] \
   || fail "CLI version does not match $release_tag"
 
 log "building ad-hoc signed beta menubar app"
-BASETEN_SWITCH_MARKETING_VERSION="$marketing_version" \
-BASETEN_SWITCH_BUILD_NUMBER="$build_number" \
-BASETEN_SWITCH_RELEASE_SIGNING_MODE="$release_signing_mode" \
+OPENROUTER_SWITCH_MARKETING_VERSION="$marketing_version" \
+OPENROUTER_SWITCH_BUILD_NUMBER="$build_number" \
+OPENROUTER_SWITCH_RELEASE_SIGNING_MODE="$release_signing_mode" \
   "$REPO_DIR/scripts/build-menubar.sh" --variant stable --release
-app="$REPO_DIR/mac/BasetenSwitch/dist/Baseten Switch.app"
+app="$REPO_DIR/mac/OpenRouterSwitch/dist/OpenRouter Switch.app"
 app_plist="$app/Contents/Info.plist"
 [[ -d "$app" ]] || fail "menubar build did not produce $app"
 [[ "$(plutil -extract CFBundleShortVersionString raw "$app_plist")" == "$marketing_version" ]] \
@@ -168,9 +168,9 @@ app_plist="$app/Contents/Info.plist"
 [[ "$(plutil -extract CFBundleVersion raw "$app_plist")" == "$build_number" ]] \
   || fail "app build number does not match $build_number"
 verify_adhoc_signature "$app" 1
-verify_adhoc_signature "$app/Contents/MacOS/BasetenSwitch"
+verify_adhoc_signature "$app/Contents/MacOS/OpenRouterSwitch"
 
-for binary in "$stage/bin/baseten-switch" "$app/Contents/MacOS/BasetenSwitch"; do
+for binary in "$stage/bin/openrouter-switch" "$app/Contents/MacOS/OpenRouterSwitch"; do
   archs="$(lipo -archs "$binary")"
   for wanted_arch in arm64 x86_64; do
     case " $archs " in
@@ -181,7 +181,7 @@ for binary in "$stage/bin/baseten-switch" "$app/Contents/MacOS/BasetenSwitch"; d
 done
 
 log "assembling $artifact_name"
-ditto -c -k --keepParent "$app" "$stage/Baseten Switch.app.zip"
+ditto -c -k --keepParent "$app" "$stage/OpenRouter Switch.app.zip"
 install -m 0755 "$REPO_DIR/scripts/release/install.sh" "$stage/install.sh"
 install -m 0644 "$REPO_DIR/LICENSE" "$stage/LICENSE"
 install -m 0644 "$REPO_DIR/THIRD_PARTY_NOTICES.md" "$stage/THIRD_PARTY_NOTICES.md"
@@ -193,8 +193,8 @@ install -m 0644 "$REPO_DIR/README.md" "$stage/README.md"
 
 archive_entries="$(unzip -Z1 "$artifact")"
 for required_entry in \
-  "bin/baseten-switch" \
-  "Baseten Switch.app.zip" \
+  "bin/openrouter-switch" \
+  "OpenRouter Switch.app.zip" \
   "install.sh" \
   "LICENSE" \
   "THIRD_PARTY_NOTICES.md" \

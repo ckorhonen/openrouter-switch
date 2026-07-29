@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// commentedFixture is a comment-rich config in the style 'baseten-switch
+// commentedFixture is a comment-rich config in the style 'openrouter-switch
 // config init' generates: a head comment block, aligned values, blank
 // lines, and a commented-out client block. Every one of those byte
 // regions must survive a targeted edit untouched.
@@ -332,7 +332,7 @@ clients:
     bind_addr: 127.0.0.1:18081
     protocol_shape: anthropic
 
-  # codex ships parked; 'baseten-switch codex on' offers to enable it.
+  # codex ships parked; 'openrouter-switch codex on' offers to enable it.
   - name: codex
     enabled: false  # parked
     bind_addr: 127.0.0.1:18081
@@ -342,7 +342,7 @@ clients:
 `
 
 // TestSetClientScalarsEnabled drives the bool-aware enabled case: the
-// un-park flip 'baseten-switch codex on' performs (the Codex integration contract
+// un-park flip 'openrouter-switch codex on' performs (the Codex integration contract
 // item 2.2). Full-file wants, so byte preservation outside the changed
 // line is asserted, and the refusal semantics match the string scalars.
 func TestSetClientScalarsEnabled(t *testing.T) {
@@ -440,7 +440,7 @@ func TestSetClientScalarsEnabled(t *testing.T) {
 // TestSetClientScalarsEnabledTemplateRoundTrip un-parks the codex
 // client in the shipped template itself and asserts the only changed
 // bytes are the enabled token, so the editor is proven against the
-// exact file 'baseten-switch config init' writes.
+// exact file 'openrouter-switch config init' writes.
 func TestSetClientScalarsEnabledTemplateRoundTrip(t *testing.T) {
 	path := writeEditFixture(t, string(InitTemplate), 0o600)
 	if err := SetClientScalars(path, "codex", map[string]string{"enabled": "true"}); err != nil {

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/upstreamerror"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/upstreamerror"
 )
 
 func TestHasIdentityContentEncoding(t *testing.T) {

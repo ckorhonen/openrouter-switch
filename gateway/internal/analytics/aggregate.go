@@ -4,9 +4,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/modelmeta"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/modelmeta"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 type groupKey struct {

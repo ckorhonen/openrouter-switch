@@ -1,6 +1,6 @@
 # Third-party notices
 
-Baseten Switch includes or derives from the following open-source work.
+OpenRouter Switch includes or derives from the following open-source work.
 
 ## MIT-licensed work
 

@@ -20,7 +20,7 @@ func TestBuildPreviewConfigSanitizesInlineCredentialsAndQuotedBindKeys(t *testin
 global:
   routing_enabled: false
   auth: {baseten: literal-baseten-secret, anthropic: literal-anthropic-secret}
-  telemetry_dir: /Users/test/.config/baseten-switch/telemetry
+  telemetry_dir: /Users/test/.config/openrouter-switch/telemetry
 clients:
   - name: claude-code
     enabled: true
@@ -106,7 +106,7 @@ func TestValidatePreviewConfigRejectsHiddenListenerAndLiteralCredential(t *testi
 
 func TestEnvFilePathHonorsExplicitOverride(t *testing.T) {
 	want := t.TempDir() + "/preview-env"
-	t.Setenv("BASETEN_SWITCH_ENV_FILE", want)
+	t.Setenv("OPENROUTER_SWITCH_ENV_FILE", want)
 	if got := EnvFilePath(); got != want {
 		t.Fatalf("EnvFilePath() = %q, want %q", got, want)
 	}

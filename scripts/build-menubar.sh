@@ -15,8 +15,8 @@
 # and a numeric build number.
 #
 # Outputs:
-#   stable:  mac/BasetenSwitch/dist/Baseten Switch.app
-#   preview: mac/BasetenSwitch/dist-preview/Baseten Switch Preview.app
+#   stable:  mac/OpenRouterSwitch/dist/OpenRouter Switch.app
+#   preview: mac/OpenRouterSwitch/dist-preview/OpenRouter Switch Preview.app
 #
 # Stable remains the default to preserve the existing local and release
 # build contract. Preview is selected only by an explicit argument, never
@@ -24,7 +24,7 @@
 # the Preview identity.
 
 set -euo pipefail
-cd "$(dirname "$0")/../mac/BasetenSwitch"
+cd "$(dirname "$0")/../mac/OpenRouterSwitch"
 
 fail() {
     echo "error: $*" >&2
@@ -38,9 +38,9 @@ Usage: scripts/build-menubar.sh [--variant stable|preview] [--release]
 Build the universal macOS menubar app. Stable is the default.
 
 Development builds use an ad hoc signature. Beta release builds require:
-  BASETEN_SWITCH_RELEASE_SIGNING_MODE  Must be "adhoc"
-  BASETEN_SWITCH_MARKETING_VERSION     Numeric version, for example 0.2.0
-  BASETEN_SWITCH_BUILD_NUMBER          Numeric build, for example 42
+  OPENROUTER_SWITCH_RELEASE_SIGNING_MODE  Must be "adhoc"
+  OPENROUTER_SWITCH_MARKETING_VERSION     Numeric version, for example 0.2.0
+  OPENROUTER_SWITCH_BUILD_NUMBER          Numeric build, for example 42
 EOF
 }
 
@@ -71,15 +71,15 @@ done
 case "$VARIANT" in
     stable)
         BUNDLE_ID="co.baseten.switch"
-        APP_NAME="Baseten Switch"
-        EXECUTABLE_NAME="BasetenSwitch"
+        APP_NAME="OpenRouter Switch"
+        EXECUTABLE_NAME="OpenRouterSwitch"
         BUILD_CHANNEL="stable"
         DIST_DIR="dist"
         ;;
     preview)
         BUNDLE_ID="co.baseten.switch.preview"
-        APP_NAME="Baseten Switch Preview"
-        EXECUTABLE_NAME="BasetenSwitchPreview"
+        APP_NAME="OpenRouter Switch Preview"
+        EXECUTABLE_NAME="OpenRouterSwitchPreview"
         BUILD_CHANNEL="preview"
         DIST_DIR="dist-preview"
         ;;
@@ -89,26 +89,26 @@ case "$VARIANT" in
 esac
 
 if [[ "$RELEASE_BUILD" == 1 ]]; then
-    MARKETING_VERSION="${BASETEN_SWITCH_MARKETING_VERSION:-}"
-    BUILD_NUMBER="${BASETEN_SWITCH_BUILD_NUMBER:-}"
-    RELEASE_SIGNING_MODE="${BASETEN_SWITCH_RELEASE_SIGNING_MODE:-}"
+    MARKETING_VERSION="${OPENROUTER_SWITCH_MARKETING_VERSION:-}"
+    BUILD_NUMBER="${OPENROUTER_SWITCH_BUILD_NUMBER:-}"
+    RELEASE_SIGNING_MODE="${OPENROUTER_SWITCH_RELEASE_SIGNING_MODE:-}"
     [[ "$RELEASE_SIGNING_MODE" == "adhoc" ]] \
-        || fail "release build requires BASETEN_SWITCH_RELEASE_SIGNING_MODE=adhoc"
+        || fail "release build requires OPENROUTER_SWITCH_RELEASE_SIGNING_MODE=adhoc"
     [[ "$MARKETING_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] \
-        || fail "release build requires BASETEN_SWITCH_MARKETING_VERSION as two or three period-separated integers"
+        || fail "release build requires OPENROUTER_SWITCH_MARKETING_VERSION as two or three period-separated integers"
     [[ "$BUILD_NUMBER" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
-        || fail "release build requires BASETEN_SWITCH_BUILD_NUMBER as period-separated integers"
+        || fail "release build requires OPENROUTER_SWITCH_BUILD_NUMBER as period-separated integers"
 else
-    MARKETING_VERSION="${BASETEN_SWITCH_MARKETING_VERSION:-0.0.0}"
-    BUILD_NUMBER="${BASETEN_SWITCH_BUILD_NUMBER:-0}"
+    MARKETING_VERSION="${OPENROUTER_SWITCH_MARKETING_VERSION:-0.0.0}"
+    BUILD_NUMBER="${OPENROUTER_SWITCH_BUILD_NUMBER:-0}"
     [[ "$MARKETING_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] \
-        || fail "BASETEN_SWITCH_MARKETING_VERSION must contain two or three period-separated integers"
+        || fail "OPENROUTER_SWITCH_MARKETING_VERSION must contain two or three period-separated integers"
     [[ "$BUILD_NUMBER" =~ ^[0-9]+(\.[0-9]+)*$ ]] \
-        || fail "BASETEN_SWITCH_BUILD_NUMBER must contain period-separated integers"
+        || fail "OPENROUTER_SWITCH_BUILD_NUMBER must contain period-separated integers"
 fi
-if [[ -n "${BASETEN_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
+if [[ -n "${OPENROUTER_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
     SWIFT_BUILD_FLAGS=()
-    read -r -a SWIFT_BUILD_FLAGS <<< "$BASETEN_SWITCH_SWIFT_BUILD_FLAGS"
+    read -r -a SWIFT_BUILD_FLAGS <<< "$OPENROUTER_SWITCH_SWIFT_BUILD_FLAGS"
 fi
 
 # Stable and Preview share the packaged Baseten-green app artwork. AppIcon.svg
@@ -116,7 +116,7 @@ fi
 APP_ICON_SOURCE="Assets/AppIcon.icns"
 
 echo "==> swift build -c release (${BUILD_CHANNEL}, universal: arm64 + x86_64)"
-if [[ -n "${BASETEN_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
+if [[ -n "${OPENROUTER_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
     swift build -c release --arch arm64 --arch x86_64 "${SWIFT_BUILD_FLAGS[@]}"
 else
     swift build -c release --arch arm64 --arch x86_64
@@ -124,13 +124,13 @@ fi
 # With multiple --arch flags SwiftPM lipos the product into the
 # .build/apple/Products/Release layout; --show-bin-path with the same
 # arches resolves that path instead of hardcoding it.
-if [[ -n "${BASETEN_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
+if [[ -n "${OPENROUTER_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
     BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 \
         "${SWIFT_BUILD_FLAGS[@]}" --show-bin-path)"
 else
     BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
 fi
-BIN="${BIN_DIR}/BasetenSwitch"
+BIN="${BIN_DIR}/OpenRouterSwitch"
 test -x "$BIN" || { echo "error: release binary not found at $BIN" >&2; exit 1; }
 
 APP="${DIST_DIR}/${APP_NAME}.app"
@@ -156,7 +156,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 	<string>${APP_NAME}</string>
 	<key>CFBundleExecutable</key>
 	<string>${EXECUTABLE_NAME}</string>
-	<key>BasetenSwitchBuildChannel</key>
+	<key>OpenRouterSwitchBuildChannel</key>
 	<string>${BUILD_CHANNEL}</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -220,7 +220,7 @@ for check in \
     "CFBundleName:${APP_NAME}" \
     "CFBundleDisplayName:${APP_NAME}" \
     "CFBundleExecutable:${EXECUTABLE_NAME}" \
-    "BasetenSwitchBuildChannel:${BUILD_CHANNEL}" \
+    "OpenRouterSwitchBuildChannel:${BUILD_CHANNEL}" \
     "CFBundleShortVersionString:${MARKETING_VERSION}" \
     "CFBundleVersion:${BUILD_NUMBER}"; do
     key="${check%%:*}"

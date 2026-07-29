@@ -1,6 +1,6 @@
 # Testing
 
-How Baseten Switch is tested and how to run each layer.
+How OpenRouter Switch is tested and how to run each layer.
 
 ## Strategy
 
@@ -23,7 +23,7 @@ cd gateway && go test ./...
 
 | Package | Covers |
 |---|---|
-| `cmd/baseten-switch` | CLI surface, clean config reset, global mutation CAS/journal/reconciliation, Claude settings adapter, and diagnostics |
+| `cmd/openrouter-switch` | CLI surface, clean config reset, global mutation CAS/journal/reconciliation, Claude settings adapter, and diagnostics |
 | `cmd/gateway` | Routing engine, global gate and resolver status, fallback waterfall, upstream discovery, subagent gate, TTFT timing, reload behavior, and admin security |
 | `internal/*` | Analytics aggregation and indexing, config editing, OAuth and credential isolation, door circuit breaker, pidfiles, sanitization, telemetry, protocol translation, and usage accounting |
 
@@ -31,12 +31,12 @@ The only production package with no tests is `internal/version`.
 
 ### Swift (menubar app)
 
-Tests under `mac/BasetenSwitch/Tests/BasetenSwitchTests/` cover
+Tests under `mac/OpenRouterSwitch/Tests/OpenRouterSwitchTests/` cover
 `DisplayTests`, `DoorStatusTests`, `LoginItemTests`, `PopupDisplayTests`,
 `RuntimeCoordinationTests`, `StatsTests`, and `TrafficTests`. Run with:
 
 ```sh
-cd mac/BasetenSwitch && swift test
+cd mac/OpenRouterSwitch && swift test
 ```
 
 These cover display formatting, stats parsing, login-item policy,
@@ -62,9 +62,9 @@ agents. Steps, in order:
 
 1. `gofmt` on changed files (ratchet: ignores pre-existing drift).
 2. `go build ./...`, `go vet ./...`, `go test ./...`.
-3. Build the `baseten-switch` binary.
+3. Build the `openrouter-switch` binary.
 4. Verify the scratch ports are free. Defaults are 28081-28083, 28182-28183,
-   and 28786-28787; `BASETEN_SWITCH_CHECK_*_PORT` variables override them for parallel
+   and 28786-28787; `OPENROUTER_SWITCH_CHECK_*_PORT` variables override them for parallel
    worktrees.
 5. Smoke: `whoami --refresh` against the configured credential store, forcing
    a live `/v1/users/me` call. Skipped by `--offline` or when no local auth
@@ -74,15 +74,15 @@ agents. Steps, in order:
 7. Smoke: throwaway door boot against a dead router; asserts `/doorz` reports
    tripped.
 8. Smoke: `up`, `status`, idempotent `up`, `down`, `status` round trip on
-   scratch ports with `BASETEN_SWITCH_LAUNCHD=off` and a fully sandboxed env. Never
+   scratch ports with `OPENROUTER_SWITCH_LAUNCHD=off` and a fully sandboxed env. Never
    touches the live gateway.
 All smoke steps isolate themselves with the env seams listed below; the gate
-never edits `~/.config/baseten-switch` or touches a running production gateway.
+never edits `~/.config/openrouter-switch` or touches a running production gateway.
 
 ## Layer 3: fresh-install simulation (`tests/fresh-install/`)
 
 A clean Debian container installs the binary, writes config and a 0600 env
-file, runs `baseten-switch up`, then verifies that a real request through the
+file, runs `openrouter-switch up`, then verifies that a real request through the
 front door returns 200 from Baseten and that telemetry records the request.
 
 ```sh
@@ -103,20 +103,20 @@ touch real state. Any test that boots a component must set the relevant ones:
 
 | Seam | Purpose |
 |---|---|
-| `BASETEN_SWITCH_CONFIG_PATH` | config file location |
-| `BASETEN_SWITCH_ADMIN_ADDR` | admin API address |
-| `BASETEN_SWITCH_CLAUDE_SETTINGS`, `BASETEN_SWITCH_BACKUP_DIR` | Claude settings.json adapter targets |
-| `BASETEN_SWITCH_LAUNCHD=off` | disable launchd supervision entirely |
-| `BASETEN_SWITCH_GATEWAY_PIDFILE`, `BASETEN_SWITCH_DOOR_PIDFILE` | pidfile locations |
-| `BASETEN_SWITCH_GATEWAY_LOG`, `BASETEN_SWITCH_DOOR_LOG` | process log locations |
-| `BASETEN_SWITCH_TELEMETRY_DIR` | segmented telemetry store location |
-| `BASETEN_SWITCH_OAUTH_PROFILE` | named Baseten CLI profile; unset follows the CLI's current profile (point at a nonexistent name to run credential-less) |
-| `BASETEN_SWITCH_MENUBAR_APP` | menubar bundle path override |
+| `OPENROUTER_SWITCH_CONFIG_PATH` | config file location |
+| `OPENROUTER_SWITCH_ADMIN_ADDR` | admin API address |
+| `OPENROUTER_SWITCH_CLAUDE_SETTINGS`, `OPENROUTER_SWITCH_BACKUP_DIR` | Claude settings.json adapter targets |
+| `OPENROUTER_SWITCH_LAUNCHD=off` | disable launchd supervision entirely |
+| `OPENROUTER_SWITCH_GATEWAY_PIDFILE`, `OPENROUTER_SWITCH_DOOR_PIDFILE` | pidfile locations |
+| `OPENROUTER_SWITCH_GATEWAY_LOG`, `OPENROUTER_SWITCH_DOOR_LOG` | process log locations |
+| `OPENROUTER_SWITCH_TELEMETRY_DIR` | segmented telemetry store location |
+| `OPENROUTER_SWITCH_OAUTH_PROFILE` | named Baseten CLI profile; unset follows the CLI's current profile (point at a nonexistent name to run credential-less) |
+| `OPENROUTER_SWITCH_MENUBAR_APP` | menubar bundle path override |
 
 Hard rules for contributors and agents:
 
 - Never point a test at the real `~/.claude/settings.json` or
-  `~/.config/baseten-switch`; always go through the seams above.
+  `~/.config/openrouter-switch`; always go through the seams above.
 - Never restart or kill a running production gateway from a test.
 - Gate every change set with `scripts/check.sh`. `go test ./...` alone does
   not exercise the live refresh path.

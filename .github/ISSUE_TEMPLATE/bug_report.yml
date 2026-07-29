@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible Baseten Switch problem
+description: Report a reproducible OpenRouter Switch problem
 title: "[Bug]: "
 body:
   - type: markdown
@@ -24,8 +24,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Baseten Switch version
-      placeholder: baseten-switch v0.2.0
+      label: OpenRouter Switch version
+      placeholder: openrouter-switch v0.2.0
     validations:
       required: true
   - type: input

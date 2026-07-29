@@ -18,15 +18,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/basetenlabs/baseten-switch/gateway/internal/config"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/pricing"
-	"github.com/basetenlabs/baseten-switch/gateway/internal/telemetry"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
 func testConfig(t *testing.T, upstreamBaseten, upstreamAnthropic string) Config {
 	t.Helper()
-	t.Setenv("BASETEN_SWITCH_AUTH_NO_KEYRING", "1")
-	t.Setenv("BASETEN_SWITCH_AUTH_FILE", filepath.Join(t.TempDir(), "auth.json"))
+	t.Setenv("OPENROUTER_SWITCH_AUTH_NO_KEYRING", "1")
+	t.Setenv("OPENROUTER_SWITCH_AUTH_FILE", filepath.Join(t.TempDir(), "auth.json"))
 	return Config{
 		TelemetryDir:   filepath.Join(t.TempDir(), "telemetry"),
 		PidFile:        filepath.Join(t.TempDir(), "g.pid"),
@@ -1336,7 +1336,7 @@ func TestMissingConfigRefusal(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected refusal for missing config, got %d clients", len(got))
 	}
-	for _, want := range []string{path, "baseten-switch config init", "gateway.example.yaml", "BASETEN_SWITCH_CONFIG_PATH"} {
+	for _, want := range []string{path, "openrouter-switch config init", "gateway.example.yaml", "OPENROUTER_SWITCH_CONFIG_PATH"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("refusal %q does not mention %q", err.Error(), want)
 		}
