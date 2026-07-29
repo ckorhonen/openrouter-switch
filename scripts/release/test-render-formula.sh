@@ -23,7 +23,12 @@ checksum="0123456789abcdef0123456789abcdef0123456789abcdef0123456789ABCDEF"
 
 [[ -f "$formula" ]] || fail "renderer did not create the formula"
 [[ -f "$patch" ]] || fail "renderer did not create the tap patch"
-[[ "$(stat -f '%Lp' "$formula" 2>/dev/null || stat -c '%a' "$formula")" == 644 ]] \
+if [[ "$(uname -s)" == Darwin ]]; then
+    formula_mode="$(stat -f '%Lp' "$formula")"
+else
+    formula_mode="$(stat -c '%a' "$formula")"
+fi
+[[ "$formula_mode" == 644 ]] \
     || fail "formula mode is not 0644"
 ruby -c "$formula" >/dev/null || fail "formula is not valid Ruby syntax"
 tap_checkout="$TMP_ROOT/tap-checkout"
