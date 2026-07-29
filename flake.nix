@@ -31,7 +31,7 @@
           src = self;
           modRoot = "gateway";
           subPackages = [ "cmd/openrouter-switch" ];
-          vendorHash = "sha256-wOrYrtvL+7qecoaFfH75KdxBOFeba0zG09LEIvLpO5o=";
+          vendorHash = "sha256-eDsz35BS4aDkQtm95bWuKely+6wzOxDtvMdiUNicofE=";
           ldflags = [ "-X github.com/ckorhonen/openrouter-switch/gateway/internal/version.Version=${version}" ];
         };
       });
