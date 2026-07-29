@@ -22,8 +22,8 @@ type uninstallStep struct {
 }
 
 // cmdUninstall removes only the current OpenRouter Switch installation. It does
-// not know about pre-release names or paths, and it never touches credentials
-// owned by the Baseten CLI.
+// not know about predecessor product names or paths. Provider credentials are
+// retained unless the user removes them explicitly.
 func cmdUninstall(args []string) int {
 	opts, err := parseUninstallOptions(args)
 	if err != nil {
@@ -69,7 +69,7 @@ func runUninstall(opts uninstallOptions, steps []uninstallStep, out io.Writer) i
 		}
 	}
 	if opts.purge {
-		root := basetenSwitchDataRoot()
+		root := openRouterSwitchDataRoot()
 		if opts.dryRun {
 			fmt.Fprintf(out, "would permanently remove current product data root %s\n", root)
 		} else if err := purgeOpenRouterSwitchDataRoot(root); err != nil {
@@ -94,7 +94,7 @@ func runUninstall(opts uninstallOptions, steps []uninstallStep, out io.Writer) i
 }
 
 func defaultUninstallSteps() []uninstallStep {
-	root := basetenSwitchDataRoot()
+	root := openRouterSwitchDataRoot()
 	return []uninstallStep{
 		{
 			description: "restore Claude Code settings only when OpenRouter Switch ownership can be proven",
@@ -131,7 +131,7 @@ func defaultUninstallSteps() []uninstallStep {
 
 func uninstallClaude() error {
 	settings := envDefault("OPENROUTER_SWITCH_CLAUDE_SETTINGS", homeJoin(".claude", "settings.json"))
-	backupRoot := envDefault("OPENROUTER_SWITCH_BACKUP_DIR", filepath.Join(basetenSwitchDataRoot(), "backups"))
+	backupRoot := envDefault("OPENROUTER_SWITCH_BACKUP_DIR", filepath.Join(openRouterSwitchDataRoot(), "backups"))
 	backup := claudeBackupPath(backupRoot, settings)
 	if err := rejectSymlinkTargets(settings, backup); err != nil {
 		return err
@@ -154,7 +154,7 @@ func uninstallClaude() error {
 func uninstallCodex() error {
 	codexHome := envDefault("OPENROUTER_SWITCH_CODEX_HOME", homeJoin(".codex"))
 	overlay := filepath.Join(codexHome, codexOverlayName)
-	backupRoot := envDefault("OPENROUTER_SWITCH_BACKUP_DIR", filepath.Join(basetenSwitchDataRoot(), "backups"))
+	backupRoot := envDefault("OPENROUTER_SWITCH_BACKUP_DIR", filepath.Join(openRouterSwitchDataRoot(), "backups"))
 	backup := codexBackupPath(backupRoot, overlay)
 	if err := rejectSymlinkTargets(overlay, backup); err != nil {
 		return err
@@ -303,7 +303,7 @@ func uninstallManagedApp() error {
 	return fmt.Errorf("manual action required: open %s, turn off Start at Login, quit the app, then remove %s; the CLI cannot safely unregister another app's SMAppService login item", appPath, appPath)
 }
 
-func basetenSwitchDataRoot() string {
+func openRouterSwitchDataRoot() string {
 	return homeJoin(".config", "openrouter-switch")
 }
 

@@ -54,6 +54,7 @@ func newSubagentTestEnv(t *testing.T, adminDown bool) *subagentTestEnv {
 	// config file. The handler re-reads gateway.yaml on each request so
 	// it reflects the verb's config edit.
 	mux := http.NewServeMux()
+	handleEligibleTestCatalog(mux)
 	ordering := &fakeMutationOrdering{}
 	mux.HandleFunc("/v1/admin/status", func(w http.ResponseWriter, r *http.Request) {
 		subModel := readSubagentModelFromConfig(t, cfgPath)
@@ -65,7 +66,7 @@ func newSubagentTestEnv(t *testing.T, adminDown bool) *subagentTestEnv {
 			"capabilities":["global_routing"],"global_routing_enabled":true,
 			"auth":{"signed_in":true,"profile":"doc","fallback_enabled":false,"fallback_in_use":false},
 			"clients":[{"name":"claude-code","enabled":true,"bind_addr":"127.0.0.1:18081","protocol_shape":"anthropic",
-				"effective_route":"baseten","fallback_route":"anthropic","auth_set":true,"currently_bound":true,
+				"effective_route":"openrouter","fallback_route":"anthropic","auth_set":true,"currently_bound":true,
 				"subagent_model":%q,"subagent_routing":%q}]}`,
 			version.Version, os.Getpid(), generation, hash, hash, cfgPath,
 			subModel, subRouting)
@@ -117,8 +118,8 @@ clients:
     default_model: zai-org/GLM-5.2
     fallback_route: anthropic
     model_aliases:
-      claude-baseten-glm-5-2: zai-org/GLM-5.2
-      claude-baseten-kimi-k2-7: moonshotai/Kimi-K2-7
+      claude-openrouter-glm-5-2: zai-org/GLM-5.2
+      claude-openrouter-kimi-k2-7: moonshotai/Kimi-K2-7
 door:
   ports:
     - bind_addr: 127.0.0.1:8081
@@ -144,7 +145,7 @@ door:
 	t.Setenv("OPENROUTER_SWITCH_ENV_FILE", filepath.Join(dir, "env"))
 	t.Setenv("OPENROUTER_SWITCH_LAUNCHD", "off")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
-	t.Setenv("BASETEN_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv(claudeSubagentEnvKey, "")
 
 	return &subagentTestEnv{
@@ -276,12 +277,12 @@ func runClaudeCaptured(t *testing.T, args []string) (int, string, string) {
 // verify poll succeeds.
 func TestSubagentsSetAliasWritesConfig(t *testing.T) {
 	e := newSubagentTestEnv(t, false)
-	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"})
 	if code != 0 {
 		t.Fatalf("subagents set = %d (%s)", code, stderr)
 	}
-	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-baseten-glm-5-2" {
-		t.Errorf("subagent_model = %q, want claude-baseten-glm-5-2", m)
+	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-openrouter-glm-5-2" {
+		t.Errorf("subagent_model = %q, want claude-openrouter-glm-5-2", m)
 	}
 	if r := cfgSubagentRouting(t, e.cfgPath); r != "on" {
 		t.Errorf("subagent_routing = %q, want on", r)
@@ -305,7 +306,7 @@ func TestSubagentsSetSlugAcceptedWithNote(t *testing.T) {
 	if m := cfgSubagentModel(t, e.cfgPath); m != "zai-org/GLM-5.2" {
 		t.Errorf("subagent_model = %q, want zai-org/GLM-5.2", m)
 	}
-	if !strings.Contains(stderr, "route explicitly to Baseten") {
+	if !strings.Contains(stderr, "route explicitly to OpenRouter") {
 		t.Errorf("slug note missing: %q", stderr)
 	}
 }
@@ -331,11 +332,11 @@ func TestSubagentsSetNativeIdAcceptedWithNote(t *testing.T) {
 func TestSubagentsUnknownAliasExits1(t *testing.T) {
 	e := newSubagentTestEnv(t, false)
 	before := fileBytes(t, e.cfgPath)
-	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-baseten-nope"})
+	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-nope"})
 	if code != 1 {
 		t.Fatalf("unknown alias = %d, want 1 (%s)", code, stderr)
 	}
-	for _, want := range []string{"unknown gateway model", "claude-baseten-glm-5-2", "claude-baseten-kimi-k2-7", "model_aliases"} {
+	for _, want := range []string{"unknown gateway model", "claude-openrouter-glm-5-2", "claude-openrouter-kimi-k2-7", "model_aliases"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("error output missing %q: %q", want, stderr)
 		}
@@ -348,7 +349,7 @@ func TestSubagentsUnknownAliasExits1(t *testing.T) {
 // TestSubagentsOnFlipsRouting keeps the model and flips routing on.
 func TestSubagentsOnFlipsRouting(t *testing.T) {
 	e := newSubagentTestEnv(t, false)
-	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"}); code != 0 {
+	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"}); code != 0 {
 		t.Fatal("set failed")
 	}
 	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "off"}); code != 0 {
@@ -364,7 +365,7 @@ func TestSubagentsOnFlipsRouting(t *testing.T) {
 	if r := cfgSubagentRouting(t, e.cfgPath); r != "on" {
 		t.Errorf("routing = %q, want on", r)
 	}
-	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-baseten-glm-5-2" {
+	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-openrouter-glm-5-2" {
 		t.Errorf("model changed on routing flip: %q", m)
 	}
 }
@@ -423,7 +424,7 @@ func TestSubagentsOffWithoutModelNoop(t *testing.T) {
 // TestSubagentsOffFlipsRouting keeps the model.
 func TestSubagentsOffFlipsRouting(t *testing.T) {
 	e := newSubagentTestEnv(t, false)
-	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"}); code != 0 {
+	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"}); code != 0 {
 		t.Fatal("set failed")
 	}
 	code, _, _ := runClaudeCaptured(t, []string{"subagents", "off"})
@@ -433,7 +434,7 @@ func TestSubagentsOffFlipsRouting(t *testing.T) {
 	if r := cfgSubagentRouting(t, e.cfgPath); r != "off" {
 		t.Errorf("routing = %q, want off", r)
 	}
-	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-baseten-glm-5-2" {
+	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-openrouter-glm-5-2" {
 		t.Errorf("model lost on off: %q", m)
 	}
 }
@@ -443,7 +444,7 @@ func TestSubagentsOffFlipsRouting(t *testing.T) {
 // confirmation names the inherit state.
 func TestSubagentsInheritAlias(t *testing.T) {
 	e := newSubagentTestEnv(t, false)
-	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"}); code != 0 {
+	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"}); code != 0 {
 		t.Fatal("set failed")
 	}
 	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "inherit"})
@@ -453,7 +454,7 @@ func TestSubagentsInheritAlias(t *testing.T) {
 	if r := cfgSubagentRouting(t, e.cfgPath); r != "off" {
 		t.Errorf("routing = %q, want off (the wire value for inherit)", r)
 	}
-	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-baseten-glm-5-2" {
+	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-openrouter-glm-5-2" {
 		t.Errorf("model lost on inherit: %q", m)
 	}
 	if !strings.Contains(stderr, "claude subagents: inherit") ||
@@ -469,7 +470,7 @@ func TestSubagentsInheritAlias(t *testing.T) {
 // the model (which is unchanged by a routing flip).
 func TestSubagentsRoutingFlipVerifiesLive(t *testing.T) {
 	e := newSubagentTestEnv(t, false)
-	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"}); code != 0 {
+	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"}); code != 0 {
 		t.Fatal("set failed")
 	}
 	// Flip off: the model is unchanged, so a poll that only checks the
@@ -507,10 +508,10 @@ clients:
     protocol_shape: anthropic
     default_model: zai-org/GLM-5.2
     fallback_route: anthropic
-    subagent_model: claude-baseten-glm-5-2
+    subagent_model: claude-openrouter-glm-5-2
     model_aliases:
-      claude-baseten-glm-5-2: zai-org/GLM-5.2
-      claude-baseten-kimi-k2-7: moonshotai/Kimi-K2-7
+      claude-openrouter-glm-5-2: zai-org/GLM-5.2
+      claude-openrouter-kimi-k2-7: moonshotai/Kimi-K2-7
 door:
   ports:
     - bind_addr: 127.0.0.1:8081
@@ -532,8 +533,8 @@ door:
 			"capabilities":["global_routing"],"global_routing_enabled":true,
 			"auth":{"signed_in":true,"profile":"doc","fallback_enabled":false,"fallback_in_use":false},
 			"clients":[{"name":"claude-code","enabled":true,"bind_addr":"127.0.0.1:18081","protocol_shape":"anthropic",
-				"effective_route":"baseten","fallback_route":"anthropic","auth_set":true,"currently_bound":true,
-				"subagent_model":"claude-baseten-glm-5-2","subagent_routing":"on"}]}`,
+				"effective_route":"openrouter","fallback_route":"anthropic","auth_set":true,"currently_bound":true,
+				"subagent_model":"claude-openrouter-glm-5-2","subagent_routing":"on"}]}`,
 			version.Version, os.Getpid(), priorHash, priorHash, cfgPath)
 	})
 	adminSrv := httptest.NewServer(mux)
@@ -572,7 +573,7 @@ door:
 	t.Setenv("OPENROUTER_SWITCH_ENV_FILE", filepath.Join(dir, "env"))
 	t.Setenv("OPENROUTER_SWITCH_LAUNCHD", "off")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
-	t.Setenv("BASETEN_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv(claudeSubagentEnvKey, "")
 
 	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "off"})
@@ -605,14 +606,14 @@ func TestSubagentsStatusPrintsConfigState(t *testing.T) {
 	if !strings.Contains(stdout, "unmanaged") {
 		t.Errorf("unmanaged state missing: %q", stdout)
 	}
-	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"}); code != 0 {
+	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"}); code != 0 {
 		t.Fatal("set failed")
 	}
 	code, stdout, _ = runClaudeCaptured(t, []string{"subagents"})
 	if code != 0 {
 		t.Fatalf("bare subagents = %d", code)
 	}
-	if !strings.Contains(stdout, "claude-baseten-glm-5-2") || !strings.Contains(stdout, "configured in model_aliases") {
+	if !strings.Contains(stdout, "claude-openrouter-glm-5-2") || !strings.Contains(stdout, "configured in model_aliases") {
 		t.Errorf("managed state missing class/config info: %q", stdout)
 	}
 }
@@ -621,7 +622,7 @@ func TestSubagentsStatusPrintsConfigState(t *testing.T) {
 // routing state, with the off wire value displayed as inherit.
 func TestSubagentsStatusShowsRouting(t *testing.T) {
 	_ = newSubagentTestEnv(t, false)
-	runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"})
 	runClaudeCaptured(t, []string{"subagents", "off"})
 	_, stdout, _ := runClaudeCaptured(t, []string{"subagents"})
 	if !strings.Contains(stdout, "routing inherit") {
@@ -654,11 +655,11 @@ func TestSubagentsStatusShowsWiringWarn(t *testing.T) {
 // config is still written and a notice says it applies at next start.
 func TestSubagentsRouterDownNotice(t *testing.T) {
 	e := newSubagentTestEnv(t, true)
-	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-sonnet-4-5"})
 	if code != 0 {
 		t.Fatalf("subagents set router-down = %d (%s)", code, stderr)
 	}
-	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-baseten-glm-5-2" {
+	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-sonnet-4-5" {
 		t.Errorf("config not written: %q", m)
 	}
 	if !strings.Contains(stderr, "applies at next start") {
@@ -666,6 +667,23 @@ func TestSubagentsRouterDownNotice(t *testing.T) {
 	}
 	if e.sigCount() != 0 {
 		t.Errorf("SIGHUP fired with router down: %d", e.sigCount())
+	}
+}
+
+func TestSubagentsRejectsOpenRouterSelectionWithoutCatalog(t *testing.T) {
+	e := newSubagentTestEnv(t, true)
+	before := fileBytes(t, e.cfgPath)
+	code, _, stderr := runClaudeCaptured(t, []string{
+		"subagents", "claude-openrouter-glm-5-2",
+	})
+	if code != 1 {
+		t.Fatalf("subagents = %d, want 1 (%s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "eligible model catalog is unavailable") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if got := fileBytes(t, e.cfgPath); !bytes.Equal(got, before) {
+		t.Fatal("missing catalog mutated config")
 	}
 }
 
@@ -677,14 +695,14 @@ func TestSubagentsWiringWarn(t *testing.T) {
 	if err := os.WriteFile(e.settings, []byte(`{"env":{"ANTHROPIC_BASE_URL":"https://corp-proxy.example.com"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"})
 	if code != 0 {
 		t.Fatalf("subagents set with wiring off = %d (%s)", code, stderr)
 	}
 	if !strings.Contains(stderr, "no effect until 'openrouter-switch claude on'") {
 		t.Errorf("wiring warn missing: %q", stderr)
 	}
-	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-baseten-glm-5-2" {
+	if m := cfgSubagentModel(t, e.cfgPath); m != "claude-openrouter-glm-5-2" {
 		t.Errorf("config not written despite warning: %q", m)
 	}
 }
@@ -697,7 +715,7 @@ func TestSubagentsEnvVarDoubleManagementWarn(t *testing.T) {
 	if err := os.WriteFile(e.settings, []byte(`{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8081","CLAUDE_CODE_SUBAGENT_MODEL":"claude-haiku-4-5"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"})
 	if code != 0 {
 		t.Fatalf("subagents set = %d (%s)", code, stderr)
 	}
@@ -711,7 +729,7 @@ func TestSubagentsEnvVarDoubleManagementWarn(t *testing.T) {
 func TestSubagentsProcessEnvVarWarn(t *testing.T) {
 	_ = newSubagentTestEnv(t, false)
 	t.Setenv(claudeSubagentEnvKey, "claude-haiku-4-5")
-	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	code, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"})
 	if code != 0 {
 		t.Fatalf("subagents set = %d (%s)", code, stderr)
 	}
@@ -729,7 +747,7 @@ func TestSubagentsCommentsPreserved(t *testing.T) {
 	if !bytes.Contains(before, []byte(commentLine)) {
 		t.Fatal("test config must have a comment line")
 	}
-	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"}); code != 0 {
+	if code, _, _ := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"}); code != 0 {
 		t.Fatal("set failed")
 	}
 	after := fileBytes(t, e.cfgPath)
@@ -742,7 +760,7 @@ func TestSubagentsCommentsPreserved(t *testing.T) {
 // "restart Claude Code sessions" message (this is live, no restart).
 func TestSubagentsNoRestartMessage(t *testing.T) {
 	_ = newSubagentTestEnv(t, false)
-	_, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	_, _, stderr := runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"})
 	if strings.Contains(stderr, "restart Claude Code sessions") {
 		t.Errorf("restart message must not appear: %q", stderr)
 	}
@@ -788,9 +806,9 @@ func TestSubagentsUsageExplainsInheritWithoutMainThreadMetaphor(t *testing.T) {
 // the subagent line from gateway.yaml.
 func TestSubagentsStatusCarriesSubagentLine(t *testing.T) {
 	_ = newSubagentTestEnv(t, false)
-	runClaudeCaptured(t, []string{"subagents", "claude-baseten-glm-5-2"})
+	runClaudeCaptured(t, []string{"subagents", "claude-openrouter-glm-5-2"})
 	_, stdout, _ := runClaudeCaptured(t, []string{"status"})
-	if !strings.Contains(stdout, "subagents:") || !strings.Contains(stdout, "claude-baseten-glm-5-2") {
+	if !strings.Contains(stdout, "subagents:") || !strings.Contains(stdout, "claude-openrouter-glm-5-2") {
 		t.Errorf("status missing the subagents line: %q", stdout)
 	}
 }
@@ -829,7 +847,7 @@ func TestClaudeOffRestoresBaseURLStripsSubagent(t *testing.T) {
 	// and restores the base URL (the subagent key has no backup
 	// coverage, so it is stripped as gateway-owned).
 	root := readTree(t, a.settingsPath)
-	root["env"].(map[string]any)[claudeSubagentEnvKey] = "claude-baseten-glm-5-2"
+	root["env"].(map[string]any)[claudeSubagentEnvKey] = "claude-openrouter-glm-5-2"
 	b, _ := json.MarshalIndent(root, "", "  ")
 	newRaw := append(b, '\n')
 	if err := os.WriteFile(a.settingsPath, newRaw, 0o600); err != nil {
@@ -884,7 +902,7 @@ func TestClaudeOffStripsGatewayOwnedSubagentValue(t *testing.T) {
 	a, out := testAdapter(t)
 	// No backup: write a settings file with a gateway-owned subagent
 	// value and no prior `on` (so off goes strip-only-owned).
-	writeSettingsFile(t, a, `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8081","CLAUDE_CODE_SUBAGENT_MODEL":"claude-baseten-glm-5-2","OTHER":"keep"}}`)
+	writeSettingsFile(t, a, `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8081","CLAUDE_CODE_SUBAGENT_MODEL":"claude-openrouter-glm-5-2","OTHER":"keep"}}`)
 	if code := a.off(); code != 0 {
 		t.Fatalf("off = %d (%s)", code, out.String())
 	}

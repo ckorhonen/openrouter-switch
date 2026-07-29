@@ -103,7 +103,7 @@ func TestUninstallHarnessStepsRestoreOnlyManagedState(t *testing.T) {
 func TestUninstallDefaultRetainsDataAndPurgeRemovesOnlyCurrentRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	root := basetenSwitchDataRoot()
+	root := openRouterSwitchDataRoot()
 	for path, content := range map[string]string{
 		"gateway.yaml":            "version: 1\n",
 		"env":                     "secret\n",
@@ -208,7 +208,7 @@ func TestUninstallLeavesAppWhenLoginItemCannotBeSafelyUnregistered(t *testing.T)
 func TestUninstallRejectsSymlinkCleanupTargets(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	root := basetenSwitchDataRoot()
+	root := openRouterSwitchDataRoot()
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
 	}

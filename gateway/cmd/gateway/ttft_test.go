@@ -57,7 +57,7 @@ func TestTTFTDisabledByDefaultAllowsSlowFirstByte(t *testing.T) {
 	defer fb.Close()
 
 	cfg := testConfig(t, primary.URL, fb.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -72,8 +72,8 @@ func TestTTFTDisabledByDefaultAllowsSlowFirstByte(t *testing.T) {
 		t.Fatalf("fallback hit %d times with ttft_timeout disabled, want 0", n)
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
-	if rows[0].EffectiveProvider != "baseten" || valueOrZero(rows[0].Fallback.Trigger) != "" {
-		t.Fatalf("row route_effective/fallback_trigger = %q/%q, want baseten/(empty)", rows[0].EffectiveProvider, valueOrZero(rows[0].Fallback.Trigger))
+	if rows[0].EffectiveProvider != "openrouter" || valueOrZero(rows[0].Fallback.Trigger) != "" {
+		t.Fatalf("row route_effective/fallback_trigger = %q/%q, want openrouter/(empty)", rows[0].EffectiveProvider, valueOrZero(rows[0].Fallback.Trigger))
 	}
 }
 
@@ -102,7 +102,7 @@ func TestTTFTFiresFallbackBeforeFirstByteWithCooldown(t *testing.T) {
 	defer fb.Close()
 
 	cfg := testConfig(t, primary.URL, fb.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	rc.TTFTTimeout = 100 * time.Millisecond
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -149,10 +149,9 @@ func TestAuthUnavailableBypassRecordsFallback(t *testing.T) {
 	}))
 	defer fallback.Close()
 
-	cfg := testConfig(t, "http://baseten.invalid", fallback.URL)
-	cfg.BasetenKey = ""
-	cfg.APIKeyFallback = false
-	rc := resolvedAnthropicBaseten(t)
+	cfg := testConfig(t, "http://openrouter.invalid", fallback.URL)
+	cfg.OpenRouterKey = ""
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -203,7 +202,7 @@ func TestTTFTHeadersWithoutBodyFiresFallback(t *testing.T) {
 	defer fb.Close()
 
 	cfg := testConfig(t, primary.URL, fb.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	rc.TTFTTimeout = 100 * time.Millisecond
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -243,7 +242,7 @@ func TestTTFTInertAfterFirstByte(t *testing.T) {
 	defer fb.Close()
 
 	cfg := testConfig(t, primary.URL, fb.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	rc.TTFTTimeout = 120 * time.Millisecond
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -288,7 +287,7 @@ func TestOpenAIChatCompletionsCapturesUsageAndFirstOutput(t *testing.T) {
 	defer upstream.Close()
 
 	cfg := testConfig(t, upstream.URL, upstream.URL)
-	client := resolvedOpenAIBaseten(t, "opencode", "baseten")
+	client := resolvedOpenAIOpenRouter(t, "opencode", "openrouter")
 	client.DefaultModel = "moonshotai/Kimi-K2.7-Code"
 	g, adminL, _ := newGateway(t, cfg, client)
 	defer adminL.Close()
@@ -353,16 +352,16 @@ func TestTTFTExplicitAliasExpiryLoudError(t *testing.T) {
 	defer fb.Close()
 
 	cfg := testConfig(t, primary.URL, fb.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	rc.TTFTTimeout = 100 * time.Millisecond
-	rc.ModelAliases = map[string]string{"claude-baseten-glm": "zai-org/GLM-5.2"}
+	rc.ModelAliases = map[string]string{"claude-openrouter-glm": "zai-org/GLM-5.2"}
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
 
-	resp, rb := ttftPost(t, g, `{"model":"claude-baseten-glm","stream":false,"messages":[{"role":"user","content":"ping"}]}`)
+	resp, rb := ttftPost(t, g, `{"model":"claude-openrouter-glm","stream":false,"messages":[{"role":"user","content":"ping"}]}`)
 	if resp.StatusCode != 504 {
 		t.Fatalf("status = %d body=%s, want 504", resp.StatusCode, rb)
 	}

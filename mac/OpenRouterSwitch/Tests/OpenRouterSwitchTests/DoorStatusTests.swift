@@ -189,7 +189,7 @@ final class DoorStatusTests: XCTestCase {
                 globalRoutingEnabled: false),
             "Native · Anthropic")
         XCTAssertEqual(livePathGatewayHealth(nil), "Running")
-        XCTAssertEqual(livePathEffectiveRoute(client), "Baseten · GLM 5.2")
+        XCTAssertEqual(livePathEffectiveRoute(client), "OpenRouter · GLM 5.2")
         XCTAssertEqual(livePathModel(client), "GLM 5.2")
         XCTAssertEqual(livePathFallback(client), "Ready · anthropic")
     }
@@ -212,15 +212,15 @@ final class DoorStatusTests: XCTestCase {
             "enabled": true,
             "bind_addr": "127.0.0.1:18081",
             "protocol_shape": "anthropic",
-            "effective_route": "baseten",
+            "effective_route": "openrouter",
             "native_route": "anthropic",
             "currently_bound": true,
-            "effective_summary": "Baseten · GLM-5.2",
+            "effective_summary": "OpenRouter · GLM-5.2",
             "model_catalog": [[
                 "label": "GLM 5.2",
                 "storage_target": "zai-org/GLM-5.2",
                 "slug": "zai-org/GLM-5.2",
-                "alias": "claude-baseten-glm-5-2",
+                "alias": "claude-openrouter-glm-5-2",
                 "available": true,
             ]],
             "fallback": [
@@ -240,9 +240,9 @@ final class DoorStatusTests: XCTestCase {
             ],
             "unmatched_native_model": [
                 "configured_target": "zai-org/GLM-5.2",
-                "effective_route": "baseten",
+                "effective_route": "openrouter",
                 "effective_model": "zai-org/GLM-5.2",
-                "effective_source": "default_baseten",
+                "effective_source": "default_openrouter",
             ],
         ])!
     }

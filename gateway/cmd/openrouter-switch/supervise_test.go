@@ -26,7 +26,7 @@ import (
 // ~/Applications copy. Tests that exercise the step re-enable it with
 // t.Setenv("OPENROUTER_SWITCH_MENUBAR", "") plus the runCmd/HOME/keg fixtures.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "baseten-launchagents")
+	dir, err := os.MkdirTemp("", "openrouter-launchagents")
 	if err != nil {
 		panic(err)
 	}
@@ -206,25 +206,25 @@ func TestInstallPlan(t *testing.T) {
 	42	0	homebrew.mxcl.openrouter-switch
 }`, nil, []string{"homebrew.mxcl.openrouter-switch", "brew services stop"}},
 		{"our labels re-install", `services = {
-	42	0	co.baseten.switch.router
-	-	0	co.baseten.switch.door
-}`, []string{"co.baseten.switch.door", "co.baseten.switch.router"}, nil},
-		{"our door label alone", `"co.baseten.switch.door" => {`,
-			[]string{"co.baseten.switch.door"}, nil},
+	42	0	com.ckorhonen.openrouter-switch.router
+	-	0	com.ckorhonen.openrouter-switch.door
+}`, []string{"com.ckorhonen.openrouter-switch.door", "com.ckorhonen.openrouter-switch.router"}, nil},
+		{"our door label alone", `"com.ckorhonen.openrouter-switch.door" => {`,
+			[]string{"com.ckorhonen.openrouter-switch.door"}, nil},
 		{"ours plus brew still refuses", `services = {
-	42	0	co.baseten.switch.router
+	42	0	com.ckorhonen.openrouter-switch.router
 	43	0	homebrew.mxcl.openrouter-switch
 }`, nil, []string{"homebrew.mxcl.openrouter-switch"}},
 		{"running menubar app is not supervision", `services = {
-	812	0	application.co.baseten.switch.123139528.123139533
+	812	0	application.com.ckorhonen.openrouter-switch.123139528.123139533
 }`, nil, nil},
 		{"menubar app plus ours re-install", `services = {
-	812	0	application.co.baseten.switch.123139528.123139533
-	42	0	co.baseten.switch.router
-	-	0	co.baseten.switch.door
-}`, []string{"co.baseten.switch.door", "co.baseten.switch.router"}, nil},
+	812	0	application.com.ckorhonen.openrouter-switch.123139528.123139533
+	42	0	com.ckorhonen.openrouter-switch.router
+	-	0	com.ckorhonen.openrouter-switch.door
+}`, []string{"com.ckorhonen.openrouter-switch.door", "com.ckorhonen.openrouter-switch.router"}, nil},
 		{"menubar app plus brew still refuses", `services = {
-	812	0	application.co.baseten.switch.123139528.123139533
+	812	0	application.com.ckorhonen.openrouter-switch.123139528.123139533
 	43	0	homebrew.mxcl.openrouter-switch
 }`, nil, []string{"homebrew.mxcl.openrouter-switch"}},
 	}
@@ -290,7 +290,7 @@ func TestCmdUpInstallReinstallsOurLabels(t *testing.T) {
 	f := useFake(t)
 	// The domain listing answers once; every later print (the
 	// post-bootout teardown polls) reads the labels as gone.
-	f.queue("print", "services = {\n\t42\t0\tco.baseten.switch.router\n\t-\t0\tco.baseten.switch.door\n}\n", nil)
+	f.queue("print", "services = {\n\t42\t0\tcom.ckorhonen.openrouter-switch.router\n\t-\t0\tcom.ckorhonen.openrouter-switch.door\n}\n", nil)
 	f.respond("bootout", "", nil)
 	f.respond("bootstrap", "", nil)
 
@@ -862,7 +862,7 @@ func fakeAdminWithVersion(t *testing.T, v string) *httptest.Server {
 		fmt.Fprint(w, `{"clients":[]}`)
 	})
 	mux.HandleFunc("/v1/admin/auth/status", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"signed_in":true,"email":"user@example.com"}`)
+		fmt.Fprint(w, `{"status":"valid","source":"keychain"}`)
 	})
 	return httptest.NewServer(mux)
 }

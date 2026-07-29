@@ -29,7 +29,7 @@ APP_BIN="$APP/Contents/MacOS/OpenRouterSwitch"
 
 [ -d "$APP" ] || fail "nested app ZIP did not contain '$APP_NAME'"
 [ -x "$APP_BIN" ] || fail "app executable is missing"
-[ "$(/usr/bin/plutil -extract CFBundleIdentifier raw "$PLIST")" = "co.baseten.switch" ] \
+[ "$(/usr/bin/plutil -extract CFBundleIdentifier raw "$PLIST")" = "com.ckorhonen.openrouter-switch" ] \
     || fail "unexpected app bundle identifier"
 [ "$(/usr/bin/plutil -extract CFBundleDisplayName raw "$PLIST")" = "OpenRouter Switch" ] \
     || fail "unexpected app display name"
@@ -112,7 +112,7 @@ Quick start:
 
 Homebrew is the canonical public install and upgrade channel:
 
-  brew install basetenlabs/baseten/openrouter-switch
+  brew install ckorhonen/openrouter-switch/openrouter-switch
 
 OpenRouter Switch runs locally. Request bodies leave the machine only for
 the model provider selected by routing policy.

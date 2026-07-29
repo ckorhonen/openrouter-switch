@@ -128,16 +128,16 @@ struct TrafficCost: Decodable, Equatable, Sendable {
 
 struct TrafficCostSummary: Decodable, Equatable, Sendable {
     var actualClaudeCostUSD: Double = 0
-    var actualBasetenCostUSD: Double = 0
-    var estimatedNativeCostForBasetenUSD: Double = 0
+    var actualOpenRouterCostUSD: Double = 0
+    var estimatedNativeCostForOpenRouterUSD: Double = 0
     var savedUSD: Double = 0
     var savedPercent: Double = 0
 
     enum CodingKeys: String, CodingKey {
         case actualClaudeCostUSD = "actual_claude_cost_usd"
-        case actualBasetenCostUSD = "actual_baseten_cost_usd"
-        case estimatedNativeCostForBasetenUSD =
-            "estimated_native_cost_for_baseten_usd"
+        case actualOpenRouterCostUSD = "actual_openrouter_cost_usd"
+        case estimatedNativeCostForOpenRouterUSD =
+            "estimated_native_cost_for_openrouter_usd"
         case savedUSD = "saved_usd"
         case savedPercent = "saved_percent"
     }
@@ -197,11 +197,11 @@ struct TrafficCostRow: Decodable, Equatable, Identifiable, Sendable {
 }
 
 struct TrafficSavings: Decodable, Equatable, Sendable {
-    var byBasetenModel: [TrafficSavingsModelRow] = []
+    var byOpenRouterModel: [TrafficSavingsModelRow] = []
     var mappings: [TrafficSavingsMapping] = []
 
     enum CodingKeys: String, CodingKey {
-        case byBasetenModel = "by_baseten_model"
+        case byOpenRouterModel = "by_openrouter_model"
         case mappings
     }
 }
@@ -209,7 +209,7 @@ struct TrafficSavings: Decodable, Equatable, Sendable {
 struct TrafficSavingsModelRow: Decodable, Equatable, Identifiable, Sendable {
     var modelID = ""
     var displayName: String?
-    var actualBasetenCostUSD: Double = 0
+    var actualOpenRouterCostUSD: Double = 0
     var estimatedNativeCostUSD: Double = 0
     var savedUSD: Double = 0
     var savedPercent: Double = 0
@@ -217,7 +217,7 @@ struct TrafficSavingsModelRow: Decodable, Equatable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case modelID = "model_id"
         case displayName = "display_name"
-        case actualBasetenCostUSD = "actual_baseten_cost_usd"
+        case actualOpenRouterCostUSD = "actual_openrouter_cost_usd"
         case estimatedNativeCostUSD = "estimated_native_cost_usd"
         case savedUSD = "saved_usd"
         case savedPercent = "saved_percent"
@@ -228,36 +228,36 @@ struct TrafficSavingsModelRow: Decodable, Equatable, Identifiable, Sendable {
         trafficModelLabel(displayName: displayName, modelID: modelID)
     }
     var estimatedAdditionalClaudeCostUSD: Double {
-        max(0, estimatedNativeCostUSD - actualBasetenCostUSD)
+        max(0, estimatedNativeCostUSD - actualOpenRouterCostUSD)
     }
     var hasNegativeSavings: Bool {
-        estimatedNativeCostUSD < actualBasetenCostUSD
+        estimatedNativeCostUSD < actualOpenRouterCostUSD
     }
 }
 
 struct TrafficSavingsMapping: Decodable, Equatable, Identifiable, Sendable {
-    var basetenModelID = ""
-    var basetenDisplayName: String?
+    var openrouterModelID = ""
+    var openrouterDisplayName: String?
     var requestedClaudeFamily = ""
-    var actualBasetenCostUSD: Double = 0
+    var actualOpenRouterCostUSD: Double = 0
     var estimatedNativeCostUSD: Double = 0
 
     enum CodingKeys: String, CodingKey {
-        case basetenModelID = "baseten_model_id"
-        case basetenDisplayName = "baseten_display_name"
+        case openrouterModelID = "openrouter_model_id"
+        case openrouterDisplayName = "openrouter_display_name"
         case requestedClaudeFamily = "requested_claude_family"
-        case actualBasetenCostUSD = "actual_baseten_cost_usd"
+        case actualOpenRouterCostUSD = "actual_openrouter_cost_usd"
         case estimatedNativeCostUSD = "estimated_native_cost_usd"
     }
 
-    var id: String { "\(basetenModelID):\(requestedClaudeFamily)" }
+    var id: String { "\(openrouterModelID):\(requestedClaudeFamily)" }
     var label: String {
         trafficModelLabel(
-            displayName: basetenDisplayName,
-            modelID: basetenModelID)
+            displayName: openrouterDisplayName,
+            modelID: openrouterModelID)
     }
     var savedUSD: Double {
-        estimatedNativeCostUSD - actualBasetenCostUSD
+        estimatedNativeCostUSD - actualOpenRouterCostUSD
     }
 }
 
@@ -322,23 +322,23 @@ private func trafficModelLabel(
 struct TrafficSavingsChartGroup: Identifiable, Equatable {
     var id: String
     var label: String
-    var actualBasetenCostUSD: Double
+    var actualOpenRouterCostUSD: Double
     var estimatedNativeCostUSD: Double
 
     var estimatedAdditionalClaudeCostUSD: Double {
-        max(0, estimatedNativeCostUSD - actualBasetenCostUSD)
+        max(0, estimatedNativeCostUSD - actualOpenRouterCostUSD)
     }
     var hasNegativeSavings: Bool {
-        estimatedNativeCostUSD < actualBasetenCostUSD
+        estimatedNativeCostUSD < actualOpenRouterCostUSD
     }
 }
 
-func trafficSavingsEligibleBasetenCost(
+func trafficSavingsEligibleOpenRouterCost(
     _ summary: TrafficCostSummary
 ) -> Double {
     max(
         0,
-        summary.estimatedNativeCostForBasetenUSD - summary.savedUSD)
+        summary.estimatedNativeCostForOpenRouterUSD - summary.savedUSD)
 }
 
 extension TrafficAnalyticsWindow {

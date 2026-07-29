@@ -102,8 +102,6 @@ func dispatch(args []string) int {
 		return cmdSpend(args[1:])
 	case "healthz":
 		return cmdHealthz(args[1:])
-	case "whoami":
-		return cmdWhoami(args[1:])
 	case "auth":
 		return cmdAuth(args[1:])
 	case "doctor":
@@ -161,8 +159,7 @@ menubar shutdown step.
 Restore only provably managed Claude Code and Codex settings, stop the current
 door and router, remove the current launchd agents and runtime residue, and
 quit the current menubar app. Config, secrets, telemetry, logs, and backups are
-retained by default. Baseten CLI credentials and keychain entries are never
-removed.
+retained by default. The OpenRouter API key in Keychain is never removed.
 
   --dry-run  Print every intended action without changing anything
   --purge    Also remove ~/.config/openrouter-switch permanently
@@ -185,7 +182,7 @@ Exit 0 only when every managed component is up.
 Run down, then up with the same config. The start half is skipped if shutdown
 does not complete cleanly.
 `},
-	{"on", "Enable global Baseten routing", `Usage: openrouter-switch on [mutation options]
+	{"on", "Enable global OpenRouter routing", `Usage: openrouter-switch on [mutation options]
 
 Enable routing by editing only global.routing_enabled. Client arguments are
 rejected. Machine callers may place these options before or after the verb:
@@ -195,7 +192,7 @@ rejected. Machine callers may place these options before or after the verb:
   --if-active-token TOKEN
   --if-config-hash HASH
 `},
-	{"off", "Disable global Baseten routing", `Usage: openrouter-switch off [mutation options]
+	{"off", "Disable global OpenRouter routing", `Usage: openrouter-switch off [mutation options]
 
 Disable routing by editing only global.routing_enabled. Client arguments are
 rejected. Machine callers may place these options before or after the verb:
@@ -234,9 +231,9 @@ Environment:
   OPENROUTER_SWITCH_GATEWAY_PIDFILE   Router pidfile path
   OPENROUTER_SWITCH_GATEWAY_LOG       Router log path
   OPENROUTER_SWITCH_GATEWAY_TOKEN     Local gateway token
-  BASETEN_BASE_URL      Baseten upstream base URL
+  OPENROUTER_BASE_URL   OpenRouter upstream base URL
   ANTHROPIC_API_BASE_URL Native Anthropic upstream base URL
-  BASETEN_API_KEY       Baseten API key override
+  OPENROUTER_API_KEY    OpenRouter API key fallback
   ANTHROPIC_API_KEY     Anthropic API key override
 
 Logs append to ~/.config/openrouter-switch/logs/{router,door}.log by default. The
@@ -254,11 +251,12 @@ backup, validates, and hot-reloads a running router. Activation failure
 restores and reactivates the prior bytes. The three Preview flags must be
 supplied together.
 `},
-	{"setup", "Check prerequisites, sign in, and initialize configuration", `Usage: openrouter-switch setup
+	{"setup", "Validate an OpenRouter key and initialize configuration", `Usage: openrouter-switch setup
 
-Check for baseten CLI v0.3.0 or newer, verify the current credential and run
-"baseten auth login" interactively when needed, then create the default
-gateway config if it does not exist. Existing config is never overwritten.
+Validate the current Keychain or OPENROUTER_API_KEY credential. When none is
+available, securely prompt for a key, validate it with OpenRouter, and store it
+in Keychain. Then create the default gateway config if it does not exist.
+Existing config is never overwritten.
 
 setup does not start daemons or change any coding harness configuration.
 `},
@@ -266,20 +264,17 @@ setup does not start daemons or change any coding harness configuration.
 
 Print the spend summary calculated from local telemetry segments.
 `},
-	{"whoami", "Show the signed-in Baseten identity and token expiry", `Usage: openrouter-switch whoami [--profile NAME] [--host URL] [--refresh]
+	{"auth", "Manage the OpenRouter API key", `Usage:
+  openrouter-switch auth set-key
+  openrouter-switch auth status
 
-Print the signed-in email, workspace, token expiry, and profile. Authentication
-comes from the credential store written by "baseten auth login".
+set-key reads the API key without terminal echo, validates it with OpenRouter,
+then stores it in macOS Keychain and reloads a running router. Validation
+failure leaves the existing Keychain key unchanged.
 
-  --profile NAME  Select a credential profile
-  --host URL      Override the Baseten API host
-  --refresh       Force a token refresh before the identity lookup
-`},
-	{"auth", "Re-authenticate with the Baseten CLI", `Usage: openrouter-switch auth login
-
-Run "baseten auth login" interactively, SIGHUP the running router so it picks
-up the fresh credential, then print the identity. openrouter-switch does not write the
-credential store itself.
+status validates the active credential and prints only its source, masked
+label, limit metadata, free-tier state, and expiry. Keychain takes precedence
+over the read-only OPENROUTER_API_KEY environment fallback.
 `},
 	{"doctor", "Diagnose the full request chain and suggest a concrete fix", `Usage: openrouter-switch doctor [--json] [--probe] [--verbose] [--fix] [--yes] [--timeout SEC]
 
@@ -301,31 +296,31 @@ Plain doctor is read-only. --fix cannot be combined with --json.
   openrouter-switch claude on|off|status
   openrouter-switch claude subagents [<model>|on|inherit]
   openrouter-switch claude route [<family> <target|default>]
-  openrouter-switch claude reasoning baseten <model> off|follow-harness|effort <value>|default
+  openrouter-switch claude reasoning openrouter <model> off|follow-harness|effort <value>|default
 
 on points ANTHROPIC_BASE_URL in ~/.claude/settings.json at the gateway door
 and backs up the prior value. off restores it exactly when possible, or strips
 only gateway-owned values after drift. start and stop alias on and off.
 
-subagents selects a configured alias, raw Baseten slug, or native model for
+subagents selects a configured alias, raw OpenRouter slug, or native model for
 Task and sidechain requests. "on" re-enables the kept model. "inherit" leaves
 Claude Code's requested model unchanged; "off" is an accepted alias.
 
 route shows family pins or sets fable, opus, sonnet, or haiku to native, a
-configured alias, a raw Baseten slug, or default to remove the pin. Config
+configured alias, a raw OpenRouter slug, or default to remove the pin. Config
 edits use SIGHUP and live verification, not a restart.
 
 reasoning configures a catalog-validated, Claude Code-only reasoning policy
-for the final Baseten model.
+for the final OpenRouter model.
 `},
 	{"codex", "Manage the opt-in Codex gateway profile", `Usage:
   openrouter-switch codex on|off|status
-  openrouter-switch codex route <baseten-slug>
-  openrouter-switch codex reasoning baseten <model> off|follow-harness|effort <value>|default
+  openrouter-switch codex route <openrouter-slug>
+  openrouter-switch codex reasoning openrouter <model> off|follow-harness|effort <value>|default
 
-on writes the managed $CODEX_HOME/baseten.config.toml overlay and points its
+on writes the managed $CODEX_HOME/openrouter.config.toml overlay and points its
 provider at the gateway door. It refuses to modify an existing overlay that is
-not the exact managed shape. Opt in per session with "codex --profile baseten";
+not the exact managed shape. Opt in per session with "codex --profile openrouter";
 the user's config.toml is never written.
 If the gateway Codex client is parked, on requests consent before enabling it.
 
@@ -334,12 +329,12 @@ strips only gateway-owned content after drift. status reports overlay,
 gateway-client, door-port, model, token-stub, and backup state. start and stop
 alias on and off.
 
-route changes the Codex client's Baseten default_model with a journaled,
+route changes the Codex client's OpenRouter default_model with a journaled,
 hot-reloaded config mutation. The managed profile stays byte-identical, so
 active profiled sessions use the new target without a Codex restart.
 
 reasoning configures a catalog-validated, Codex-only reasoning policy for the
-final Baseten model.
+final OpenRouter model.
 `},
 }
 
@@ -420,8 +415,6 @@ func commandOptionConsumesValue(args []string, index int) bool {
 			option == "--probe-interval" || option == "-probe-interval" ||
 			option == "--anthropic-url" || option == "-anthropic-url" ||
 			option == "--openai-url" || option == "-openai-url"
-	case "whoami":
-		return option == "--profile" || option == "--host"
 	case "doctor":
 		return option == "--timeout"
 	}
@@ -467,10 +460,8 @@ func envDefault(name, def string) string {
 	return def
 }
 
-// gatewayLogPath is the router daemon log. It moved from the old
-// O_TRUNC ~/.baseten-gateway.log (which erased history on every restart,
-// the lifecycle contract "Logs") to an append-mode file under
-// ~/.config/openrouter-switch/logs/. OPENROUTER_SWITCH_GATEWAY_LOG still overrides.
+// gatewayLogPath is the append-only router daemon log.
+// OPENROUTER_SWITCH_GATEWAY_LOG overrides its config-root location.
 func gatewayLogPath() string {
 	return envDefault("OPENROUTER_SWITCH_GATEWAY_LOG", homeJoin(".config", "openrouter-switch", "logs", "router.log"))
 }
@@ -833,10 +824,10 @@ func cmdGatewayStatus(args []string) int {
 	}
 	running := alive && healthy
 	out := map[string]interface{}{
-		"running":                running,
-		"host":                   fmt.Sprintf("127.0.0.1:%d", portI),
-		"upstream_for_baseten":   envDefault("BASETEN_BASE_URL", gateway.DefaultBasetenURL),
-		"upstream_for_anthropic": envDefault("ANTHROPIC_API_BASE_URL", gateway.DefaultAnthropicURL),
+		"running":                 running,
+		"host":                    fmt.Sprintf("127.0.0.1:%d", portI),
+		"upstream_for_openrouter": envDefault("OPENROUTER_BASE_URL", gateway.DefaultOpenRouterURL),
+		"upstream_for_anthropic":  envDefault("ANTHROPIC_API_BASE_URL", gateway.DefaultAnthropicURL),
 	}
 	if running {
 		out["pid"] = pid

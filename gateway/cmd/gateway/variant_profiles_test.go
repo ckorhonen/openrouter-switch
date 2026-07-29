@@ -23,12 +23,12 @@ type variantUpstreamRequest struct {
 }
 
 func TestVariantProfileNativeAnthropicCanonicalizesModelAndPreservesFast(t *testing.T) {
-	recorded := make(chan variantUpstreamRequest, 1)
+	recorded := make(chan variantUpstreamRequest, 4)
 	anthropic := variantAnthropicServer(t, recorded, http.StatusOK, "fast")
 	defer anthropic.Close()
 
 	cfg := testConfig(t, anthropic.URL, anthropic.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = "anthropic"
 	rc.GlobalRoutingEnabled = false
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -59,13 +59,13 @@ func TestVariantProfileNativeAnthropicCanonicalizesModelAndPreservesFast(t *test
 	}
 }
 
-func TestVariantProfileBasetenAnthropicStripsUnsupportedFastOnly(t *testing.T) {
-	recorded := make(chan variantUpstreamRequest, 1)
-	baseten := variantAnthropicServer(t, recorded, http.StatusOK, "")
-	defer baseten.Close()
+func TestVariantProfileOpenRouterAnthropicStripsUnsupportedFastOnly(t *testing.T) {
+	recorded := make(chan variantUpstreamRequest, 4)
+	openrouter := variantAnthropicServer(t, recorded, http.StatusOK, "")
+	defer openrouter.Close()
 
-	cfg := testConfig(t, baseten.URL, baseten.URL)
-	rc := resolvedAnthropicBaseten(t)
+	cfg := testConfig(t, openrouter.URL, openrouter.URL)
+	rc := resolvedAnthropicOpenRouter(t)
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
 	stop := start(t, g)
@@ -81,12 +81,12 @@ func TestVariantProfileBasetenAnthropicStripsUnsupportedFastOnly(t *testing.T) {
 		t.Fatalf("path = %q, want /v1/messages", got.path)
 	}
 	if _, found := got.body["speed"]; found {
-		t.Fatalf("unsupported top-level speed reached Baseten: %#v", got.body["speed"])
+		t.Fatalf("unsupported top-level speed reached OpenRouter: %#v", got.body["speed"])
 	}
 	if model := fmtString(got.body["model"]); model == "" ||
 		model == "claude-opus-5" ||
 		strings.Contains(model, "[1m]") {
-		t.Fatalf("Baseten model was not rewritten to a canonical target: %q", model)
+		t.Fatalf("OpenRouter model was not rewritten to a canonical target: %q", model)
 	}
 	if metadata, ok := got.body["metadata"].(map[string]any); !ok ||
 		metadata["speed"] != "nested-keep" ||
@@ -96,9 +96,9 @@ func TestVariantProfileBasetenAnthropicStripsUnsupportedFastOnly(t *testing.T) {
 	assertVariantBetaTokens(t, got.headers, false)
 }
 
-func TestVariantProfileBasetenOpenAIStripsUnsupportedFastOnly(t *testing.T) {
-	recorded := make(chan variantUpstreamRequest, 1)
-	baseten := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestVariantProfileOpenRouterOpenAIStripsUnsupportedFastOnly(t *testing.T) {
+	recorded := make(chan variantUpstreamRequest, 4)
+	openrouter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recordVariantRequest(t, recorded, r)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -108,10 +108,10 @@ func TestVariantProfileBasetenOpenAIStripsUnsupportedFastOnly(t *testing.T) {
 			"usage":{"prompt_tokens":1,"completion_tokens":1}
 		}`))
 	}))
-	defer baseten.Close()
+	defer openrouter.Close()
 
-	cfg := testConfig(t, baseten.URL, baseten.URL)
-	rc := resolvedAnthropicBaseten(t)
+	cfg := testConfig(t, openrouter.URL, openrouter.URL)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.DefaultModel = "moonshotai/Kimi-K2.7-Code"
 	rc.UpstreamShape = "openai"
 	g, adminL, _ := newGateway(t, cfg, rc)
@@ -140,15 +140,15 @@ func TestVariantProfileBasetenOpenAIStripsUnsupportedFastOnly(t *testing.T) {
 }
 
 func TestVariantProfileFallbackPreservesFastForNativeAnthropic(t *testing.T) {
-	primaryRequests := make(chan variantUpstreamRequest, 1)
+	primaryRequests := make(chan variantUpstreamRequest, 4)
 	primary := variantAnthropicServer(t, primaryRequests, http.StatusServiceUnavailable, "")
 	defer primary.Close()
-	fallbackRequests := make(chan variantUpstreamRequest, 1)
+	fallbackRequests := make(chan variantUpstreamRequest, 4)
 	fallback := variantAnthropicServer(t, fallbackRequests, http.StatusOK, "fast")
 	defer fallback.Close()
 
 	cfg := testConfig(t, primary.URL, fallback.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -162,7 +162,7 @@ func TestVariantProfileFallbackPreservesFastForNativeAnthropic(t *testing.T) {
 
 	primaryGot := receiveVariantRequest(t, primaryRequests)
 	if _, found := primaryGot.body["speed"]; found {
-		t.Fatalf("unsupported speed reached Baseten primary: %#v", primaryGot.body["speed"])
+		t.Fatalf("unsupported speed reached OpenRouter primary: %#v", primaryGot.body["speed"])
 	}
 	assertVariantBetaTokens(t, primaryGot.headers, false)
 

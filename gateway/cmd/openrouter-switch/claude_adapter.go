@@ -56,7 +56,7 @@ import (
 const (
 	claudeManagedEnvKey  = "ANTHROPIC_BASE_URL"
 	claudeSubagentEnvKey = "CLAUDE_CODE_SUBAGENT_MODEL"
-	claudeAliasPrefix    = "claude-baseten-" // the model-discovery contract alias namespace
+	claudeAliasPrefix    = "claude-openrouter-" // the model-discovery contract alias namespace
 	claudeHarnessName    = "claude"
 
 	// Status uses 0 = on and 3 = off (1 is reserved for operational
@@ -70,7 +70,7 @@ var claudeManagedEnvKeys = []string{claudeManagedEnvKey, claudeSubagentEnvKey}
 
 func cmdClaude(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: openrouter-switch claude on|off|status|subagents [<model>|on|inherit]|route [<family> <target|default>]|reasoning baseten <model> off|follow-harness|effort <value>|default  (start/stop are aliases for on/off)")
+		fmt.Fprintln(os.Stderr, "usage: openrouter-switch claude on|off|status|subagents [<model>|on|inherit]|route [<family> <target|default>]|reasoning openrouter <model> off|follow-harness|effort <value>|default  (start/stop are aliases for on/off)")
 		return 2
 	}
 	a, err := newClaudeAdapterFromEnv()
@@ -318,7 +318,7 @@ func (a *claudeAdapter) isGatewayURL(raw string) bool {
 // against Anthropic directly, so it is user territory.
 const (
 	subagentClassAlias  = "gateway alias"
-	subagentClassSlug   = "raw Baseten slug"
+	subagentClassSlug   = "raw OpenRouter slug"
 	subagentClassNative = "native id"
 )
 
@@ -337,7 +337,7 @@ func classifySubagentModel(id string) (string, bool) {
 }
 
 // claudeSubagentOwned is the "we own this value" test for the subagent
-// key: a baseten alias or a raw Baseten slug only resolves through the
+// key: an OpenRouter alias or a raw OpenRouter slug only resolves through the
 // gateway, so stripping it can never lose a user-chosen native model.
 func claudeSubagentOwned(v string) bool {
 	return gateway.InAliasNamespace(v) || strings.Contains(v, "/")
@@ -840,7 +840,7 @@ func (a *claudeAdapter) offStripOnly(root map[string]any, existed bool, bak *cla
 // fixModelAlias handles the the model-discovery contract persisted-alias
 // trap: a model picked via the gateway's /v1/models aliases persists
 // in settings.json, and Anthropic rejects it once routing is off. If
-// the current model looks like ours (claude-baseten-*), reset it to the
+// the current model looks like ours (claude-openrouter-*), reset it to the
 // backed-up value or delete it. Reports whether root changed.
 func (a *claudeAdapter) fixModelAlias(root map[string]any, bak *claudeBackup) bool {
 	m, ok := root["model"].(string)
@@ -859,7 +859,7 @@ func (a *claudeAdapter) fixModelAlias(root map[string]any, bak *claudeBackup) bo
 
 // --- subagents ----------------------------------------------------------------
 
-const claudeSubagentsUsage = "usage: openrouter-switch claude subagents [<model>|on|inherit]  (inherit: no subagent-specific model rewrite; Claude Code's requested model follows its family mapping or the unmatched-model default; \"off\" is an accepted alias; model: a configured claude-baseten-*/anthropic-baseten-* alias, a raw Baseten slug like org/model, or a native claude-*/anthropic-* id)"
+const claudeSubagentsUsage = "usage: openrouter-switch claude subagents [<model>|on|inherit]  (inherit: no subagent-specific model rewrite; Claude Code's requested model follows its family mapping or the unmatched-model default; \"off\" is an accepted alias; model: a configured claude-openrouter-*/anthropic-openrouter-* alias, a raw OpenRouter slug like org/model, or a native claude-*/anthropic-* id)"
 
 func (a *claudeAdapter) subagents(args []string, stdout io.Writer) int {
 	if len(args) == 0 {
@@ -934,6 +934,18 @@ func (a *claudeAdapter) subagentsSetModel(model string, opts mutationOptions, st
 			}, "invalid_subagent_target", message, false, 1)
 		}
 	}
+	if class == subagentClassAlias || class == subagentClassSlug {
+		modelID := model
+		if class == subagentClassAlias {
+			modelID = a.modelAliases[model]
+		}
+		if eligibilityErr := requireEligibleOpenRouterModel(modelID); eligibilityErr != nil {
+			return failMutation(opts, stdout, mutationResult{
+				OperationID: opts.OperationID, Operation: "set_claude_subagents",
+				RequestedTarget: model, Client: a.clientName, Key: "subagents", ConfigPath: a.configPath,
+			}, eligibilityErr.code, eligibilityErr.message, eligibilityErr.retriable, 1)
+		}
+	}
 
 	if !opts.JSON {
 		// Warnings (never refusals): a config edit is harmless.
@@ -945,7 +957,7 @@ func (a *claudeAdapter) subagentsSetModel(model string, opts mutationOptions, st
 		humanSuccess := fmt.Sprintf("claude subagents: on (subagent_model=%s in %s)", model, a.configPath)
 		switch class {
 		case subagentClassSlug:
-			humanSuccess = fmt.Sprintf("note: %q is a raw Baseten slug; subagent requests route explicitly to Baseten.\n%s", model, humanSuccess)
+			humanSuccess = fmt.Sprintf("note: %q is a raw OpenRouter slug; subagent requests route explicitly to OpenRouter.\n%s", model, humanSuccess)
 		case subagentClassNative:
 			humanSuccess = fmt.Sprintf("note: %q is a native id; subagent requests route per the switch position.\n%s", model, humanSuccess)
 		}
@@ -967,7 +979,7 @@ func (a *claudeAdapter) subagentsSetModel(model string, opts mutationOptions, st
 
 	switch class {
 	case subagentClassSlug:
-		fmt.Fprintf(a.out, "note: %q is a raw Baseten slug; subagent requests route explicitly to Baseten.\n", model)
+		fmt.Fprintf(a.out, "note: %q is a raw OpenRouter slug; subagent requests route explicitly to OpenRouter.\n", model)
 	case subagentClassNative:
 		fmt.Fprintf(a.out, "note: %q is a native id; subagent requests route per the switch position.\n", model)
 	}
@@ -1008,6 +1020,28 @@ func (a *claudeAdapter) subagentsRouting(want, requestedTarget string, opts muta
 			"claude subagents: cannot enable routing with no subagent_model configured; set one with 'openrouter-switch claude subagents <model>'",
 			false, 1)
 	}
+	// Absent routing means on when a model is set. Only a transition from
+	// inherit/off to on activates a saved OpenRouter selection.
+	effective := cur.SubagentRouting
+	if effective == "" && cur.SubagentModel != "" {
+		effective = "on"
+	}
+	if want == "on" && effective != "on" {
+		class, ok := classifySubagentModel(cur.SubagentModel)
+		if ok && (class == subagentClassAlias || class == subagentClassSlug) {
+			modelID := cur.SubagentModel
+			if class == subagentClassAlias {
+				modelID = a.modelAliases[cur.SubagentModel]
+			}
+			if eligibilityErr := requireEligibleOpenRouterModel(modelID); eligibilityErr != nil {
+				return failMutation(opts, stdout, mutationResult{
+					OperationID: opts.OperationID, Operation: "set_claude_subagents",
+					RequestedTarget: requestedTarget, Client: a.clientName, Key: "subagents",
+					ConfigPath: a.configPath,
+				}, eligibilityErr.code, eligibilityErr.message, eligibilityErr.retriable, 1)
+			}
+		}
+	}
 	// "off" with no subagent_model is already the effective state, and
 	// writing subagent_routing: off alone would leave a config the router
 	// refuses (routing set while model empty; validateSubagentConfig).
@@ -1028,10 +1062,6 @@ func (a *claudeAdapter) subagentsRouting(want, requestedTarget string, opts muta
 	}
 	// Absent routing means on when a model is set, so "on" with an
 	// empty routing is already the effective state.
-	effective := cur.SubagentRouting
-	if effective == "" && cur.SubagentModel != "" {
-		effective = "on"
-	}
 	set := map[string]string{"subagent_routing": want}
 	if journaled {
 		human := fmt.Sprintf("claude subagents: %s (subagent_model=%s)", requestedTarget, orDash(cur.SubagentModel))
@@ -1226,7 +1256,7 @@ func (a *claudeAdapter) subagentStateLabel(c *config.Client) string {
 		}
 		return fmt.Sprintf("%s (%s, NOT in model_aliases; requests fail loud at the gateway, routing %s)", c.SubagentModel, class, routing)
 	case subagentClassSlug:
-		return fmt.Sprintf("%s (%s; routes explicitly to Baseten, routing %s)", c.SubagentModel, class, routing)
+		return fmt.Sprintf("%s (%s; routes explicitly to OpenRouter, routing %s)", c.SubagentModel, class, routing)
 	default:
 		return fmt.Sprintf("%s (%s; routes per the switch position, routing %s)", c.SubagentModel, class, routing)
 	}
@@ -1309,7 +1339,7 @@ func validRouteTarget(target string, aliases map[string]string) bool {
 	return ok
 }
 
-const claudeRouteUsage = "usage: openrouter-switch claude route [<family> <target|default>]  (family: one of fable, opus, sonnet, haiku; target: native, a configured alias, a raw Baseten slug like org/model, or default to remove the pin)"
+const claudeRouteUsage = "usage: openrouter-switch claude route [<family> <target|default>]  (family: one of fable, opus, sonnet, haiku; target: native, a configured alias, a raw OpenRouter slug like org/model, or default to remove the pin)"
 
 func (a *claudeAdapter) route(args []string, stdout io.Writer) int {
 	if len(args) == 0 {
@@ -1419,6 +1449,18 @@ func (a *claudeAdapter) routeSet(key, target string, stdout io.Writer, opts muta
 			RequestedTarget: target, Client: a.clientName, Key: key, ConfigPath: a.configPath,
 		}, "invalid_route_target", message, false, 1)
 	}
+	if class == subagentClassAlias || class == subagentClassSlug {
+		modelID := target
+		if class == subagentClassAlias {
+			modelID = a.modelAliases[target]
+		}
+		if eligibilityErr := requireEligibleOpenRouterModel(modelID); eligibilityErr != nil {
+			return failMutation(opts, stdout, mutationResult{
+				OperationID: opts.OperationID, Operation: "set_claude_route",
+				RequestedTarget: target, Client: a.clientName, Key: key, ConfigPath: a.configPath,
+			}, eligibilityErr.code, eligibilityErr.message, eligibilityErr.retriable, 1)
+		}
+	}
 
 	if !opts.JSON {
 		// Warnings (never refusals): a config edit is harmless.
@@ -1428,7 +1470,7 @@ func (a *claudeAdapter) routeSet(key, target string, stdout io.Writer, opts muta
 	if journaled {
 		humanSuccess := fmt.Sprintf("claude route: %s -> %s (in %s)", key, target, a.configPath)
 		if class == subagentClassSlug {
-			humanSuccess = fmt.Sprintf("note: %q is a raw Baseten slug; pinned requests route explicitly to Baseten.\n%s", target, humanSuccess)
+			humanSuccess = fmt.Sprintf("note: %q is a raw OpenRouter slug; pinned requests route explicitly to OpenRouter.\n%s", target, humanSuccess)
 		}
 		return a.runClaudeJournaledMutationLocked(opts, stdout, journaledMutationSpec{
 			Operation:       "set_claude_route",
@@ -1447,7 +1489,7 @@ func (a *claudeAdapter) routeSet(key, target string, stdout io.Writer, opts muta
 	}
 	switch class {
 	case subagentClassSlug:
-		fmt.Fprintf(a.out, "note: %q is a raw Baseten slug; pinned requests route explicitly to Baseten.\n", target)
+		fmt.Fprintf(a.out, "note: %q is a raw OpenRouter slug; pinned requests route explicitly to OpenRouter.\n", target)
 	}
 	a.routeReloadAndVerify(key, target)
 	fmt.Fprintf(a.out, "claude route: %s -> %s (in %s)\n", key, target, a.configPath)

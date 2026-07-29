@@ -90,8 +90,8 @@ func TestRunConfigInitCreatesValidConfig(t *testing.T) {
 
 	// Next-steps output names the command flow.
 	for _, want := range []string{
-		"baseten auth login",
-		"BASETEN_API_KEY",
+		"openrouter-switch auth set-key",
+		"OPENROUTER_API_KEY",
 		"openrouter-switch up --install",
 		"openrouter-switch claude on",
 		"openrouter-switch status",

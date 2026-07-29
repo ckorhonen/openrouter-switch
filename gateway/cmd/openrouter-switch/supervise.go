@@ -125,7 +125,7 @@ func installPlan(printOut string) (ours []string, err error) {
 		}
 		// macOS assigns ephemeral "application.<bundle-id>.<n>.<n>"
 		// labels to every normally launched GUI app; the menubar app
-		// (co.baseten.switch) always carries one while open.
+		// (com.ckorhonen.openrouter-switch) always carries one while open.
 		// Those are not KeepAlive jobs and cannot fight over the
 		// ports, so they are not supervision conflicts.
 		if strings.HasPrefix(l, "application.") {
@@ -164,7 +164,7 @@ func jobEnv(lc *lifecycleConfig) map[string]string {
 	}
 	return map[string]string{
 		"OPENROUTER_SWITCH_CONFIG_PATH": path,
-		"PATH":                       os.Getenv("PATH"),
+		"PATH":                          os.Getenv("PATH"),
 	}
 }
 

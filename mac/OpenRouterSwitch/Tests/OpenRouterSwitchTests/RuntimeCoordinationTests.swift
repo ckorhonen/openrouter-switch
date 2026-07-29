@@ -59,6 +59,94 @@ private actor SequencedAdminReader: AdminStatusReading {
     }
 }
 
+private final class StateCredentialBackend: OpenRouterCredentialPersisting {
+    var key: String?
+
+    init(key: String? = nil) {
+        self.key = key
+    }
+
+    func readKey() throws -> String? { key }
+    func writeKey(_ key: String) throws { self.key = key }
+    func deleteKey() throws { key = nil }
+}
+
+private actor RecordingKeyValidator: OpenRouterKeyValidating {
+    private(set) var candidates: [String] = []
+    let result: Result
+
+    enum Result: Sendable {
+        case success(OpenRouterKeyMetadata)
+        case failure(OpenRouterKeyValidationError)
+    }
+
+    init(result: Result) {
+        self.result = result
+    }
+
+    func validate(_ key: String) async throws -> OpenRouterKeyMetadata {
+        candidates.append(key)
+        switch result {
+        case .success(let metadata):
+            return metadata
+        case .failure(let error):
+            throw error
+        }
+    }
+}
+
+private actor FixedCredentialReloader: CredentialReloading {
+    private(set) var calls = 0
+    let shouldFail: Bool
+    let status: String
+    let source: String
+    let error: String
+
+    init(
+        shouldFail: Bool = false,
+        status: String = "valid",
+        source: String = "keychain",
+        error: String = ""
+    ) {
+        self.shouldFail = shouldFail
+        self.status = status
+        self.source = source
+        self.error = error
+    }
+
+    func reloadCredentials() async throws -> AuthStatus {
+        calls += 1
+        if shouldFail {
+            throw GatewayClientError.invalidPayload
+        }
+        return AuthStatus(dict: [
+            "status": status,
+            "source": source,
+            "masked_label": "sk-or-v1-…test",
+            "last_error": error,
+        ])
+    }
+}
+
+private actor FixedCredentialModelReader: ModelCatalogReading {
+    func fetchModelCatalog() async throws -> LiveModelCatalogSnapshot {
+        LiveModelCatalogSnapshot(dict: [
+            "state": "ready",
+            "unavailable_reason": "",
+            "models": [[
+                "slug": "vendor/tool-model",
+                "display_name": "Tool Model",
+                "tool_capable": true,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "supported_parameters": ["tools"],
+            ]],
+            "fetched_at": "2026-07-29T16:00:00Z",
+            "error": "",
+        ])!
+    }
+}
+
 private struct FixedClock: RuntimeClock {
     let now: Date
 
@@ -200,7 +288,7 @@ final class RuntimeCoordinationTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch Preview",
                 "CFBundleExecutable": "OpenRouterSwitchPreview",
             ],
-            bundleIdentifier: "co.baseten.switch.preview",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch.preview",
             runningExecutableName: "OpenRouterSwitchPreview",
             homeDirectory: "/tmp/openrouter-switch-home",
             environment: ["OPENROUTER_SWITCH_GATEWAY_BIN": "/usr/bin/true"])
@@ -216,13 +304,13 @@ final class RuntimeCoordinationTests: XCTestCase {
             at: root,
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: NSNumber(value: 0o700)])
-        for name in ["logs", "backups", "claude", "baseten"] {
+        for name in ["logs", "backups", "claude"] {
             try manager.createDirectory(
                 at: root.appendingPathComponent(name, isDirectory: true),
                 withIntermediateDirectories: false,
                 attributes: [.posixPermissions: NSNumber(value: 0o700)])
         }
-        for name in ["gateway.yaml", "env", "auth.json"] {
+        for name in ["gateway.yaml", "env"] {
             let path = root.appendingPathComponent(name)
             XCTAssertTrue(manager.createFile(
                 atPath: path.path,
@@ -238,7 +326,7 @@ final class RuntimeCoordinationTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch Preview",
                 "CFBundleExecutable": "OpenRouterSwitchPreview",
             ],
-            bundleIdentifier: "co.baseten.switch.preview",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch.preview",
             runningExecutableName: "OpenRouterSwitchPreview",
             homeDirectory: home.path,
             environment: ["OPENROUTER_SWITCH_GATEWAY_BIN": "/usr/bin/true"])
@@ -300,6 +388,24 @@ final class RuntimeCoordinationTests: XCTestCase {
         ])
     }
 
+    private func stableVariant() -> AppVariant {
+        AppVariant.resolve(
+            infoDictionary: [:],
+            bundleIdentifier: "com.ckorhonen.openrouter-switch",
+            runningExecutableName: "OpenRouterSwitch",
+            homeDirectory: "/tmp/openrouter-switch-home",
+            environment: [:])
+    }
+
+    private var validatedKeyMetadata: OpenRouterKeyMetadata {
+        OpenRouterKeyMetadata(
+            maskedLabel: "sk-or-v1-…test",
+            limit: 20,
+            limitRemaining: 12,
+            isFreeTier: false,
+            expiresAt: "")
+    }
+
     private func codexStatus(
         generation: Int,
         hash: String,
@@ -322,7 +428,7 @@ final class RuntimeCoordinationTests: XCTestCase {
                 "protocol_shape": "openai",
                 "unmatched_native_model": [
                     "configured_target": configuredTarget,
-                    "effective_route": "baseten",
+                    "effective_route": "openrouter",
                     "effective_model": effectiveModel ?? configuredTarget,
                     "effective_source": "default_model",
                 ],
@@ -544,7 +650,7 @@ final class RuntimeCoordinationTests: XCTestCase {
             ambient: [
                 "HOME": "/Users/test",
                 "PATH": "/attacker/bin:/usr/bin",
-                "BASETEN_API_KEY": "secret",
+                "OPENROUTER_API_KEY": "secret",
                 "ANTHROPIC_AUTH_TOKEN": "secret",
                 "SSH_AUTH_SOCK": "/tmp/attacker-agent.sock",
                 "UNRELATED": "not-required",
@@ -563,10 +669,203 @@ final class RuntimeCoordinationTests: XCTestCase {
             environment["OPENROUTER_SWITCH_CONFIG_PATH"],
             "/tmp/preview/gateway.yaml")
         XCTAssertEqual(environment["OPENROUTER_SWITCH_GATEWAY_TOKEN"], "preview-token")
-        XCTAssertNil(environment["BASETEN_API_KEY"])
+        XCTAssertNil(environment["OPENROUTER_API_KEY"])
         XCTAssertNil(environment["ANTHROPIC_AUTH_TOKEN"])
         XCTAssertNil(environment["UNRELATED"])
         XCTAssertNil(environment["SSH_AUTH_SOCK"])
+    }
+
+    @MainActor
+    func testPreviewStateNeverResolvesSharedKeychainCredential() {
+        let backend = StateCredentialBackend(key: "stable-production-key")
+        let state = OpenRouterSwitchState(
+            variant: previewVariant(),
+            reader: CountingAdminReader(
+                status: currentStatus()),
+            modelCatalogReader: FixedCredentialModelReader(),
+            credentialStore: OpenRouterCredentialStore(
+                backend: backend,
+                environment: { [:] }),
+            loginItemService: FakeLoginItemService(),
+            previewRuntimeValidator: { _ in nil },
+            startPolling: false)
+
+        XCTAssertFalse(state.credentialResolution.isConfigured)
+        XCTAssertNil(state.credentialResolution.source)
+        state.stop()
+    }
+
+    @MainActor
+    func testRejectedKeyIsValidatedBeforeAndNeverReplacesStoredKey() async {
+        let backend = StateCredentialBackend(key: "existing-key")
+        let validator = RecordingKeyValidator(result: .failure(.rejected))
+        let reloader = FixedCredentialReloader()
+        let state = OpenRouterSwitchState(
+            variant: stableVariant(),
+            reader: CountingAdminReader(status: currentStatus()),
+            modelCatalogReader: FixedCredentialModelReader(),
+            credentialStore: OpenRouterCredentialStore(
+                backend: backend,
+                environment: { [:] }),
+            keyValidator: validator,
+            credentialReloader: reloader,
+            loginItemService: FakeLoginItemService(),
+            startPolling: false)
+
+        await state.saveAPIKey("replacement-key")
+
+        let validatedCandidates = await validator.candidates
+        let reloadCalls = await reloader.calls
+        XCTAssertEqual(backend.key, "existing-key")
+        XCTAssertEqual(validatedCandidates, ["replacement-key"])
+        XCTAssertEqual(reloadCalls, 0)
+        XCTAssertEqual(state.lastError, "OpenRouter rejected this API key.")
+        state.stop()
+    }
+
+    @MainActor
+    func testSavingValidatedKeyInvalidatesCatalogBeforeReloadFailure() async {
+        let backend = StateCredentialBackend(key: "existing-key")
+        let validator = RecordingKeyValidator(
+            result: .success(validatedKeyMetadata))
+        let reloader = FixedCredentialReloader(shouldFail: true)
+        let state = OpenRouterSwitchState(
+            variant: stableVariant(),
+            reader: CountingAdminReader(status: currentStatus()),
+            modelCatalogReader: FixedCredentialModelReader(),
+            credentialStore: OpenRouterCredentialStore(
+                backend: backend,
+                environment: { [:] }),
+            keyValidator: validator,
+            credentialReloader: reloader,
+            loginItemService: FakeLoginItemService(),
+            startPolling: false)
+        state.requestModelCatalogRefresh()
+        await state.waitForModelCatalogRefresh()
+        guard case .ready = state.liveModelCatalogState else {
+            return XCTFail("expected loaded account catalog")
+        }
+
+        await state.saveAPIKey("replacement-key")
+
+        let reloadCalls = await reloader.calls
+        XCTAssertEqual(backend.key, "replacement-key")
+        XCTAssertEqual(state.credentialResolution.source, .keychain)
+        XCTAssertEqual(state.validatedKeyMetadata, validatedKeyMetadata)
+        XCTAssertEqual(state.liveModelCatalogState, .idle)
+        XCTAssertEqual(reloadCalls, 1)
+        state.stop()
+    }
+
+    @MainActor
+    func testSaveDoesNotRefreshCatalogWhenGatewayRejectsReloadedKey() async {
+        let secret = "replacement-key"
+        let backend = StateCredentialBackend(key: "existing-key")
+        let reloader = FixedCredentialReloader(
+            status: "invalid",
+            error: "OpenRouter rejected \(secret)")
+        let state = OpenRouterSwitchState(
+            variant: stableVariant(),
+            reader: CountingAdminReader(status: currentStatus()),
+            modelCatalogReader: FixedCredentialModelReader(),
+            credentialStore: OpenRouterCredentialStore(
+                backend: backend,
+                environment: { [:] }),
+            keyValidator: RecordingKeyValidator(
+                result: .success(validatedKeyMetadata)),
+            credentialReloader: reloader,
+            loginItemService: FakeLoginItemService(),
+            startPolling: false)
+
+        await state.saveAPIKey(secret)
+
+        XCTAssertEqual(backend.key, secret)
+        XCTAssertEqual(state.liveModelCatalogState, .idle)
+        XCTAssertEqual(
+            state.lastError,
+            "The gateway rejected the saved OpenRouter API key.")
+        XCTAssertFalse(state.lastError?.contains(secret) ?? true)
+        state.stop()
+    }
+
+    @MainActor
+    func testSaveRequiresGatewayToLoadTheKeychainSource() async {
+        let backend = StateCredentialBackend(key: "existing-key")
+        let state = OpenRouterSwitchState(
+            variant: stableVariant(),
+            reader: CountingAdminReader(status: currentStatus()),
+            modelCatalogReader: FixedCredentialModelReader(),
+            credentialStore: OpenRouterCredentialStore(
+                backend: backend,
+                environment: {
+                    ["OPENROUTER_API_KEY": "older-environment-key"]
+                }),
+            keyValidator: RecordingKeyValidator(
+                result: .success(validatedKeyMetadata)),
+            credentialReloader: FixedCredentialReloader(
+                status: "valid",
+                source: "environment"),
+            loginItemService: FakeLoginItemService(),
+            startPolling: false)
+
+        await state.saveAPIKey("replacement-key")
+
+        XCTAssertEqual(backend.key, "replacement-key")
+        XCTAssertEqual(state.liveModelCatalogState, .idle)
+        XCTAssertEqual(
+            state.lastError,
+            "The gateway could not load the saved key from macOS Keychain.")
+        state.stop()
+    }
+
+    @MainActor
+    func testDeleteAcceptsExpectedMissingGatewayCredential() async {
+        let backend = StateCredentialBackend(key: "keychain-key")
+        let state = OpenRouterSwitchState(
+            variant: stableVariant(),
+            reader: CountingAdminReader(status: currentStatus()),
+            modelCatalogReader: FixedCredentialModelReader(),
+            credentialStore: OpenRouterCredentialStore(
+                backend: backend,
+                environment: { [:] }),
+            keyValidator: RecordingKeyValidator(
+                result: .success(validatedKeyMetadata)),
+            credentialReloader: FixedCredentialReloader(status: "missing"),
+            loginItemService: FakeLoginItemService(),
+            startPolling: false)
+
+        await state.deleteKeychainAPIKey()
+
+        XCTAssertNil(backend.key)
+        XCTAssertNil(state.lastError)
+        XCTAssertEqual(state.liveModelCatalogState, .idle)
+        state.stop()
+    }
+
+    @MainActor
+    func testDeletingKeychainKeyFallsBackToReadOnlyEnvironmentKey() async {
+        let backend = StateCredentialBackend(key: "keychain-key")
+        let state = OpenRouterSwitchState(
+            variant: stableVariant(),
+            reader: CountingAdminReader(status: currentStatus()),
+            modelCatalogReader: FixedCredentialModelReader(),
+            credentialStore: OpenRouterCredentialStore(
+                backend: backend,
+                environment: {
+                    ["OPENROUTER_API_KEY": "environment-key"]
+                }),
+            keyValidator: RecordingKeyValidator(
+                result: .success(validatedKeyMetadata)),
+            credentialReloader: FixedCredentialReloader(),
+            loginItemService: FakeLoginItemService(),
+            startPolling: false)
+
+        await state.deleteKeychainAPIKey()
+
+        XCTAssertNil(backend.key)
+        XCTAssertEqual(state.credentialResolution.source, .environment)
+        XCTAssertTrue(state.credentialResolution.isReadOnly)
+        state.stop()
     }
 
     func testPreviewRuntimeFilesystemAcceptsPrivateRegularTree() throws {
@@ -574,20 +873,22 @@ final class RuntimeCoordinationTests: XCTestCase {
         XCTAssertNil(previewRuntimeFilesystemError(runtime: variant.runtime))
     }
 
-    func testPreviewRuntimeFilesystemRejectsAuthSymlinkEscape() throws {
+    func testPreviewRuntimeFilesystemRejectsEnvironmentSymlinkEscape() throws {
         let variant = try isolatedPreviewVariant()
         let manager = FileManager.default
-        let authPath = variant.runtime.environment["OPENROUTER_SWITCH_AUTH_FILE"]!
-        try manager.removeItem(atPath: authPath)
-        let stable = URL(fileURLWithPath: authPath)
+        let environmentPath = variant.runtime.environment["OPENROUTER_SWITCH_ENV_FILE"]!
+        try manager.removeItem(atPath: environmentPath)
+        let stable = URL(fileURLWithPath: environmentPath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("stable-auth.json")
+            .appendingPathComponent("stable-env")
         XCTAssertTrue(manager.createFile(
             atPath: stable.path,
             contents: Data("stable-secret".utf8),
             attributes: [.posixPermissions: NSNumber(value: 0o600)]))
-        try manager.createSymbolicLink(atPath: authPath, withDestinationPath: stable.path)
+        try manager.createSymbolicLink(
+            atPath: environmentPath,
+            withDestinationPath: stable.path)
 
         let error = previewRuntimeFilesystemError(runtime: variant.runtime)
         XCTAssertTrue(error?.contains("symlink") == true, error ?? "missing error")
@@ -626,7 +927,7 @@ final class RuntimeCoordinationTests: XCTestCase {
 
     func testDiagnosticRedactionRemovesCredentialValues() {
         let redacted = redactDiagnosticText("""
-        BASETEN_API_KEY=sk-sensitive
+        OPENROUTER_API_KEY=sk-sensitive
         Authorization: Bearer test-authorization-secret
         "OPENAI_API_KEY": "sk-json-secret"
         command --auth-token token-flag-secret
@@ -637,7 +938,7 @@ final class RuntimeCoordinationTests: XCTestCase {
         XCTAssertFalse(redacted.contains("test-authorization-secret"))
         XCTAssertFalse(redacted.contains("sk-json-secret"))
         XCTAssertFalse(redacted.contains("token-flag-secret"))
-        XCTAssertTrue(redacted.contains("BASETEN_API_KEY=<redacted>"))
+        XCTAssertTrue(redacted.contains("OPENROUTER_API_KEY=<redacted>"))
         XCTAssertTrue(redacted.contains("Authorization: <redacted>"))
         XCTAssertTrue(redacted.contains("--auth-token <redacted>"))
         XCTAssertTrue(redacted.contains("harmless context"))
@@ -791,7 +1092,7 @@ final class RuntimeCoordinationTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch",
                 "CFBundleExecutable": "OpenRouterSwitch",
             ],
-            bundleIdentifier: "co.baseten.switch",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch",
             runningExecutableName: "OpenRouterSwitch",
             homeDirectory: "/tmp/openrouter-switch-home",
             environment: ["OPENROUTER_SWITCH_GATEWAY_BIN": "/usr/bin/true"])
@@ -1021,9 +1322,9 @@ final class RuntimeCoordinationTests: XCTestCase {
         let guidance = codexRoutePickerSummary()
         XCTAssertEqual(
             guidance,
-            "Choose the Baseten model used for Codex requests.")
+            "Choose the OpenRouter model used for Codex requests.")
         XCTAssertTrue(guidance.contains("Codex"))
-        XCTAssertTrue(guidance.contains("Baseten"))
+        XCTAssertTrue(guidance.contains("OpenRouter"))
         XCTAssertFalse(guidance.contains("Claude"))
         XCTAssertFalse(guidance.contains("Anthropic"))
         XCTAssertFalse(guidance.contains("OpenAI"))
@@ -1037,7 +1338,7 @@ final class RuntimeCoordinationTests: XCTestCase {
                 "configured_target": "Qwen/Qwen3-Coder",
             ],
             "model_options": [
-                "baseten": [
+                "openrouter": [
                     "zai-org/GLM-5.2": [
                         "reasoning": [
                             "available": true,

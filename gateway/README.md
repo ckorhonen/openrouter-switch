@@ -46,7 +46,7 @@ on, off
 config init, config reset
 claude on|off|status|subagents|route|reasoning
 codex on|off|status|route|reasoning
-whoami, auth login, doctor, spend
+auth set-key, auth status, doctor, spend
 gateway start|stop|restart|status
 door
 ```
@@ -59,7 +59,7 @@ overrides.
 ```text
 cmd/openrouter-switch/   CLI and lifecycle commands
 cmd/gateway/          router, admin API, and request handling
-internal/auth/        Baseten CLI credential reader and OAuth transport
+internal/auth/        OpenRouter Keychain/env credential handling
 internal/config/      configuration parsing and editing
 internal/door/        front-door configuration
 internal/proxy/       upstream request and response relay

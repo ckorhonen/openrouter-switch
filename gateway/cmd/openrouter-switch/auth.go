@@ -2,142 +2,111 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
 )
 
-type whoamiResponse struct {
-	Email         string `json:"email"`
-	WorkspaceName string `json:"workspace_name"`
+const authRequestTimeout = 15 * time.Second
+
+var (
+	resolveAuthAPIKey  = auth.ResolveDefaultAPIKey
+	validateAuthAPIKey = func(
+		ctx context.Context,
+		apiKey string,
+	) (auth.KeyMetadata, error) {
+		return auth.ValidateAPIKey(
+			ctx,
+			&http.Client{Timeout: authRequestTimeout},
+			envDefault("OPENROUTER_BASE_URL", auth.DefaultBaseURL),
+			apiKey,
+		)
+	}
+	storeAuthAPIKey = auth.StoreDefaultAPIKey
+)
+
+func cmdAuth(args []string) int {
+	return runAuth(args, os.Stdout, os.Stderr)
 }
 
-func cmdWhoami(args []string) int {
-	// Empty profile falls through to auth.json's current-profile pointer
-	// inside auth.Load, matching the gateway (OPENROUTER_SWITCH_OAUTH_PROFILE defaults
-	// to empty) and the baseten CLI's email-derived profile names.
-	profile := ""
-	host := auth.DefaultHost()
-	forceRefresh := false
-	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--refresh":
-			// Force a token refresh round trip even when the cached
-			// access token is still valid, so health checks exercise
-			// the real token endpoint deterministically.
-			forceRefresh = true
-		case args[i] == "--profile":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "--profile requires a value")
-				return 2
-			}
-			profile = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--profile="):
-			profile = strings.TrimPrefix(args[i], "--profile=")
-		case args[i] == "--host":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "--host requires a value")
-				return 2
-			}
-			host = strings.TrimRight(args[i+1], "/")
-			i++
-		case strings.HasPrefix(args[i], "--host="):
-			host = strings.TrimRight(strings.TrimPrefix(args[i], "--host="), "/")
-		}
+func runAuth(args []string, out, errOut io.Writer) int {
+	if len(args) == 0 {
+		printAuthUsage(errOut)
+		return 2
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	buildClient := auth.HTTPClient
-	if forceRefresh {
-		buildClient = auth.HTTPClientForceRefresh
+	switch args[0] {
+	case "set-key":
+		return runAuthSetKey(args[1:], out, errOut)
+	case "status":
+		return runAuthStatus(args[1:], out, errOut)
+	default:
+		fmt.Fprintf(errOut, "unknown auth subcommand: %s\n", args[0])
+		printAuthUsage(errOut)
+		return 2
 	}
-	client, err := buildClient(ctx, profile, host)
+}
+
+func printAuthUsage(out io.Writer) {
+	fmt.Fprintln(out, "usage: openrouter-switch auth set-key|status")
+}
+
+func runAuthStatus(args []string, out, errOut io.Writer) int {
+	if len(args) != 0 {
+		printAuthUsage(errOut)
+		return 2
+	}
+	apiKey, source, err := resolveAuthAPIKey()
 	if err != nil {
-		var ak *auth.APIKeyProfileError
-		if errors.As(err, &ak) {
-			if ak.Key == "" {
-				fmt.Fprintf(os.Stderr, "profile %q uses API key auth, but the key could not be read (check the keyring or auth.json)\n", ak.Profile)
-				return 1
-			}
-			fmt.Printf("Signed in with API key (profile %q)\n", ak.Profile)
-			fmt.Println("Identity lookup requires OAuth; run 'baseten auth login' to switch, or inspect routing with 'openrouter-switch status' and 'openrouter-switch doctor --probe'.")
-			return 0
-		}
-		if errors.Is(err, auth.ErrNotSignedIn) {
-			fmt.Fprintln(os.Stderr, "not signed in (run 'baseten auth login')")
+		if errors.Is(err, auth.ErrNoAPIKey) {
+			fmt.Fprintln(errOut, "OpenRouter API key is not configured. Run 'openrouter-switch auth set-key' or set OPENROUTER_API_KEY.")
 			return 3
 		}
-		fmt.Fprintf(os.Stderr, "whoami: %v\n", err)
+		fmt.Fprintln(errOut, "auth status: could not read the OpenRouter API key")
 		return 1
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, host+"/v1/users/me", nil)
-	resp, err := client.Do(req)
+	ctx, cancel := context.WithTimeout(context.Background(), authRequestTimeout)
+	defer cancel()
+	metadata, err := validateAuthAPIKey(ctx, apiKey)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "whoami: %v\n", err)
-		return 1
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "whoami: HTTP %d: %s\n", resp.StatusCode, strings.TrimSpace(string(body)))
-		return 1
-	}
-	var wa whoamiResponse
-	if err := json.Unmarshal(body, &wa); err != nil {
-		fmt.Fprintf(os.Stderr, "whoami: parse: %v\n", err)
-		return 1
-	}
-	tok, _, _ := auth.Load(profile)
-	expires := "(unknown)"
-	if tok != nil {
-		if exp, ok := jwtExpiry(tok.AccessToken); ok {
-			expires = time.Unix(exp, 0).UTC().Format(time.RFC3339)
+		if auth.IsValidationStatus(err, http.StatusUnauthorized) {
+			fmt.Fprintln(errOut, "auth status: OpenRouter rejected the configured API key; run 'openrouter-switch auth set-key' to replace it")
+		} else {
+			fmt.Fprintln(errOut, "auth status: could not validate the configured OpenRouter API key")
 		}
+		return 1
 	}
-	profileLabel := profile
-	if profileLabel == "" {
-		profileLabel = "(current)"
-	}
-	fmt.Printf("Email:      %s\n", wa.Email)
-	fmt.Printf("Workspace:  %s\n", wa.WorkspaceName)
-	fmt.Printf("Expires at: %s\n", expires)
-	fmt.Printf("Profile:    %s\n", profileLabel)
+	printAuthMetadata(out, source, metadata)
 	return 0
 }
 
-func jwtExpiry(accessToken string) (int64, bool) {
-	parts := strings.Split(accessToken, ".")
-	if len(parts) < 2 {
-		return 0, false
+func printAuthMetadata(out io.Writer, source auth.Source, metadata auth.KeyMetadata) {
+	fmt.Fprintln(out, "OpenRouter API key: valid")
+	fmt.Fprintf(out, "  Source: %s\n", source)
+	fmt.Fprintf(out, "  Label: %s\n", metadata.Label)
+	if metadata.Limit == nil {
+		fmt.Fprintln(out, "  Limit: none")
+	} else {
+		fmt.Fprintf(out, "  Limit: $%.2f\n", *metadata.Limit)
 	}
-	payload := parts[1]
-	if pad := len(payload) % 4; pad != 0 {
-		payload += strings.Repeat("=", 4-pad)
+	if metadata.LimitRemaining == nil {
+		fmt.Fprintln(out, "  Remaining: unknown")
+	} else {
+		fmt.Fprintf(out, "  Remaining: $%.2f\n", *metadata.LimitRemaining)
 	}
-	raw, err := base64.URLEncoding.DecodeString(payload)
-	if err != nil {
-		return 0, false
+	if metadata.LimitReset == nil || *metadata.LimitReset == "" {
+		fmt.Fprintln(out, "  Reset: none")
+	} else {
+		fmt.Fprintf(out, "  Reset: %s\n", *metadata.LimitReset)
 	}
-	var claims map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &claims); err != nil {
-		return 0, false
+	fmt.Fprintf(out, "  Free tier: %t\n", metadata.IsFreeTier)
+	if metadata.ExpiresAt == nil {
+		fmt.Fprintln(out, "  Expires: none")
+	} else {
+		fmt.Fprintf(out, "  Expires: %s\n", metadata.ExpiresAt.UTC().Format(time.RFC3339))
 	}
-	v, ok := claims["exp"]
-	if !ok {
-		return 0, false
-	}
-	var exp int64
-	if err := json.Unmarshal(v, &exp); err != nil {
-		return 0, false
-	}
-	return exp, true
 }

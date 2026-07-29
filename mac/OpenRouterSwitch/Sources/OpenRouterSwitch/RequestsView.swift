@@ -354,7 +354,7 @@ private extension View {
 
 func requestServedProviderLabel(_ item: RequestItem) -> String {
     let model = item.servedModel
-    let provider = item.effectiveProvider.capitalized
+    let provider = providerDisplayName(item.effectiveProvider)
     switch (model.isEmpty, provider.isEmpty) {
     case (false, false):
         return "\(model) · \(provider)"
@@ -393,15 +393,15 @@ func requestFallbackReason(_ fallback: RequestFallback?) -> String? {
     let trigger = fallback?.trigger ?? ""
     switch trigger {
     case "image_input_unsupported":
-        return "Baseten could not accept the image, native provider used"
+        return "OpenRouter could not accept the image, native provider used"
     case "ttft_timeout":
-        return "Baseten timed out before the first token, native provider used"
+        return "OpenRouter timed out before the first token, native provider used"
     case "cooldown":
-        return "Baseten health cooldown was active, native provider used"
+        return "OpenRouter health cooldown was active, native provider used"
     case "auth_unavailable":
-        return "Baseten credentials were unavailable, native provider used"
+        return "OpenRouter credentials were unavailable, native provider used"
     case "transport_error":
-        return "Baseten connection failed, native provider used"
+        return "OpenRouter connection failed, native provider used"
     case "reasoning_policy_error":
         return "Reasoning policy could not be applied, native provider used"
     case "":
@@ -410,9 +410,9 @@ func requestFallbackReason(_ fallback: RequestFallback?) -> String? {
         if trigger.hasPrefix("http_"),
            let status = Int(trigger.dropFirst("http_".count)) {
             if status == 429 {
-                return "Baseten rate limited the request, native provider used"
+                return "OpenRouter rate limited the request, native provider used"
             }
-            return "Baseten returned HTTP \(status), native provider used"
+            return "OpenRouter returned HTTP \(status), native provider used"
         }
         let readable = trigger.replacingOccurrences(of: "_", with: " ")
         return "Fallback provider used (\(readable))"
@@ -435,13 +435,19 @@ func requestRouteLabel(_ item: RequestItem) -> String {
     let configured = item.configuredRoute
     let effective = item.effectiveProvider
     if configured.isEmpty {
-        return effective.isEmpty ? "Unknown route" : effective.capitalized
+        return effective.isEmpty ? "Unknown route" : providerDisplayName(effective)
     }
     if effective.isEmpty
         || configured.caseInsensitiveCompare(effective) == .orderedSame {
-        return configured.capitalized
+        return providerDisplayName(configured)
     }
-    return "\(configured.capitalized) → \(effective.capitalized)"
+    return "\(providerDisplayName(configured)) → \(providerDisplayName(effective))"
+}
+
+func providerDisplayName(_ provider: String) -> String {
+    provider.caseInsensitiveCompare("openrouter") == .orderedSame
+        ? "OpenRouter"
+        : provider.capitalized
 }
 
 func requestTimestamp<T>(_ value: T) -> Double {

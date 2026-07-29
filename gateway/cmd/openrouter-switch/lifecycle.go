@@ -760,7 +760,7 @@ func statErr(path string) (os.FileInfo, bool) {
 
 // routerClientRows fetches /v1/admin/status and renders one row per
 // enabled client: name, port, effective route, switch position
-// (ON = Baseten).
+// (ON = OpenRouter).
 func routerClientRows(adminAddr string) []string {
 	var payload struct {
 		Clients []struct {
@@ -780,7 +780,7 @@ func routerClientRows(adminAddr string) []string {
 			continue
 		}
 		sw := "OFF"
-		if c.Route == "baseten" {
+		if c.Route == "openrouter" {
 			sw = "ON"
 		}
 		port := portOf(c.BindAddr)
@@ -862,23 +862,33 @@ func authLine(adminAddr string, routerUp bool) string {
 		return "unknown (router not up)"
 	}
 	var a struct {
-		SignedIn       bool   `json:"signed_in"`
-		Email          string `json:"email"`
-		FallbackInUse  bool   `json:"fallback_in_use"`
-		FallbackEnable bool   `json:"fallback_enabled"`
+		Status string `json:"status"`
+		Source string `json:"source"`
 	}
 	if err := getJSON(adminAddr, "/v1/admin/auth/status", &a); err != nil {
 		return fmt.Sprintf("unknown (auth status unavailable: %v)", err)
 	}
-	switch {
-	case a.SignedIn && a.Email != "":
-		return fmt.Sprintf("signed in (OAuth, %s)", a.Email)
-	case a.SignedIn:
-		return "signed in (OAuth)"
-	case a.FallbackInUse:
-		return "API key fallback in use (no OAuth sign-in)"
+	switch a.Status {
+	case "configured":
+		if a.Source != "" {
+			return fmt.Sprintf("OpenRouter API key configured (%s)", a.Source)
+		}
+		return "OpenRouter API key configured"
+	case "valid", "healthy":
+		if a.Source != "" {
+			return fmt.Sprintf("OpenRouter API key valid (%s)", a.Source)
+		}
+		return "OpenRouter API key valid"
+	case "invalid":
+		return "OpenRouter API key invalid (run 'openrouter-switch auth set-key')"
+	case "error":
+		return "OpenRouter API key status error"
+	case "missing":
+		return "OpenRouter API key not configured (run 'openrouter-switch auth set-key' or set OPENROUTER_API_KEY)"
+	case "":
+		return "OpenRouter API key not configured (run 'openrouter-switch auth set-key' or set OPENROUTER_API_KEY)"
 	default:
-		return "not signed in (run 'baseten auth login')"
+		return fmt.Sprintf("OpenRouter API key status %s", a.Status)
 	}
 }
 

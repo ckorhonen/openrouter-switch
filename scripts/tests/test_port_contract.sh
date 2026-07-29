@@ -44,8 +44,8 @@ public_shipping_files=(
 
 shipping_files=("${public_shipping_files[@]}")
 
-require_text gateway/cmd/gateway/gateway.go 'DefaultPort         = 45273'
-require_text gateway/cmd/gateway/gateway.go 'DefaultAdminAddr    = "127.0.0.1:45273"'
+require_text gateway/cmd/gateway/gateway.go 'DefaultPort          = 45273'
+require_text gateway/cmd/gateway/gateway.go 'DefaultAdminAddr     = "127.0.0.1:45273"'
 require_text scripts/build.sh '-o bin/openrouter-switch ./cmd/openrouter-switch'
 require_text config/gateway.example.yaml 'bind_addr: 127.0.0.1:45271'
 require_text config/gateway.example.yaml 'router_addr: 127.0.0.1:45272'

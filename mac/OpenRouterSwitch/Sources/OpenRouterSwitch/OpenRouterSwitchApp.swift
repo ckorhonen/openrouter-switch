@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 
 enum AppColors {
-    /// Baseten brand green (#16D766), shared by active routing indicators.
-    static let basetenGreen = NSColor(
-        srgbRed: 0x16 / 255.0,
-        green: 0xD7 / 255.0,
-        blue: 0x66 / 255.0,
+    /// OpenRouter Switch indigo (#6D5EF7), shared by active routing indicators.
+    static let openRouterIndigo = NSColor(
+        srgbRed: 0x6D / 255.0,
+        green: 0x5E / 255.0,
+        blue: 0xF7 / 255.0,
         alpha: 1.0)
 }
 
@@ -47,7 +47,7 @@ struct OpenRouterSwitchApp: App {
         Settings { EmptyView() }
     }
 
-    /// The Baseten logo as a native template image. AppKit derives the
+    /// The OpenRouter logo as a native template image. AppKit derives the
     /// glyph from the SVG's alpha so it adapts to light/dark and menu
     /// highlight states. The packaged app loads it from Resources; the
     /// source-tree candidate keeps bare Swift builds useful in development.
@@ -66,7 +66,7 @@ struct OpenRouterSwitchApp: App {
     }()
 
     static func menubarIconResourceURL() -> URL? {
-        if let bundled = Bundle.main.url(forResource: "baseten-logo-white",
+        if let bundled = Bundle.main.url(forResource: "openrouter-logo",
                                          withExtension: "svg") {
             return bundled
         }
@@ -76,25 +76,25 @@ struct OpenRouterSwitchApp: App {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let sourceAsset = packageRoot
-            .appendingPathComponent("Assets/baseten-logo-white.svg")
+            .appendingPathComponent("Assets/openrouter-logo.svg")
         return FileManager.default.fileExists(atPath: sourceAsset.path)
             ? sourceAsset
             : nil
     }
 
-    /// Baseten brand green (#16D766). The active icon is a pre-tinted
+    /// OpenRouter Switch indigo (#6D5EF7). The active icon is pre-tinted.
     /// non-template copy: the status bar ignores tint on template
     /// images (the system owns their color), so color state requires a
     /// real color image. The inactive icon stays the template so the
     /// system keeps adapting it to light/dark menu bars; a literal
     /// black glyph would vanish on a dark menu bar.
     static let menubarIconActive: NSImage = {
-        tinted(menubarIcon, AppColors.basetenGreen)
+        tinted(menubarIcon, AppColors.openRouterIndigo)
     }()
 
     /// Degraded amber (#F5A623): gateway up but at least one enabled
     /// client is serving via native fallback. Pre-tinted non-template
-    /// for the same reason as the green icon.
+    /// for the same reason as the active icon.
     static let menubarIconDegraded: NSImage = {
         let amber = NSColor(srgbRed: 0xF5 / 255.0, green: 0xA6 / 255.0,
                             blue: 0x23 / 255.0, alpha: 1.0)
@@ -104,7 +104,7 @@ struct OpenRouterSwitchApp: App {
     private static let menubarIconPreview = previewBadged(menubarIcon)
     private static let menubarIconPreviewActive = tinted(
         menubarIconPreview,
-        AppColors.basetenGreen)
+        AppColors.openRouterIndigo)
     private static let menubarIconPreviewDegraded = tinted(
         menubarIconPreview,
         NSColor(

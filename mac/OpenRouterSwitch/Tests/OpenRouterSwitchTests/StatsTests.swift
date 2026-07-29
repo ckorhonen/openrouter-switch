@@ -29,8 +29,8 @@ final class StatsTests: XCTestCase {
              "route_effective": "", "requested_model": "claude-fable-5",
              "upstream_model": "claude-fable-5", "status": 200,
              "duration_ms": 812, "subagent": false},
-            {"ts": 1783997995.5, "client": "claude-code", "route": "baseten",
-             "route_effective": "baseten", "requested_model": "claude-opus-4-8",
+            {"ts": 1783997995.5, "client": "claude-code", "route": "openrouter",
+             "route_effective": "openrouter", "requested_model": "claude-opus-4-8",
              "upstream_model": "zai-org/GLM-5.2", "status": 502,
              "duration_ms": 90.5, "subagent": true}
           ]
@@ -113,22 +113,27 @@ final class StatsTests: XCTestCase {
           "uptime_seconds": 12, "version": "v0.2.1",
           "config_path": "/tmp/live/gateway.yaml",
           "global_routing_enabled": true,
-          "auth": {"signed_in": true, "profile": "user@example",
-                   "fallback_enabled": true, "fallback_in_use": false,
-                   "health": "ok", "last_refresh_error": "",
-                   "last_refresh_error_at": "", "last_refresh_ok_at": ""},
-          "clients": [{"name": "claude-code", "enabled": true, "effective_route": "baseten"}]
+          "auth": {"status": "valid", "source": "keychain",
+                   "label": "sk-or-…test",
+                   "limit": 100, "limit_remaining": "42.5",
+                   "limit_reset": "monthly", "is_free_tier": false,
+                   "expires_at": "", "last_ok_at": "2026-07-29T12:00:00Z",
+                   "last_error": ""},
+          "clients": [{"name": "claude-code", "enabled": true, "effective_route": "openrouter"}]
         }
         """))
         XCTAssertEqual(snap.version, "v0.2.1")
         XCTAssertEqual(snap.configPath, "/tmp/live/gateway.yaml")
         XCTAssertTrue(snap.globalRoutingEnabled)
-        XCTAssertEqual(snap.auth?.signedIn, true)
-        XCTAssertEqual(snap.auth?.profile, "user@example")
-        XCTAssertEqual(snap.auth?.fallbackEnabled, true)
-        XCTAssertEqual(snap.auth?.fallbackInUse, false)
-        XCTAssertEqual(snap.auth?.health, "ok")
-        XCTAssertEqual(snap.auth?.lastRefreshError, "")
+        XCTAssertEqual(snap.auth?.status, "valid")
+        XCTAssertEqual(snap.auth?.source, "keychain")
+        XCTAssertEqual(snap.auth?.maskedLabel, "sk-or-…test")
+        XCTAssertEqual(snap.auth?.limit, 100)
+        XCTAssertEqual(snap.auth?.limitRemaining, 42.5)
+        XCTAssertEqual(snap.auth?.limitReset, "monthly")
+        XCTAssertEqual(snap.auth?.isFreeTier, false)
+        XCTAssertEqual(snap.auth?.validatedAt, "2026-07-29T12:00:00Z")
+        XCTAssertTrue(snap.auth?.isValid == true)
         XCTAssertEqual(snap.clients.count, 1)
         XCTAssertEqual(snap.clients[0].name, "claude-code")
     }
@@ -144,12 +149,12 @@ final class StatsTests: XCTestCase {
         // Auth block with missing fields: zero values, not nil.
         let partial = AdminStatusSnapshot(dict: decode(#"{"auth": {}}"#))
         XCTAssertNotNil(partial.auth)
-        XCTAssertEqual(partial.auth?.signedIn, false)
-        XCTAssertEqual(partial.auth?.profile, "")
+        XCTAssertEqual(partial.auth?.status, "unknown")
+        XCTAssertEqual(partial.auth?.source, "")
 
         let routedClientWithoutGlobalField = AdminStatusSnapshot(dict: decode("""
         {"clients": [{"name": "claude-code", "enabled": true,
-                      "effective_route": "baseten"}]}
+                      "effective_route": "openrouter"}]}
         """))
         XCTAssertFalse(routedClientWithoutGlobalField.globalRoutingEnabled)
     }
@@ -188,7 +193,7 @@ final class StatsTests: XCTestCase {
             "model_catalog": [{
               "label": "GLM-5.2",
               "storage_target": "zai-org/GLM-5.2",
-              "alias": "claude-baseten-glm-5-2",
+              "alias": "claude-openrouter-glm-5-2",
               "available": true
             }],
             "families": [{
@@ -223,7 +228,7 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(client.modelCatalog.first?.target, "zai-org/GLM-5.2")
         XCTAssertEqual(
             client.modelCatalog.first?.alias,
-            "claude-baseten-glm-5-2")
+            "claude-openrouter-glm-5-2")
 
         let family = try! XCTUnwrap(client.families.first)
         XCTAssertEqual(family.configuredTarget, "zai-org/GLM-5.2")
@@ -237,28 +242,34 @@ final class StatsTests: XCTestCase {
         XCTAssertTrue(routing.desiredMatchesActive)
     }
 
-    // The credential-health fields (oauth-expiry spike): a dead
-    // credential decodes with its error; routers that predate the
-    // fields decode to empty strings so the app renders as before.
-    func testAuthStatusParsesHealthFields() {
-        let dead = AdminStatusSnapshot(dict: decode("""
-        {"auth": {"signed_in": true, "health": "refresh_failed",
-                  "last_refresh_error": "oauth2: \\"invalid_grant\\"",
-                  "last_refresh_error_at": "2026-07-13T09:55:00Z"}}
+    func testAuthStatusParsesCredentialHealthFields() {
+        let invalid = AdminStatusSnapshot(dict: decode("""
+        {"auth": {"status": "invalid", "source": "keychain",
+                  "masked_label": "sk-or-…test",
+                  "error": "OpenRouter rejected this key."}}
         """))
-        XCTAssertEqual(dead.auth?.signedIn, true)
-        XCTAssertEqual(dead.auth?.health, "refresh_failed")
-        XCTAssertEqual(dead.auth?.lastRefreshError, #"oauth2: "invalid_grant""#)
+        XCTAssertEqual(invalid.auth?.status, "invalid")
+        XCTAssertTrue(invalid.auth?.needsAttention == true)
+        XCTAssertEqual(
+            invalid.auth?.error,
+            "OpenRouter rejected this key.")
 
-        // Absent fields decode to empty strings, not nil.
-        let old = AdminStatusSnapshot(dict: decode(#"{"auth": {"signed_in": true}}"#))
-        XCTAssertEqual(old.auth?.health, "")
-        XCTAssertEqual(old.auth?.lastRefreshError, "")
+        let gatewayError = AdminStatusSnapshot(dict: decode("""
+        {"auth": {"status": "error", "source": "keychain",
+                  "last_error": "OpenRouter key validation request failed",
+                  "last_ok_at": "2026-07-29T12:00:00Z"}}
+        """))
+        XCTAssertEqual(
+            gatewayError.auth?.error,
+            "OpenRouter key validation request failed")
+        XCTAssertEqual(
+            gatewayError.auth?.validatedAt,
+            "2026-07-29T12:00:00Z")
 
-        // Malformed types drop to zero values (decode style pin).
         let bad = AdminStatusSnapshot(dict: decode(
-            #"{"auth": {"health": 3, "last_refresh_error": false}}"#))
-        XCTAssertEqual(bad.auth?.health, "")
-        XCTAssertEqual(bad.auth?.lastRefreshError, "")
+            #"{"auth": {"status": 3, "limit": false, "error": false}}"#))
+        XCTAssertEqual(bad.auth?.status, "unknown")
+        XCTAssertNil(bad.auth?.limit)
+        XCTAssertEqual(bad.auth?.error, "")
     }
 }

@@ -24,11 +24,32 @@ var expectedAdvertisedCommands = []string{
 	"config",
 	"setup",
 	"spend",
-	"whoami",
 	"auth",
 	"doctor",
 	"claude",
 	"codex",
+}
+
+func TestAuthAndSetupHelpUseOpenRouterKeyFlow(t *testing.T) {
+	for _, command := range []string{"auth", "setup"} {
+		var out bytes.Buffer
+		if !printCommandHelp(&out, command) {
+			t.Fatalf("%s detailed help is unavailable", command)
+		}
+		got := strings.ToLower(out.String())
+		for _, forbidden := range []string{"baseten", "oauth", "auth login"} {
+			if strings.Contains(got, forbidden) {
+				t.Errorf("%s help retained %q:\n%s", command, forbidden, out.String())
+			}
+		}
+	}
+	var authHelp bytes.Buffer
+	_ = printCommandHelp(&authHelp, "auth")
+	for _, want := range []string{"auth set-key", "auth status", "OPENROUTER_API_KEY", "Keychain"} {
+		if !strings.Contains(authHelp.String(), want) {
+			t.Errorf("auth help missing %q:\n%s", want, authHelp.String())
+		}
+	}
 }
 
 func TestRootHelpUsesOneLinePerAdvertisedCommand(t *testing.T) {
@@ -279,6 +300,8 @@ func TestRemovedCommandsAreUnknown(t *testing.T) {
 		{"tier", "--help"},
 		{"session-check"},
 		{"session-check", "--help"},
+		{"whoami"},
+		{"whoami", "--help"},
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			out := captureStderr(t, func() {

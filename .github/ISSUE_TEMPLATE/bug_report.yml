@@ -29,12 +29,11 @@ body:
     validations:
       required: true
   - type: input
-    id: baseten_cli_version
+    id: openrouter_account
     attributes:
-      label: Baseten CLI version
-      placeholder: baseten v0.3.0
-    validations:
-      required: true
+      label: OpenRouter account state
+      description: Report only masked output from openrouter-switch auth status. Never include the key.
+      placeholder: key valid, catalog available
   - type: input
     id: system
     attributes:

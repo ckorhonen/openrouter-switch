@@ -241,10 +241,10 @@ func (request telemetryRequestCaptureV1) event(
 		attempt.quoteCapturedAt,
 		completion.usage,
 		completion.usageComplete,
-		attempt.effectiveProvider == pricing.ProviderBaseten,
+		attempt.effectiveProvider == pricing.ProviderOpenRouter,
 	)
 	var nativeCounterfactual *telemetry.CostSnapshotV1
-	if attempt.effectiveProvider == "baseten" {
+	if attempt.effectiveProvider == "openrouter" {
 		nativeQuote := request.nativeQuote
 		if request.nativePricingUnsupported {
 			nativeQuote = unpricedQuote(nativeQuote)

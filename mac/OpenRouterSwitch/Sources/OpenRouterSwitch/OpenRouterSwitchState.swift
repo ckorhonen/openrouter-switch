@@ -70,7 +70,10 @@ final class OpenRouterSwitchState: ObservableObject {
     @Published private(set) var loginItemStatus: SMAppService.Status = .notRegistered
     @Published private(set) var stats: StatsSnapshot?
     @Published private(set) var cliVersion = ""
-    @Published private(set) var reauthenticating = false
+    @Published private(set) var credentialResolution =
+        OpenRouterCredentialResolution(source: nil, isConfigured: false)
+    @Published private(set) var credentialMutationInFlight = false
+    @Published private(set) var validatedKeyMetadata: OpenRouterKeyMetadata?
     @Published private(set) var runtimeTrust: RuntimeTrust
     @Published private(set) var pendingGlobalRouting: PendingGlobalRouting?
     @Published private(set) var pendingFamilyRoutes: [String: PendingControlMutation] = [:]
@@ -82,6 +85,9 @@ final class OpenRouterSwitchState: ObservableObject {
     private let reader: any AdminStatusReading
     private let modelCatalogReader: any ModelCatalogReading
     private let reasoningPreflightReader: any ReasoningPreflightReading
+    private let credentialStore: OpenRouterCredentialStore
+    private let keyValidator: any OpenRouterKeyValidating
+    private let credentialReloader: any CredentialReloading
     private let cliRunner: any CLIRunning
     private let clock: any RuntimeClock
     private let loginItemService: any LoginItemServicing
@@ -123,6 +129,11 @@ final class OpenRouterSwitchState: ObservableObject {
          reader: (any AdminStatusReading)? = nil,
          modelCatalogReader: (any ModelCatalogReading)? = nil,
          reasoningPreflightReader: (any ReasoningPreflightReading)? = nil,
+         credentialStore: OpenRouterCredentialStore =
+             OpenRouterCredentialStore(),
+         keyValidator: any OpenRouterKeyValidating =
+             OpenRouterKeyValidator(),
+         credentialReloader: (any CredentialReloading)? = nil,
          cliRunner: any CLIRunning = SystemCLIRunner(),
          clock: any RuntimeClock = SystemRuntimeClock(),
          loginItemService: (any LoginItemServicing)? = nil,
@@ -135,6 +146,9 @@ final class OpenRouterSwitchState: ObservableObject {
         self.reader = reader ?? apiClient
         self.modelCatalogReader = modelCatalogReader ?? apiClient
         self.reasoningPreflightReader = reasoningPreflightReader ?? apiClient
+        self.credentialStore = credentialStore
+        self.keyValidator = keyValidator
+        self.credentialReloader = credentialReloader ?? apiClient
         self.cliRunner = cliRunner
         self.clock = clock
         self.loginItemService = loginItemService ?? SystemLoginItemService()
@@ -152,6 +166,9 @@ final class OpenRouterSwitchState: ObservableObject {
             interval: 5)
         pollCoordinator = poll
         mutationCoordinator = MutationCoordinator(runner: cliRunner)
+        if variant.channel == .stable {
+            refreshCredentialResolution()
+        }
 
         if variant.channel == .preview,
            variant.identityError == nil,
@@ -182,6 +199,9 @@ final class OpenRouterSwitchState: ObservableObject {
         self.reader = reader
         modelCatalogReader = reader
         reasoningPreflightReader = reader
+        credentialStore = OpenRouterCredentialStore(environment: { [:] })
+        keyValidator = OpenRouterKeyValidator()
+        credentialReloader = reader
         cliRunner = SystemCLIRunner()
         clock = SystemRuntimeClock()
         loginItemService = SystemLoginItemService()
@@ -362,13 +382,13 @@ final class OpenRouterSwitchState: ObservableObject {
         switch snapshot.state {
         case .ready:
             liveModelCatalogState = .ready(snapshot.models)
-        case .signedOut:
-            guard let reason = snapshot.signedOutReason else {
+        case .unavailable:
+            guard let reason = snapshot.unavailableReason else {
                 liveModelCatalogState = .error(
                     "Live model availability could not be loaded.")
                 return
             }
-            liveModelCatalogState = .signedOut(reason)
+            liveModelCatalogState = .unavailable(reason)
         case .error:
             liveModelCatalogState = .error(
                 snapshot.error.isEmpty
@@ -448,7 +468,7 @@ final class OpenRouterSwitchState: ObservableObject {
         return true
     }
 
-    func setAllRoutesThroughBaseten(_ enabled: Bool) async {
+    func setAllRoutesThroughOpenRouter(_ enabled: Bool) async {
         guard beginGlobalRouting(enabled) else { return }
         await finishGlobalRouting(enabled)
     }
@@ -981,28 +1001,129 @@ final class OpenRouterSwitchState: ObservableObject {
 
     // MARK: - Supporting actions
 
-    func reauthenticate() async {
-        guard !reauthenticating else { return }
+    func saveAPIKey(_ key: String) async {
+        guard !credentialMutationInFlight else { return }
         guard variant.channel == .stable else {
-            lastError = "Authentication changes are disabled in OpenRouter Switch Preview."
+            lastError =
+                "API key changes are disabled in OpenRouter Switch Preview."
             return
         }
-        guard let binary = Self.locateOpenRouterSwitchBinary(variant: variant) else {
-            lastError = "openrouter-switch is not installed."
+        let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else {
+            lastError = OpenRouterKeyValidationError.empty.localizedDescription
             return
         }
 
-        reauthenticating = true
-        defer { reauthenticating = false }
-        let script = reauthAppleScript(binaryPath: binary.path)
-        let result = await cliRunner.run(CLIExecutionRequest(
-            binary: URL(fileURLWithPath: "/usr/bin/osascript"),
-            arguments: ["-e", script],
-            environment: processEnvironment(),
-            timeout: 10))
-        lastError = result.succeeded
-            ? nil
-            : "Opening Terminal for reauthentication failed."
+        credentialMutationInFlight = true
+        defer { credentialMutationInFlight = false }
+        do {
+            let metadata = try await keyValidator.validate(candidate)
+            try credentialStore.write(candidate)
+            validatedKeyMetadata = metadata
+            refreshCredentialResolution()
+            invalidateModelCatalog()
+            let reloadedAuth =
+                try await credentialReloader.reloadCredentials()
+            await refresh()
+            guard reloadedAuth.isValid,
+                  reloadedAuth.source
+                    == OpenRouterCredentialSource.keychain.rawValue else {
+                if reloadedAuth.isValid {
+                    lastError =
+                        "The gateway could not load the saved key from macOS Keychain."
+                    return
+                }
+                lastError = credentialReloadFailureMessage(
+                    reloadedAuth,
+                    submittedKey: candidate)
+                return
+            }
+            requestModelCatalogRefresh()
+            lastError = nil
+        } catch let error as LocalizedError {
+            lastError = error.errorDescription
+                ?? "The OpenRouter API key could not be saved."
+        } catch {
+            lastError = "The OpenRouter API key could not be saved."
+        }
+    }
+
+    func deleteKeychainAPIKey() async {
+        guard !credentialMutationInFlight else { return }
+        guard variant.channel == .stable else {
+            lastError =
+                "API key changes are disabled in OpenRouter Switch Preview."
+            return
+        }
+
+        credentialMutationInFlight = true
+        defer { credentialMutationInFlight = false }
+        do {
+            try credentialStore.delete()
+            validatedKeyMetadata = nil
+            refreshCredentialResolution()
+            invalidateModelCatalog()
+            let reloadedAuth =
+                try await credentialReloader.reloadCredentials()
+            await refresh()
+            if reloadedAuth.isValid {
+                requestModelCatalogRefresh()
+            } else if reloadedAuth.status != "missing" {
+                lastError = credentialReloadFailureMessage(reloadedAuth)
+                return
+            }
+            lastError = nil
+        } catch let error as LocalizedError {
+            lastError = error.errorDescription
+                ?? "The OpenRouter API key could not be removed."
+        } catch {
+            lastError = "The OpenRouter API key could not be removed."
+        }
+    }
+
+    func refreshCredentialResolution() {
+        guard variant.channel == .stable else {
+            credentialResolution = OpenRouterCredentialResolution(
+                source: nil,
+                isConfigured: false)
+            return
+        }
+        do {
+            credentialResolution = try credentialStore.resolution()
+        } catch let error as LocalizedError {
+            credentialResolution = OpenRouterCredentialResolution(
+                source: nil,
+                isConfigured: false)
+            lastError = error.errorDescription
+                ?? "The OpenRouter API key could not be read."
+        } catch {
+            credentialResolution = OpenRouterCredentialResolution(
+                source: nil,
+                isConfigured: false)
+            lastError = "The OpenRouter API key could not be read."
+        }
+    }
+
+    private func credentialReloadFailureMessage(
+        _ auth: AuthStatus,
+        submittedKey: String? = nil
+    ) -> String {
+        let detail = auth.error.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        if !detail.isEmpty,
+           submittedKey.map({ !detail.contains($0) }) ?? true {
+            return menuErrorLabel(detail, limit: 180)
+        }
+        switch auth.status {
+        case "missing":
+            return "The gateway could not load the saved OpenRouter API key."
+        case "invalid":
+            return "The gateway rejected the saved OpenRouter API key."
+        case "forbidden":
+            return "The saved OpenRouter API key cannot access OpenRouter."
+        default:
+            return "The gateway could not validate the OpenRouter API key."
+        }
     }
 
     func startSystem() async {

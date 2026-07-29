@@ -73,6 +73,11 @@ grep -Fq '"dist/openrouter-switch_${version}_darwin_universal.zip"' "$WORKFLOW" 
     || fail "release does not upload the universal ZIP"
 grep -Fq '"dist/checksums.txt"' "$WORKFLOW" \
     || fail "release does not upload checksums"
+grep -Fq 'name: openrouter-switch-${{ inputs.release_tag }}-homebrew' "$WORKFLOW" \
+    || fail "workflow artifact name does not use the OpenRouter Switch identity"
+if grep -Eiq 'baseten|basetenlabs|BASETEN_SWITCH' "$WORKFLOW"; then
+    fail "release workflow retains a Baseten product or environment reference"
+fi
 
 if grep -Eiq -- 'APPLE_|NOTARY|NOTARIZ|SBOM|CYCLONEDX|RELEASE_TAG_SIGNING_PUBLIC_KEY_BASE64|gpg --batch|--draft|--clobber|gh release edit|gh release upload|gh release delete|git push|brew tap' "$WORKFLOW"; then
     fail "workflow contains replacement, publication, tap mutation, or release mutation behavior"

@@ -127,7 +127,7 @@ func TestCmdMenubarHomebrewPayloadFirstInstall(t *testing.T) {
 		case strings.HasSuffix(name, "plutil"):
 			switch args[1] {
 			case "CFBundleIdentifier":
-				return "co.baseten.switch", nil
+				return "com.ckorhonen.openrouter-switch", nil
 			case "CFBundleDisplayName":
 				return "OpenRouter Switch", nil
 			case "CFBundleExecutable":
@@ -913,7 +913,7 @@ func TestMenubarStatusLines(t *testing.T) {
 		t.Cleanup(func() { menubarKegPaths = old })
 		installProcFake(t, false, nil)
 		lines := menubarStatusLines()
-		if len(lines) != 1 || lines[0] != "not installed (install: brew install basetenlabs/baseten/openrouter-switch)" {
+		if len(lines) != 1 || lines[0] != "not installed (install: brew install ckorhonen/openrouter-switch/openrouter-switch)" {
 			t.Fatalf("lines = %v", lines)
 		}
 	})
@@ -995,7 +995,7 @@ func TestMenubarStatusLines(t *testing.T) {
 	t.Run("bare binary outside a bundle: pid only", func(t *testing.T) {
 		menubarFixture(t)
 		f := installProcFake(t, true, nil)
-		f.comm = "/Users/example/baseten/mac/OpenRouterSwitch/.build/release/OpenRouterSwitch"
+		f.comm = "/Users/example/openrouter-switch/mac/OpenRouterSwitch/.build/release/OpenRouterSwitch"
 		lines := menubarStatusLines()
 		if len(lines) != 1 || lines[0] != "up (pid 123)" {
 			t.Fatalf("lines = %v", lines)

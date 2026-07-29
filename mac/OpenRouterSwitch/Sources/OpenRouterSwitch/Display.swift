@@ -5,12 +5,11 @@ import Foundation
 // what /v1/admin/status reports.
 
 /// Menubar icon state. Precedence: degraded > active > off.
-/// - degraded: gateway up AND (the stored Baseten credential is dead
-///   (auth health "refresh_failed") OR any enabled client reports
-///   an active fallback), regardless of routes. A dead credential warns
+/// - degraded: gateway up AND (the OpenRouter key needs attention OR any
+///   enabled client reports an active fallback). A credential problem warns
 ///   on any route state so the user notices without opening the popup.
 /// - active: gateway up AND any enabled client routes through
-///   Baseten (route == "baseten").
+///   OpenRouter (route == "openrouter").
 /// - off: everything else, including gateway down with stale
 ///   fallback flags (a down gateway cannot be degraded).
 /// Disabled clients never influence the icon.
@@ -23,18 +22,18 @@ enum MenubarIconState: Equatable {
     case degraded
 }
 
-/// auth defaults to nil (unknown), so an unavailable admin auth block does not
-/// claim that reauthentication is required.
+/// Auth defaults to nil so an unavailable admin auth block does not claim a
+/// credential problem.
 func menubarIconState(gatewayUp: Bool, clients: [ClientStatus],
                       auth: AuthStatus? = nil) -> MenubarIconState {
     guard gatewayUp else { return .off }
-    if authNeedsReauth(auth: auth) {
+    if authNeedsAttention(auth: auth) {
         return .degraded
     }
     if clients.contains(where: { $0.enabled && $0.fallbackActive }) {
         return .degraded
     }
-    if clients.contains(where: { $0.enabled && $0.effectiveRoute == "baseten" }) {
+    if clients.contains(where: { $0.enabled && $0.effectiveRoute == "openrouter" }) {
         return .active
     }
     return .off
@@ -46,7 +45,7 @@ func menubarIconState(gatewayUp: Bool,
                       clients: [ClientStatus],
                       auth: AuthStatus? = nil) -> MenubarIconState {
     guard gatewayUp else { return .off }
-    if authNeedsReauth(auth: auth)
+    if authNeedsAttention(auth: auth)
         || clients.contains(where: { $0.enabled && $0.fallbackActive }) {
         return .degraded
     }
@@ -55,7 +54,7 @@ func menubarIconState(gatewayUp: Bool,
 
 /// A selectable choice in a family's Model routing submenu. The three
 /// classes mirror the family mapping targets: Native
-/// (passthrough), a model_catalog entry (Baseten target), and Default
+/// (passthrough), a model_catalog entry (OpenRouter target), and Default
 /// (remove the explicit family mapping). Equatable so the checkmark
 /// lookup and the reselect-noop guard can compare choices directly.
 enum FamilyChoice: Equatable {
@@ -77,18 +76,20 @@ enum LiveModelCatalogLoadState: Equatable, Sendable {
     case idle
     case loading
     case ready([LiveModelCatalogEntry])
-    case signedOut(LiveModelCatalogSignedOutReason)
+    case unavailable(LiveModelCatalogUnavailableReason)
     case error(String)
 }
 
-func liveModelCatalogSignedOutMessage(
-    _ reason: LiveModelCatalogSignedOutReason
+func liveModelCatalogUnavailableMessage(
+    _ reason: LiveModelCatalogUnavailableReason
 ) -> String {
     switch reason {
-    case .notSignedIn:
-        return "Sign in to Baseten to load Model APIs."
-    case .sessionExpired:
-        return "Your Baseten session expired. Sign in again to load Model APIs."
+    case .missingCredentials:
+        return "Add an OpenRouter API key to load account models."
+    case .invalidCredentials:
+        return "The OpenRouter API key is invalid. Replace it to load account models."
+    case .forbidden:
+        return "This OpenRouter API key cannot access account models."
     }
 }
 
@@ -119,7 +120,7 @@ func projectModelCatalog(
 
     var seenSlugs = Set<String>()
     var selectable: [ModelCatalogEntry] = []
-    for liveModel in live {
+    for liveModel in live where liveModel.selectable {
         guard seenSlugs.insert(liveModel.slug).inserted else {
             continue
         }
@@ -178,7 +179,7 @@ func reasoningRowsForDisplay(
     let liveBySlug = Dictionary(
         liveModels.map { ($0.slug, $0) },
         uniquingKeysWith: { first, _ in first })
-    let options = client.modelOptions["baseten"] ?? [:]
+    let options = client.modelOptions["openrouter"] ?? [:]
     var selectedModels = Set<String>()
     func select(_ target: String?) {
         guard let target, !target.isEmpty, target != "native" else {
@@ -222,7 +223,7 @@ func reasoningRowsForDisplay(
                 .map(modelDisplayLabel)
             ?? shortModelName(model)
         return ReasoningDisplayRow(
-            provider: "baseten",
+            provider: "openrouter",
             model: model,
             displayName: displayName,
             status: status,
@@ -353,7 +354,7 @@ func reasoningCaption(
     if row.status.configured.mode == .followHarness {
         return "\(clientDisplayName(clientName))’s reasoning setting passes through when the adapter supports it."
     }
-    return "Used when \(clientDisplayName(clientName)) routes to this Baseten model."
+    return "Used when \(clientDisplayName(clientName)) routes to this OpenRouter model."
 }
 
 private func canonicalModelID(
@@ -385,7 +386,7 @@ func gatewayStatusLabel(up: Bool, uptimeSeconds: Int64) -> String {
 }
 
 /// Menu item text for a client Toggle ("name -> destination"). On the
-/// baseten route show the resolved upstream model (or "Baseten (?)"
+/// openrouter route show the resolved upstream model (or "OpenRouter (?)"
 /// when the gateway has not resolved one, keeping the gap visible);
 /// otherwise show the native route as reported by the gateway
 /// (`route`, falling back to the status API's `native_route` when
@@ -394,11 +395,11 @@ func gatewayStatusLabel(up: Bool, uptimeSeconds: Int64) -> String {
 func clientRowLabel(name: String, route: String, nativeRoute: String,
                     selectedModel: String, fallbackActive: Bool = false) -> String {
     let suffix = fallbackActive ? " (fallback active)" : ""
-    if route == "baseten" {
+    if route == "openrouter" {
         if !selectedModel.isEmpty {
             return "\(name) -> \(selectedModel)\(suffix)"
         }
-        return "\(name) -> Baseten (?)\(suffix)"
+        return "\(name) -> OpenRouter (?)\(suffix)"
     }
     let native = route.isEmpty ? nativeRoute : route
     if native.isEmpty {
@@ -429,7 +430,7 @@ func subagentMenuRowLabel(model: String, routing: String) -> String {
 /// Menu item text for one family row in the Model routing submenu. The
 /// label shows the EFFECTIVE destination from the server's `families`
 /// table, never re-derived in Swift. When effective_model is non-empty
-/// the family is served by that Baseten model (alias or slug); when
+/// the family is served by that OpenRouter model (alias or slug); when
 /// empty, effective_route names the native route the family passes
 /// through to (e.g. "anthropic"), shown as "Native (<route>)". A bare
 /// empty effective_route falls back to "default" so the row is never
@@ -499,7 +500,7 @@ func familyDispatchArgs(client: String, family: String, choice: FamilyChoice) ->
 }
 
 /// The Codex profile keeps a compatibility-safe request model while this
-/// command changes only the Baseten model selected by the gateway.
+/// command changes only the OpenRouter model selected by the gateway.
 func codexRouteDispatchArgs(model: ModelCatalogEntry) -> [String] {
     ["codex", "route", model.slug]
 }
@@ -541,38 +542,6 @@ func subagentChoiceArg(_ choice: SubagentChoice) -> String {
 func subagentDispatchArgs(client: String, choice: SubagentChoice) -> [String] {
     _ = client
     return ["claude", "subagents", subagentChoiceArg(choice)]
-}
-
-/// POSIX single-quote shell quoting ('\'' splice for embedded quotes)
-/// so an unusual binary path (spaces, quotes) cannot alter the
-/// Terminal command it is spliced into.
-func shellQuote(_ s: String) -> String {
-    "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
-}
-
-/// An AppleScript double-quoted string literal (backslash, then quote
-/// escaping, per the AppleScript text syntax).
-func appleScriptStringLiteral(_ s: String) -> String {
-    "\"" + s
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"") + "\""
-}
-
-/// The osascript source for the Reauthenticate button: tell Terminal
-/// to run the interactive device-flow login. The command is the fixed
-/// verb "auth login" on the locally-resolved openrouter-switch path; nothing
-/// server-supplied ever reaches this string (admin payload fields are
-/// rendered as text only, never spliced into commands), so the
-/// command-injection surface through Terminal stays closed. The path
-/// is shell-quoted, then the whole command AppleScript-escaped.
-func reauthAppleScript(binaryPath: String) -> String {
-    let command = shellQuote(binaryPath) + " auth login"
-    return """
-    tell application "Terminal"
-        activate
-        do script \(appleScriptStringLiteral(command))
-    end tell
-    """
 }
 
 /// One-line diagnostic text for compact summaries and menu tooltips:

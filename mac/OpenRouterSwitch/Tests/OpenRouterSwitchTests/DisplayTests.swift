@@ -195,10 +195,10 @@ final class DisplayTests: XCTestCase {
         XCTAssertFalse(focusable.canBecomeKeyView)
     }
 
-    func testMenubarIconUsesBasetenSVGAsTemplate() {
+    func testMenubarIconUsesOpenRouterSVGAsTemplate() {
         let resourceURL = OpenRouterSwitchApp.menubarIconResourceURL()
 
-        XCTAssertEqual(resourceURL?.lastPathComponent, "baseten-logo-white.svg")
+        XCTAssertEqual(resourceURL?.lastPathComponent, "openrouter-logo.svg")
         XCTAssertTrue(OpenRouterSwitchApp.menubarIcon.isTemplate)
         XCTAssertEqual(OpenRouterSwitchApp.menubarIcon.size,
                        NSSize(width: 16.5, height: 16.5))
@@ -228,18 +228,18 @@ final class DisplayTests: XCTestCase {
         }
     }
 
-    func testActiveRoutingColorIsBasetenGreen() {
-        guard let color = AppColors.basetenGreen.usingColorSpace(.sRGB) else {
-            return XCTFail("Baseten green must be representable in sRGB")
+    func testActiveRoutingColorIsOpenRouterIndigo() {
+        guard let color = AppColors.openRouterIndigo.usingColorSpace(.sRGB) else {
+            return XCTFail("OpenRouter indigo must be representable in sRGB")
         }
 
-        XCTAssertEqual(color.redComponent, 0x16 / 255.0, accuracy: 0.0001)
-        XCTAssertEqual(color.greenComponent, 0xD7 / 255.0, accuracy: 0.0001)
-        XCTAssertEqual(color.blueComponent, 0x66 / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(color.redComponent, 0x6D / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(color.greenComponent, 0x5E / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(color.blueComponent, 0xF7 / 255.0, accuracy: 0.0001)
         XCTAssertEqual(color.alphaComponent, 1.0, accuracy: 0.0001)
     }
 
-    func testStatusHeaderSwitchUsesGreenOnlyForOnTrack() throws {
+    func testStatusHeaderSwitchUsesIndigoOnlyForOnTrack() throws {
         let on = try XCTUnwrap(
             StatusHeaderToggleAppearance.trackColor(isOn: true)
                 .usingColorSpace(.sRGB))
@@ -247,9 +247,9 @@ final class DisplayTests: XCTestCase {
             StatusHeaderToggleAppearance.trackColor(isOn: false)
                 .usingColorSpace(.sRGB))
 
-        XCTAssertEqual(on.redComponent, 0x16 / 255.0, accuracy: 0.0001)
-        XCTAssertEqual(on.greenComponent, 0xD7 / 255.0, accuracy: 0.0001)
-        XCTAssertEqual(on.blueComponent, 0x66 / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(on.redComponent, 0x6D / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(on.greenComponent, 0x5E / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(on.blueComponent, 0xF7 / 255.0, accuracy: 0.0001)
         XCTAssertNotEqual(on, off)
 
         let offThumb = StatusHeaderToggleAppearance.thumbRect(isOn: false)
@@ -321,7 +321,7 @@ final class DisplayTests: XCTestCase {
     func testRouterWindowToolbarContainsRefreshOnly() {
         XCTAssertEqual(
             RouterWindowToolbarItems.defaultIdentifiers.map(\.rawValue),
-            ["co.baseten.switch.refresh"])
+            ["com.ckorhonen.openrouter-switch.refresh"])
     }
 
     @MainActor
@@ -393,11 +393,11 @@ final class DisplayTests: XCTestCase {
             shadowEndpoints.1,
             StatusHeaderToggleAppearance.onThumbShadowOpacity)
 
-        let green = try XCTUnwrap(
+        let indigo = try XCTUnwrap(
             control.trackColorForTesting?.usingColorSpace(.sRGB))
-        XCTAssertEqual(green.redComponent, 0x16 / 255.0, accuracy: 0.0001)
-        XCTAssertEqual(green.greenComponent, 0xD7 / 255.0, accuracy: 0.0001)
-        XCTAssertEqual(green.blueComponent, 0x66 / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(indigo.redComponent, 0x6D / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(indigo.greenComponent, 0x5E / 255.0, accuracy: 0.0001)
+        XCTAssertEqual(indigo.blueComponent, 0xF7 / 255.0, accuracy: 0.0001)
 
         // Reduce Motion snaps a subsequent endpoint change and removes any
         // in-flight state transition.
@@ -415,7 +415,7 @@ final class DisplayTests: XCTestCase {
     }
 
     @MainActor
-    func testStatusHeaderSwitchRendersGreenTrackOnlyWhenOn() throws {
+    func testStatusHeaderSwitchRendersIndigoTrackOnlyWhenOn() throws {
         func renderedTrackColor(isOn: Bool, sample: NSPoint) throws -> NSColor {
             let model = StatusHeaderToggleModel(
                 isOn: isOn,
@@ -468,9 +468,9 @@ final class DisplayTests: XCTestCase {
                 x: StatusHeaderToggleAppearance.trackRect.maxX - 8,
                 y: StatusHeaderToggleAppearance.trackRect.midY))
 
-        XCTAssertEqual(on.redComponent, 0x16 / 255.0, accuracy: 1.0 / 255.0)
-        XCTAssertEqual(on.greenComponent, 0xD7 / 255.0, accuracy: 1.0 / 255.0)
-        XCTAssertEqual(on.blueComponent, 0x66 / 255.0, accuracy: 1.0 / 255.0)
+        XCTAssertEqual(on.redComponent, 0x6D / 255.0, accuracy: 1.0 / 255.0)
+        XCTAssertEqual(on.greenComponent, 0x5E / 255.0, accuracy: 1.0 / 255.0)
+        XCTAssertEqual(on.blueComponent, 0xF7 / 255.0, accuracy: 1.0 / 255.0)
         XCTAssertGreaterThan(
             abs(off.redComponent - on.redComponent),
             0.1)
@@ -592,16 +592,16 @@ final class DisplayTests: XCTestCase {
                        "Gateway: not running")
     }
 
-    func testClientRowLabelOnBaseten() {
+    func testClientRowLabelOnOpenRouter() {
         XCTAssertEqual(
-            clientRowLabel(name: "claude-code", route: "baseten",
+            clientRowLabel(name: "claude-code", route: "openrouter",
                            nativeRoute: "anthropic", selectedModel: "zai-org/GLM-5.2"),
             "claude-code -> zai-org/GLM-5.2")
-        // Baseten route with no resolved model: make the gap visible.
+        // OpenRouter route with no resolved model: make the gap visible.
         XCTAssertEqual(
-            clientRowLabel(name: "claude-code", route: "baseten",
+            clientRowLabel(name: "claude-code", route: "openrouter",
                            nativeRoute: "anthropic", selectedModel: ""),
-            "claude-code -> Baseten (?)")
+            "claude-code -> OpenRouter (?)")
     }
 
     func testClientRowLabelOnNative() {
@@ -644,7 +644,7 @@ final class DisplayTests: XCTestCase {
 
         XCTAssertEqual(variant.channel, .stable)
         XCTAssertEqual(variant.bundleIdentifier,
-                       "co.baseten.switch")
+                       "com.ckorhonen.openrouter-switch")
         XCTAssertEqual(variant.displayName, "OpenRouter Switch")
         XCTAssertEqual(variant.executableName, "OpenRouterSwitch")
         XCTAssertEqual(variant.statusItemAutosaveName, "openrouter-switch-toggle")
@@ -662,14 +662,14 @@ final class DisplayTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch Preview",
                 "CFBundleExecutable": "OpenRouterSwitchPreview",
             ],
-            bundleIdentifier: "co.baseten.switch.preview",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch.preview",
             runningExecutableName: "OpenRouterSwitchPreview",
             homeDirectory: "/tmp/openrouter-switch-home",
             environment: ["OPENROUTER_SWITCH_GATEWAY_BIN": "/workspace/bin/openrouter-switch"])
 
         XCTAssertEqual(variant.channel, .preview)
         XCTAssertEqual(variant.bundleIdentifier,
-                       "co.baseten.switch.preview")
+                       "com.ckorhonen.openrouter-switch.preview")
         XCTAssertEqual(variant.displayName, "OpenRouter Switch Preview")
         XCTAssertEqual(variant.executableName, "OpenRouterSwitchPreview")
         XCTAssertNil(variant.identityError)
@@ -700,18 +700,14 @@ final class DisplayTests: XCTestCase {
         XCTAssertNil(environment["OPENROUTER_SWITCH_TELEMETRY_LOG"])
         XCTAssertEqual(environment["OPENROUTER_SWITCH_LAUNCHD"], "off")
         XCTAssertEqual(environment["OPENROUTER_SWITCH_MENUBAR"], "off")
-        XCTAssertEqual(environment["OPENROUTER_SWITCH_AUTH_NO_KEYRING"], "1")
         XCTAssertEqual(environment["OPENROUTER_SWITCH_PRIVATE_RUNTIME"], "1")
-        XCTAssertEqual(environment["OPENROUTER_SWITCH_OAUTH_PROFILE"],
-                       "openrouter-switch-preview")
         XCTAssertEqual(environment["OPENROUTER_SWITCH_CLAUDE_SETTINGS"],
                        "/tmp/openrouter-switch-home/.config/openrouter-switch-preview/claude/settings.json")
-        XCTAssertEqual(environment["BASETEN_CONFIG_DIR"],
-                       "/tmp/openrouter-switch-home/.config/openrouter-switch-preview/baseten")
         XCTAssertEqual(environment["OPENROUTER_SWITCH_GATEWAY_TOKEN"],
                        "openrouter-switch-local-gateway-preview")
+        XCTAssertEqual(environment["OPENROUTER_SWITCH_AUTH_NO_KEYRING"], "1")
         for key in [
-            "BASETEN_API_KEY", "OPENROUTER_SWITCH_API_KEY", "OPENROUTER_SWITCH_API_KEY_FALLBACK",
+            "OPENROUTER_API_KEY",
             "ANTHROPIC_API_KEY", "OPENROUTER_SWITCH_ANTHROPIC_KEY", "ANTHROPIC_AUTH_TOKEN",
             "OPENAI_API_KEY", "CODEX_AUTH_TOKEN",
         ] {
@@ -725,7 +721,7 @@ final class DisplayTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch Preview",
                 "CFBundleExecutable": "OpenRouterSwitchPreview",
             ],
-            bundleIdentifier: "co.baseten.switch.preview",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch.preview",
             runningExecutableName: "OpenRouterSwitchPreview",
             homeDirectory: "/tmp/openrouter-switch-home",
             environment: [:])
@@ -743,7 +739,7 @@ final class DisplayTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch Preview",
                 "CFBundleExecutable": "OpenRouterSwitchPreview",
             ],
-            bundleIdentifier: "co.baseten.switch.preview",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch.preview",
             runningExecutableName: "OpenRouterSwitch",
             homeDirectory: "/tmp/openrouter-switch-home",
             environment: [:])
@@ -761,7 +757,7 @@ final class DisplayTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch Preview",
                 "CFBundleExecutable": "OpenRouterSwitchPreview",
             ],
-            bundleIdentifier: "co.baseten.switch.preview",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch.preview",
             runningExecutableName: "OpenRouterSwitchPreview",
             homeDirectory: "/tmp/openrouter-switch-home",
             environment: [:])
@@ -917,17 +913,17 @@ final class DisplayTests: XCTestCase {
 
     // Decision table for the three-state icon: degraded > active > off.
     func testMenubarIconState() {
-        // Active: gateway up, an enabled client routed to Baseten, no fallback.
+        // Active: gateway up, an enabled client routed to OpenRouter, no fallback.
         XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                        clients: [client("claude-code", route: "baseten")]),
+                                        clients: [client("claude-code", route: "openrouter")]),
                        .active)
         XCTAssertEqual(menubarIconState(gatewayUp: true,
                                         clients: [client("claude-code", route: "anthropic"),
-                                                  client("codex", route: "baseten")]),
+                                                  client("codex", route: "openrouter")]),
                        .active)
         // Degraded: any enabled client with an active fallback, on any route.
         XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                        clients: [client("claude-code", route: "baseten",
+                                        clients: [client("claude-code", route: "openrouter",
                                                          fallback: true)]),
                        .degraded)
         XCTAssertEqual(menubarIconState(gatewayUp: true,
@@ -936,23 +932,23 @@ final class DisplayTests: XCTestCase {
                        .degraded)
         // Degraded outranks active across clients.
         XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                        clients: [client("claude-code", route: "baseten"),
+                                        clients: [client("claude-code", route: "openrouter"),
                                                   client("codex", route: "openai",
                                                          fallback: true)]),
                        .degraded)
         // Disabled clients never influence the icon, for either state.
         XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                        clients: [client("claude-code", route: "baseten",
+                                        clients: [client("claude-code", route: "openrouter",
                                                          enabled: false, fallback: true)]),
                        .off)
         XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                        clients: [client("claude-code", route: "baseten"),
+                                        clients: [client("claude-code", route: "openrouter"),
                                                   client("codex", route: "openai",
                                                          enabled: false, fallback: true)]),
                        .active)
         // Gateway down is off, even with stale routes or fallback flags.
         XCTAssertEqual(menubarIconState(gatewayUp: false,
-                                        clients: [client("claude-code", route: "baseten",
+                                        clients: [client("claude-code", route: "openrouter",
                                                          fallback: true)]),
                        .off)
         // Off: no routed clients, or no clients at all.
@@ -962,101 +958,87 @@ final class DisplayTests: XCTestCase {
         XCTAssertEqual(menubarIconState(gatewayUp: true, clients: []), .off)
     }
 
-    private func authWithHealth(_ health: String) -> AuthStatus {
-        AuthStatus(dict: ["signed_in": true, "health": health])
+    private func authWithStatus(_ status: String) -> AuthStatus {
+        AuthStatus(dict: ["status": status])
     }
 
-    // A dead credential (health refresh_failed) turns the icon amber
+    func testGatewayAuthOverridesMissingGUIEnvironmentPresentation() {
+        let local = OpenRouterCredentialResolution(
+            source: nil,
+            isConfigured: false)
+        let gateway = AuthStatus(dict: [
+            "status": "valid",
+            "source": "environment",
+            "label": "configured key",
+            "last_error": "",
+        ])
+
+        XCTAssertEqual(
+            credentialStatusLabel(auth: gateway, resolution: local),
+            "Valid")
+        XCTAssertEqual(
+            credentialSourceLabel(auth: gateway, resolution: local),
+            "Environment · read-only")
+        XCTAssertEqual(
+            effectiveCredentialSource(
+                auth: gateway,
+                resolution: local),
+            .environment)
+    }
+
+    // A credential requiring attention turns the icon amber
     // regardless of route state, so the user notices without opening
     // the popup. Every other health leaves the decision table alone.
-    func testMenubarIconStateAuthDead() {
-        // Dead credential warns on any route state, including all-off.
+    func testMenubarIconStateAuthNeedsAttention() {
         XCTAssertEqual(menubarIconState(gatewayUp: true, clients: [],
-                                        auth: authWithHealth("refresh_failed")),
+                                        auth: authWithStatus("invalid")),
                        .degraded)
         XCTAssertEqual(menubarIconState(gatewayUp: true,
                                         clients: [client("claude-code", route: "anthropic")],
-                                        auth: authWithHealth("refresh_failed")),
+                                        auth: authWithStatus("invalid")),
                        .degraded)
         // Outranks active.
         XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                        clients: [client("claude-code", route: "baseten")],
-                                        auth: authWithHealth("refresh_failed")),
+                                        clients: [client("claude-code", route: "openrouter")],
+                                        auth: authWithStatus("invalid")),
                        .degraded)
         // A down gateway stays off; the app has no live health then.
         XCTAssertEqual(menubarIconState(gatewayUp: false, clients: [],
-                                        auth: authWithHealth("refresh_failed")),
+                                        auth: authWithStatus("invalid")),
                        .off)
         // Non-dead healths and a missing auth block change nothing.
-        for health in ["ok", "error", "signed_out", ""] {
+        for status in ["valid", "ok", "error", "unknown"] {
             XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                            clients: [client("claude-code", route: "baseten")],
-                                            auth: authWithHealth(health)),
-                           .active, "health \(health)")
+                                            clients: [client("claude-code", route: "openrouter")],
+                                            auth: authWithStatus(status)),
+                           .active, "status \(status)")
         }
         XCTAssertEqual(menubarIconState(gatewayUp: true,
-                                        clients: [client("claude-code", route: "baseten")],
+                                        clients: [client("claude-code", route: "openrouter")],
                                         auth: nil),
                        .active)
     }
 
-    // MARK: - Reauthenticate dispatch (Terminal via osascript)
-
-    func testShellQuote() {
-        XCTAssertEqual(shellQuote("/Users/x/.local/bin/openrouter-switch"),
-                       "'/Users/x/.local/bin/openrouter-switch'")
-        // Spaces stay inside the quotes; embedded single quotes use
-        // the '\'' splice.
-        XCTAssertEqual(shellQuote("/Users/x y/bin"), "'/Users/x y/bin'")
-        XCTAssertEqual(shellQuote("a'b"), #"'a'\''b'"#)
-    }
-
-    func testAppleScriptStringLiteral() {
-        XCTAssertEqual(appleScriptStringLiteral("plain"), "\"plain\"")
-        XCTAssertEqual(appleScriptStringLiteral(#"say "hi""#),
-                       #""say \"hi\"""#)
-        // Backslashes escape before quotes so the two passes compose.
-        XCTAssertEqual(appleScriptStringLiteral(#"a\b"#), #""a\\b""#)
-    }
-
-    // The Terminal command is the fixed "auth login" verb on the
-    // resolved binary path; the script never carries server data
-    // (command-injection surface stays closed).
-    func testReauthAppleScript() {
-        XCTAssertEqual(
-            reauthAppleScript(binaryPath: "/Users/x/.local/bin/openrouter-switch"),
-            """
-            tell application "Terminal"
-                activate
-                do script "'/Users/x/.local/bin/openrouter-switch' auth login"
-            end tell
-            """)
-        // A hostile path cannot break out of the quoting layers.
-        let script = reauthAppleScript(binaryPath: #"/tmp/a"; rm -rf ~"#)
-        XCTAssertTrue(script.contains(
-            #"do script "'/tmp/a\"; rm -rf ~' auth login""#))
-    }
-
     func testClientStatusParsesFallbackStatus() {
-        XCTAssertTrue(client("claude-code", route: "baseten", fallback: true).fallbackActive)
-        XCTAssertFalse(client("claude-code", route: "baseten").fallbackActive)
+        XCTAssertTrue(client("claude-code", route: "openrouter", fallback: true).fallbackActive)
+        XCTAssertFalse(client("claude-code", route: "openrouter").fallbackActive)
         let minimal = ClientStatus(dict: ["name": "codex"])!
         XCTAssertFalse(minimal.fallbackActive)
     }
 
     func testClientRowLabelFallbackSuffix() {
-        // Baseten route with a resolved model.
+        // OpenRouter route with a resolved model.
         XCTAssertEqual(
-            clientRowLabel(name: "claude-code", route: "baseten",
+            clientRowLabel(name: "claude-code", route: "openrouter",
                            nativeRoute: "anthropic", selectedModel: "zai-org/GLM-5.2",
                            fallbackActive: true),
             "claude-code -> zai-org/GLM-5.2 (fallback active)")
-        // Baseten route with no resolved model.
+        // OpenRouter route with no resolved model.
         XCTAssertEqual(
-            clientRowLabel(name: "claude-code", route: "baseten",
+            clientRowLabel(name: "claude-code", route: "openrouter",
                            nativeRoute: "anthropic", selectedModel: "",
                            fallbackActive: true),
-            "claude-code -> Baseten (?) (fallback active)")
+            "claude-code -> OpenRouter (?) (fallback active)")
         // Native route.
         XCTAssertEqual(
             clientRowLabel(name: "codex", route: "openai",
@@ -1080,14 +1062,14 @@ final class DisplayTests: XCTestCase {
     // Subagent fields decode from the admin status dict; absent keys
     // default to empty strings (unknown-field tolerance).
     func testClientStatusParsesSubagentFields() {
-        let with = clientWithSubagent("claude-code", route: "baseten",
-                                      subagentModel: "claude-baseten-glm-5-2",
+        let with = clientWithSubagent("claude-code", route: "openrouter",
+                                      subagentModel: "claude-openrouter-glm-5-2",
                                       subagentRouting: "on")
-        XCTAssertEqual(with.subagentModel, "claude-baseten-glm-5-2")
+        XCTAssertEqual(with.subagentModel, "claude-openrouter-glm-5-2")
         XCTAssertEqual(with.subagentRouting, "on")
 
-        let off = clientWithSubagent("claude-code", route: "baseten",
-                                     subagentModel: "claude-baseten-glm-5-2",
+        let off = clientWithSubagent("claude-code", route: "openrouter",
+                                     subagentModel: "claude-openrouter-glm-5-2",
                                      subagentRouting: "off")
         XCTAssertEqual(off.subagentRouting, "off")
 
@@ -1108,8 +1090,8 @@ final class DisplayTests: XCTestCase {
 
     // subagentRowLabel formats the menubar row text.
     func testSubagentRowLabel() {
-        XCTAssertEqual(subagentRowLabel(model: "claude-baseten-glm-5-2"),
-                       "Subagents: claude-baseten-glm-5-2")
+        XCTAssertEqual(subagentRowLabel(model: "claude-openrouter-glm-5-2"),
+                       "Subagents: claude-openrouter-glm-5-2")
         XCTAssertEqual(subagentRowLabel(model: "zai-org/GLM-5.2"),
                        "Subagents: zai-org/GLM-5.2")
     }
@@ -1118,11 +1100,11 @@ final class DisplayTests: XCTestCase {
     // subagent Toggle when c.subagentModel is non-empty. This is a pure
     // predicate test on the stored property the view checks.
     func testSubagentRowHiddenWhenModelEmpty() {
-        let noModel = client("claude-code", route: "baseten")
+        let noModel = client("claude-code", route: "openrouter")
         XCTAssertTrue(noModel.subagentModel.isEmpty)
 
-        let withModel = clientWithSubagent("claude-code", route: "baseten",
-                                           subagentModel: "claude-baseten-glm-5-2",
+        let withModel = clientWithSubagent("claude-code", route: "openrouter",
+                                           subagentModel: "claude-openrouter-glm-5-2",
                                            subagentRouting: "on")
         XCTAssertFalse(withModel.subagentModel.isEmpty)
     }
@@ -1130,11 +1112,11 @@ final class DisplayTests: XCTestCase {
     // Binding get semantics: routing "on" or empty (absent) means on;
     // "off" means off. Empty means on when a model is set (spec).
     func testSubagentRoutingBindingGet() {
-        let on = clientWithSubagent("claude-code", route: "baseten",
+        let on = clientWithSubagent("claude-code", route: "openrouter",
                                     subagentModel: "m", subagentRouting: "on")
-        let empty = clientWithSubagent("claude-code", route: "baseten",
+        let empty = clientWithSubagent("claude-code", route: "openrouter",
                                        subagentModel: "m", subagentRouting: "")
-        let off = clientWithSubagent("claude-code", route: "baseten",
+        let off = clientWithSubagent("claude-code", route: "openrouter",
                                      subagentModel: "m", subagentRouting: "off")
         XCTAssertTrue(on.subagentRouting != "off")
         XCTAssertTrue(empty.subagentRouting != "off")
@@ -1143,7 +1125,7 @@ final class DisplayTests: XCTestCase {
 
     // MARK: - families / model_catalog decoding
 
-    private func clientWithFamilies(_ name: String, route: String = "baseten",
+    private func clientWithFamilies(_ name: String, route: String = "openrouter",
                                     families: [[String: Any]],
                                     catalog: [[String: Any]]) -> ClientStatus {
         ClientStatus(dict: [
@@ -1163,15 +1145,15 @@ final class DisplayTests: XCTestCase {
                  "configured_source": "explicit",
                  "effective_route": "anthropic", "effective_model": ""],
                 ["family": "sonnet",
-                 "configured_target": "claude-baseten-kimi-k2-7",
+                 "configured_target": "claude-openrouter-kimi-k2-7",
                  "configured_source": "explicit",
-                 "effective_route": "baseten", "effective_model": "claude-baseten-kimi-k2-7"],
+                 "effective_route": "openrouter", "effective_model": "claude-openrouter-kimi-k2-7"],
             ],
             catalog: [
                 ["label": "GLM-5.2", "storage_target": "zai-org/GLM-5.2",
-                 "slug": "zai-org/GLM-5.2", "alias": "claude-baseten-glm-5-2"],
+                 "slug": "zai-org/GLM-5.2", "alias": "claude-openrouter-glm-5-2"],
                 ["label": "Kimi-K2.7", "storage_target": "kai-org/Kimi-K2.7",
-                 "slug": "kai-org/Kimi-K2.7", "alias": "claude-baseten-kimi-k2-7"],
+                 "slug": "kai-org/Kimi-K2.7", "alias": "claude-openrouter-kimi-k2-7"],
             ])
         XCTAssertEqual(c.families.count, 2)
         XCTAssertEqual(c.families[0].family, "opus")
@@ -1179,8 +1161,8 @@ final class DisplayTests: XCTestCase {
         XCTAssertEqual(c.families[0].effectiveRoute, "anthropic")
         XCTAssertEqual(c.families[0].effectiveModel, "")
         XCTAssertEqual(c.families[1].family, "sonnet")
-        XCTAssertEqual(c.families[1].configuredTarget, "claude-baseten-kimi-k2-7")
-        XCTAssertEqual(c.families[1].effectiveModel, "claude-baseten-kimi-k2-7")
+        XCTAssertEqual(c.families[1].configuredTarget, "claude-openrouter-kimi-k2-7")
+        XCTAssertEqual(c.families[1].effectiveModel, "claude-openrouter-kimi-k2-7")
         XCTAssertEqual(c.modelCatalog.count, 2)
         XCTAssertEqual(c.modelCatalog[0].label, "GLM-5.2")
         XCTAssertEqual(c.modelCatalog[0].target, "zai-org/GLM-5.2")
@@ -1214,7 +1196,7 @@ final class DisplayTests: XCTestCase {
 
         let removedFields = clientWithFamilies("claude-code",
             families: [["family": "opus", "pin": "native"]],
-            catalog: [["target": "claude-baseten-glm-5-2",
+            catalog: [["target": "claude-openrouter-glm-5-2",
                        "slug": "zai-org/GLM-5.2"]])
         XCTAssertNil(removedFields.families[0].configuredTarget)
         XCTAssertTrue(removedFields.modelCatalog.isEmpty)
@@ -1224,7 +1206,7 @@ final class DisplayTests: XCTestCase {
 
     func testFamilyRowLabelEffectiveModel() {
         XCTAssertEqual(
-            familyRowLabel(family: "opus", effectiveRoute: "baseten",
+            familyRowLabel(family: "opus", effectiveRoute: "openrouter",
                            effectiveModel: "zai-org/GLM-5.2"),
             "Opus: zai-org/GLM-5.2")
     }
@@ -1263,7 +1245,7 @@ final class DisplayTests: XCTestCase {
     func testFamilyChoiceCheckedDefault() {
         XCTAssertTrue(familyChoiceChecked(pin: "", choice: .defaultMapping))
         XCTAssertFalse(familyChoiceChecked(pin: "native", choice: .defaultMapping))
-        XCTAssertFalse(familyChoiceChecked(pin: "claude-baseten-glm-5-2", choice: .defaultMapping))
+        XCTAssertFalse(familyChoiceChecked(pin: "claude-openrouter-glm-5-2", choice: .defaultMapping))
     }
 
     func testFamilyChoiceCheckedCatalogByTarget() {
@@ -1271,7 +1253,7 @@ final class DisplayTests: XCTestCase {
             "storage_target": "zai-org/GLM-5.2",
             "label": "GLM-5.2",
             "slug": "zai-org/GLM-5.2",
-            "alias": "claude-baseten-glm-5-2",
+            "alias": "claude-openrouter-glm-5-2",
         ])!
         XCTAssertTrue(familyChoiceChecked(pin: "zai-org/GLM-5.2",
                                           choice: .catalog(entry)))
@@ -1284,7 +1266,7 @@ final class DisplayTests: XCTestCase {
             "storage_target": "zai-org/GLM-5.2",
             "label": "GLM-5.2",
             "slug": "zai-org/GLM-5.2",
-            "alias": "claude-baseten-glm-5-2",
+            "alias": "claude-openrouter-glm-5-2",
         ])!
         // pin is a raw slug -> matches slug.
         XCTAssertTrue(familyChoiceChecked(pin: "zai-org/GLM-5.2",
@@ -1303,7 +1285,7 @@ final class DisplayTests: XCTestCase {
             ],
             catalog: [["label": "GLM-5.2", "storage_target": "zai-org/GLM-5.2",
                        "slug": "zai-org/GLM-5.2",
-                       "alias": "claude-baseten-glm-5-2"]])
+                       "alias": "claude-openrouter-glm-5-2"]])
 
         XCTAssertEqual(familyPickerSelection(c.families[0], catalog: c.modelCatalog),
                        .catalog("zai-org/GLM-5.2"))
@@ -1337,13 +1319,13 @@ final class DisplayTests: XCTestCase {
             "label": "GLM 5.2",
             "storage_target": "zai-org/GLM-5.2",
             "slug": "zai-org/GLM-5.2",
-            "alias": "claude-baseten-glm-5-2",
+            "alias": "claude-openrouter-glm-5-2",
         ])!]
         let family = FamilyEntry(dict: [
             "family": "opus",
             "configured_target": "zai-org/GLM-5.2",
             "configured_source": "default",
-            "effective_route": "baseten",
+            "effective_route": "openrouter",
             "effective_model": "zai-org/GLM-5.2",
         ])!
         let client = ClientStatus(dict: [
@@ -1356,13 +1338,13 @@ final class DisplayTests: XCTestCase {
                 "label": "GLM 5.2",
                 "storage_target": "zai-org/GLM-5.2",
                 "slug": "zai-org/GLM-5.2",
-                "alias": "claude-baseten-glm-5-2",
+                "alias": "claude-openrouter-glm-5-2",
             ]],
         ])!
 
         XCTAssertEqual(
             catalogModelDisplayLabel(
-                "claude-baseten-glm-5-2",
+                "claude-openrouter-glm-5-2",
                 catalog: catalog),
             "GLM 5.2")
         XCTAssertEqual(
@@ -1386,7 +1368,7 @@ final class DisplayTests: XCTestCase {
             "storage_target": "zai-org/GLM-5.2",
             "label": "GLM-5.2",
             "slug": "zai-org/GLM-5.2",
-            "alias": "claude-baseten-glm-5-2",
+            "alias": "claude-openrouter-glm-5-2",
         ])!
         XCTAssertEqual(
             familyDispatchArgs(client: "claude-code", family: "opus", choice: .native),
@@ -1404,14 +1386,14 @@ final class DisplayTests: XCTestCase {
     // MARK: - subagentMenuRowLabel
 
     func testSubagentMenuRowLabel() {
-        XCTAssertEqual(subagentMenuRowLabel(model: "claude-baseten-glm-5-2", routing: "on"),
-                       "Subagents: claude-baseten-glm-5-2")
+        XCTAssertEqual(subagentMenuRowLabel(model: "claude-openrouter-glm-5-2", routing: "on"),
+                       "Subagents: claude-openrouter-glm-5-2")
         // Empty routing means on when a model is set (spec).
-        XCTAssertEqual(subagentMenuRowLabel(model: "claude-baseten-glm-5-2", routing: ""),
-                       "Subagents: claude-baseten-glm-5-2")
+        XCTAssertEqual(subagentMenuRowLabel(model: "claude-openrouter-glm-5-2", routing: ""),
+                       "Subagents: claude-openrouter-glm-5-2")
         // Routing "off" is the compatibility wire value for leaving Claude
         // Code's requested subagent model untouched.
-        XCTAssertEqual(subagentMenuRowLabel(model: "claude-baseten-glm-5-2", routing: "off"),
+        XCTAssertEqual(subagentMenuRowLabel(model: "claude-openrouter-glm-5-2", routing: "off"),
                        "Subagents: Claude Code model")
         // No model configured leaves Claude Code in control regardless of
         // the routing flag.
@@ -1424,7 +1406,7 @@ final class DisplayTests: XCTestCase {
     func testSubagentRoutingDescriptionExplainsNoRewriteAndSavedOverride() {
         let noOverride = clientWithSubagent(
             "claude-code",
-            route: "baseten",
+            route: "openrouter",
             subagentModel: "zai-org/GLM-5.2",
             subagentRouting: "off")
         XCTAssertEqual(
@@ -1440,7 +1422,7 @@ final class DisplayTests: XCTestCase {
 
         let override = clientWithSubagent(
             "claude-code",
-            route: "baseten",
+            route: "openrouter",
             subagentModel: "moonshotai/Kimi-K2.5",
             subagentRouting: "on")
         XCTAssertEqual(
@@ -1490,10 +1472,10 @@ final class DisplayTests: XCTestCase {
             "storage_target": "zai-org/GLM-5.2",
             "label": "GLM-5.2",
             "slug": "zai-org/GLM-5.2",
-            "alias": "claude-baseten-glm-5-2",
+            "alias": "claude-openrouter-glm-5-2",
         ])!
         // routing on, model matches alias.
-        XCTAssertTrue(subagentChoiceChecked(subagentModel: "claude-baseten-glm-5-2",
+        XCTAssertTrue(subagentChoiceChecked(subagentModel: "claude-openrouter-glm-5-2",
                                             subagentRouting: "on",
                                             choice: .catalog(entry)))
         // routing on, model matches slug.
@@ -1501,7 +1483,7 @@ final class DisplayTests: XCTestCase {
                                             subagentRouting: "",
                                             choice: .catalog(entry)))
         // Routing off is the compatibility wire value for no override.
-        XCTAssertFalse(subagentChoiceChecked(subagentModel: "claude-baseten-glm-5-2",
+        XCTAssertFalse(subagentChoiceChecked(subagentModel: "claude-openrouter-glm-5-2",
                                              subagentRouting: "off",
                                              choice: .catalog(entry)))
         // model mismatch.
@@ -1513,11 +1495,11 @@ final class DisplayTests: XCTestCase {
     func testRouterWindowSubagentPickerSelection() {
         let catalog: [[String: Any]] = [
             ["label": "GLM-5.2", "storage_target": "zai-org/GLM-5.2",
-             "slug": "zai-org/GLM-5.2", "alias": "claude-baseten-glm-5-2"],
+             "slug": "zai-org/GLM-5.2", "alias": "claude-openrouter-glm-5-2"],
         ]
         func make(_ model: String, _ routing: String) -> ClientStatus {
             ClientStatus(dict: [
-                "name": "claude-code", "enabled": true, "effective_route": "baseten",
+                "name": "claude-code", "enabled": true, "effective_route": "openrouter",
                 "subagent_model": model, "subagent_routing": routing,
                 "subagent_effective": routing == "off" ? "inherit" : model,
                 "model_catalog": catalog,
@@ -1549,7 +1531,7 @@ final class DisplayTests: XCTestCase {
             "storage_target": "zai-org/GLM-5.2",
             "label": "GLM-5.2",
             "slug": "zai-org/GLM-5.2",
-            "alias": "claude-baseten-glm-5-2",
+            "alias": "claude-openrouter-glm-5-2",
         ])!
         XCTAssertEqual(
             subagentDispatchArgs(client: "claude-code", choice: .off),

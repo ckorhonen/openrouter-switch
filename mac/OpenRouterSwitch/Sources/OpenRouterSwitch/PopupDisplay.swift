@@ -47,52 +47,52 @@ func versionSkewNote(routerVersion: String, cliVersion: String) -> String? {
     return "Version skew: router \(routerVersion), CLI \(cliVersion)"
 }
 
-/// Auth line from the admin status auth block. Signed in shows the
-/// OAuth profile; fallback-in-use is appended (or shown alone when not
-/// signed in) so degraded auth is visible where the controls are.
-/// Health overlays (oauth-expiry spike): "refresh_failed" means the
-/// token endpoint rejected the stored credential, so every
-/// baseten-routed request fails until re-login; the line goes short
-/// and loud, with the error detail on authDetailLine. A transient
-/// "error" deliberately renders the normal line (the next refresh
-/// usually resolves it; alarming on it would flap). An empty health
-/// (router predates the field) changes nothing.
+/// Compact credential state from the gateway. Only masked metadata is shown.
 func authLineLabel(auth: AuthStatus?) -> String {
     guard let auth else { return "Auth: unknown" }
-    if auth.health == "refresh_failed" {
-        return "Auth: reauthentication required"
-    }
-    // signed_in is store presence; health "signed_out" is the gateway
-    // holding no OAuth client. Either signal renders the
-    // not-signed-in presentation.
-    if auth.signedIn && auth.health != "signed_out" {
-        let who = auth.profile.isEmpty ? "OAuth" : "\(auth.profile) OAuth"
-        if auth.fallbackInUse {
-            return "Auth: \(who), API-key fallback in use"
+    switch auth.status {
+    case "valid", "ok":
+        var parts = ["Auth: valid"]
+        if auth.source == OpenRouterCredentialSource.keychain.rawValue {
+            parts.append("Keychain")
+        } else if auth.source == OpenRouterCredentialSource.environment.rawValue {
+            parts.append("environment")
         }
-        return "Auth: \(who)"
+        if !auth.maskedLabel.isEmpty {
+            parts.append(auth.maskedLabel)
+        }
+        return parts.joined(separator: " · ")
+    case "missing", "signed_out":
+        return "Auth: API key required"
+    case "invalid":
+        return "Auth: API key invalid"
+    case "forbidden":
+        return "Auth: API key forbidden"
+    case "error":
+        return "Auth: validation unavailable"
+    default:
+        return "Auth: unknown"
     }
-    if auth.fallbackInUse {
-        return "Auth: API-key fallback in use"
-    }
-    return "Auth: not signed in"
 }
 
-/// True only in the dead-credential state: drives the warning tint on
-/// the auth line, the Reauthenticate button, and (via
-/// menubarIconState) the amber status icon. Transient "error" stays
-/// false so the popup never alarms on a blip.
-func authNeedsReauth(auth: AuthStatus?) -> Bool {
-    auth?.health == "refresh_failed"
+func authNeedsAttention(auth: AuthStatus?) -> Bool {
+    auth?.needsAttention == true
 }
 
-/// Secondary detail line under "reauthentication required": the last
-/// refresh error, collapsed to one menu-safe truncated line. Nil in
-/// every other state so a healthy popup gains no height.
 func authDetailLine(auth: AuthStatus?) -> String? {
-    guard let auth, auth.health == "refresh_failed",
-          !auth.lastRefreshError.isEmpty else { return nil }
-    return menuErrorLabel(auth.lastRefreshError)
+    guard let auth else { return nil }
+    if auth.isValid, let remaining = auth.limitRemaining {
+        return "OpenRouter key limit remaining: \(formatKeyLimit(remaining))"
+    }
+    guard auth.needsAttention, !auth.error.isEmpty else { return nil }
+    return menuErrorLabel(auth.error)
+}
+
+private func formatKeyLimit(_ value: Double) -> String {
+    if value.rounded() == value {
+        return String(Int64(value))
+    }
+    return String(format: "%.2f", value)
 }
 
 // MARK: - Start at Login row
@@ -164,16 +164,16 @@ enum GlobalRoutingState: Equatable {
 func globalRoutingState(_ clients: [ClientStatus]) -> GlobalRoutingState {
     let enabled = clients.filter(\.enabled)
     guard !enabled.isEmpty else { return .off }
-    let basetenCount = enabled.filter { $0.effectiveRoute == "baseten" }.count
-    if basetenCount == 0 { return .off }
-    if basetenCount == enabled.count { return .on }
+    let openrouterCount = enabled.filter { $0.effectiveRoute == "openrouter" }.count
+    if openrouterCount == 0 { return .off }
+    if openrouterCount == enabled.count { return .on }
     return .mixed
 }
 
 func globalRoutingSubtitle(gatewayUp: Bool, clients: [ClientStatus],
                            auth: AuthStatus?) -> String {
     guard gatewayUp else { return "Gateway stopped" }
-    if authNeedsReauth(auth: auth) { return "Authentication required" }
+    if authNeedsAttention(auth: auth) { return "OpenRouter API key required" }
 
     let enabled = clients.filter(\.enabled)
     guard !enabled.isEmpty else { return "No enabled routing clients" }
@@ -184,10 +184,10 @@ func globalRoutingSubtitle(gatewayUp: Bool, clients: [ClientStatus],
         return "\(fallbackCount) \(noun) using fallback"
     }
 
-    let basetenCount = enabled.filter { $0.effectiveRoute == "baseten" }.count
-    if basetenCount == enabled.count { return "Routing through Baseten" }
-    if basetenCount == 0 { return "Using native providers" }
-    return "\(basetenCount) of \(enabled.count) routes through Baseten"
+    let openrouterCount = enabled.filter { $0.effectiveRoute == "openrouter" }.count
+    if openrouterCount == enabled.count { return "Routing through OpenRouter" }
+    if openrouterCount == 0 { return "Using native providers" }
+    return "\(openrouterCount) of \(enabled.count) routes through OpenRouter"
 }
 
 /// Friendly names for the harness identifiers served by admin status.
@@ -218,10 +218,10 @@ func routingDestinationLabel(_ client: ClientStatus) -> String {
         let native = client.nativeRoute.isEmpty ? "native" : client.nativeRoute
         return "Fallback · \(capitalizeFamily(native))"
     }
-    if client.effectiveRoute == "baseten" {
+    if client.effectiveRoute == "openrouter" {
         let model = shortModelName(
             client.unmatchedNativeModel?.effectiveModel ?? "")
-        return model.isEmpty ? "Baseten" : "Baseten · \(model)"
+        return model.isEmpty ? "OpenRouter" : "OpenRouter · \(model)"
     }
     let native = client.effectiveRoute.isEmpty ? client.nativeRoute : client.effectiveRoute
     return native.isEmpty ? "Native" : "Native · \(capitalizeFamily(native))"
@@ -243,9 +243,9 @@ func routingCountLabel(_ clients: [ClientStatus]) -> String {
         let noun = fallback == 1 ? "fallback" : "fallbacks"
         return "\(fallback) \(noun)"
     }
-    let active = clients.filter { $0.enabled && $0.effectiveRoute == "baseten" }.count
+    let active = clients.filter { $0.enabled && $0.effectiveRoute == "openrouter" }.count
     let noun = active == 1 ? "route" : "routes"
-    return "\(active) Baseten \(noun)"
+    return "\(active) OpenRouter \(noun)"
 }
 
 /// Latest-request labels optimize for recognition over audit detail; the
@@ -256,9 +256,9 @@ func compactFeedModelLabel(requested: String, upstream: String) -> String {
 
 func compactFeedRouteLabel(route: String, routeEffective: String) -> String {
     if !routeEffective.isEmpty {
-        return "\(capitalizeFamily(routeEffective)) fallback"
+        return "\(providerDisplayName(routeEffective)) fallback"
     }
-    return capitalizeFamily(route)
+    return providerDisplayName(route)
 }
 
 /// Maps bucket request counts to sparkline points in a drawing space

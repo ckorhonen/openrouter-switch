@@ -43,12 +43,8 @@ func BuildPreviewConfig(source *File, policy PreviewPolicy) (*File, error) {
 	}
 	for provider := range out.Global.Auth {
 		switch strings.ToLower(strings.TrimSpace(provider)) {
-		case "baseten":
-			out.Global.Auth[provider] = "${BASETEN_API_KEY}"
 		case "anthropic":
 			out.Global.Auth[provider] = "${ANTHROPIC_API_KEY}"
-		case "openai":
-			out.Global.Auth[provider] = "${OPENAI_API_KEY}"
 		default:
 			out.Global.Auth[provider] = ""
 		}
@@ -113,12 +109,8 @@ func ValidatePreviewConfig(file *File, policy PreviewPolicy) error {
 	for provider, value := range file.Global.Auth {
 		want := ""
 		switch strings.ToLower(strings.TrimSpace(provider)) {
-		case "baseten":
-			want = "${BASETEN_API_KEY}"
 		case "anthropic":
 			want = "${ANTHROPIC_API_KEY}"
-		case "openai":
-			want = "${OPENAI_API_KEY}"
 		}
 		if value != "" && value != want {
 			return fmt.Errorf(

@@ -39,6 +39,17 @@ type fakeMutationOrdering struct {
 	generation uint64
 }
 
+func handleEligibleTestCatalog(mux *http.ServeMux) {
+	mux.HandleFunc("/v1/admin/model-catalog", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"state":"ready","models":[
+			{"slug":"zai-org/GLM-5.2","tool_capable":true},
+			{"slug":"moonshotai/Kimi-K2-7","tool_capable":true},
+			{"slug":"moonshotai/Kimi-K2.7-Code","tool_capable":true}
+		]}`)
+	})
+}
+
 func (o *fakeMutationOrdering) observe(t *testing.T, path string) (string, uint64) {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -70,6 +81,7 @@ func newRouteTestEnv(t *testing.T, adminDown bool) *routeTestEnv {
 	// handler re-reads gateway.yaml on each request so it reflects the
 	// verb's config edit (mirrors the subagents fake admin).
 	mux := http.NewServeMux()
+	handleEligibleTestCatalog(mux)
 	ordering := &fakeMutationOrdering{}
 	mux.HandleFunc("/v1/admin/status", func(w http.ResponseWriter, r *http.Request) {
 		routes := readModelRoutesFromConfig(t, cfgPath)
@@ -130,8 +142,8 @@ clients:
     default_model: zai-org/GLM-5.2
     fallback_route: anthropic
     model_aliases:
-      claude-baseten-glm-5-2: zai-org/GLM-5.2
-      claude-baseten-kimi-k2-7: moonshotai/Kimi-K2-7
+      claude-openrouter-glm-5-2: zai-org/GLM-5.2
+      claude-openrouter-kimi-k2-7: moonshotai/Kimi-K2-7
 door:
   ports:
     - bind_addr: 127.0.0.1:8081
@@ -154,7 +166,7 @@ door:
 	t.Setenv("OPENROUTER_SWITCH_ENV_FILE", filepath.Join(dir, "env"))
 	t.Setenv("OPENROUTER_SWITCH_LAUNCHD", "off")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
-	t.Setenv("BASETEN_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv(claudeSubagentEnvKey, "")
 	// Clear the harness env slots the route warnings check for.
 	for _, k := range routeEnvSlotKeys() {
@@ -277,16 +289,16 @@ func TestRouteSetExactPinRejected(t *testing.T) {
 }
 
 // TestRouteSetAliasPinWritesConfig runs `route sonnet
-// claude-baseten-kimi-k2-7` and asserts the alias pin is written.
+// claude-openrouter-kimi-k2-7` and asserts the alias pin is written.
 func TestRouteSetAliasPinWritesConfig(t *testing.T) {
 	e := newRouteTestEnv(t, false)
-	code, _, _ := runClaudeCaptured(t, []string{"route", "sonnet", "claude-baseten-kimi-k2-7"})
+	code, _, _ := runClaudeCaptured(t, []string{"route", "sonnet", "claude-openrouter-kimi-k2-7"})
 	if code != 0 {
 		t.Fatal("route set alias failed")
 	}
 	r := cfgModelRoutes(t, e.cfgPath)
-	if r["sonnet"] != "claude-baseten-kimi-k2-7" {
-		t.Errorf("model_routes[sonnet] = %q, want claude-baseten-kimi-k2-7", r["sonnet"])
+	if r["sonnet"] != "claude-openrouter-kimi-k2-7" {
+		t.Errorf("model_routes[sonnet] = %q, want claude-openrouter-kimi-k2-7", r["sonnet"])
 	}
 }
 
@@ -295,11 +307,11 @@ func TestRouteSetAliasPinWritesConfig(t *testing.T) {
 func TestRouteUnknownAliasExits1(t *testing.T) {
 	e := newRouteTestEnv(t, false)
 	before := fileBytes(t, e.cfgPath)
-	code, _, stderr := runClaudeCaptured(t, []string{"route", "opus", "claude-baseten-nope"})
+	code, _, stderr := runClaudeCaptured(t, []string{"route", "opus", "claude-openrouter-nope"})
 	if code != 1 {
 		t.Fatalf("unknown alias = %d, want 1 (%s)", code, stderr)
 	}
-	for _, want := range []string{"unknown gateway model", "claude-baseten-glm-5-2", "claude-baseten-kimi-k2-7", "model_aliases"} {
+	for _, want := range []string{"unknown gateway model", "claude-openrouter-glm-5-2", "claude-openrouter-kimi-k2-7", "model_aliases"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("error output missing %q: %q", want, stderr)
 		}
@@ -333,11 +345,11 @@ func TestRouteInvalidKeyExits1(t *testing.T) {
 func TestRouteAliasNamespaceKeyExits1(t *testing.T) {
 	e := newRouteTestEnv(t, false)
 	before := fileBytes(t, e.cfgPath)
-	code, _, stderr := runClaudeCaptured(t, []string{"route", "claude-baseten-glm-5-2", "native"})
+	code, _, stderr := runClaudeCaptured(t, []string{"route", "claude-openrouter-glm-5-2", "native"})
 	if code != 1 {
 		t.Fatalf("alias-namespace key = %d, want 1 (%s)", code, stderr)
 	}
-	for _, want := range []string{"claude-baseten-glm-5-2", "supported family"} {
+	for _, want := range []string{"claude-openrouter-glm-5-2", "supported family"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("error output missing %q: %q", want, stderr)
 		}
@@ -361,7 +373,7 @@ func TestRouteExactKeyAnyClaudePrefix(t *testing.T) {
 }
 
 // TestRouteConfiguredAliasOutsideNamespaceAccepted asserts a configured
-// alias whose id is NOT in the claude-baseten-/anthropic-baseten- namespace is
+// alias whose id is NOT in the claude-openrouter-/anthropic-openrouter- namespace is
 // accepted as a target (the configured-alias map is checked before the
 // namespace gate, matching the router's load order).
 func TestRouteConfiguredAliasOutsideNamespaceAccepted(t *testing.T) {
@@ -461,6 +473,23 @@ func TestRouteRouterDownNotice(t *testing.T) {
 	}
 }
 
+func TestRouteRejectsOpenRouterSelectionWithoutCatalog(t *testing.T) {
+	e := newRouteTestEnv(t, true)
+	before := fileBytes(t, e.cfgPath)
+	code, _, stderr := runClaudeCaptured(t, []string{
+		"route", "opus", "claude-openrouter-glm-5-2",
+	})
+	if code != 1 {
+		t.Fatalf("route = %d, want 1 (%s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "eligible model catalog is unavailable") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if got := fileBytes(t, e.cfgPath); !bytes.Equal(got, before) {
+		t.Fatal("missing catalog mutated config")
+	}
+}
+
 // TestRouteCommentsPreserved asserts that comments in gateway.yaml survive
 // the config edit.
 func TestRouteCommentsPreserved(t *testing.T) {
@@ -553,7 +582,7 @@ clients:
     default_model: zai-org/GLM-5.2
     fallback_route: anthropic
     model_aliases:
-      claude-baseten-glm-5-2: zai-org/GLM-5.2
+      claude-openrouter-glm-5-2: zai-org/GLM-5.2
 door:
   ports:
     - bind_addr: 127.0.0.1:8081
@@ -575,7 +604,7 @@ door:
 				"capabilities":["global_routing"],"global_routing_enabled":true,
 				"auth":{"signed_in":true,"profile":"doc","fallback_enabled":false,"fallback_in_use":false},
 				"clients":[{"name":"claude-code","enabled":true,"bind_addr":"127.0.0.1:18081","protocol_shape":"anthropic",
-					"effective_route":"baseten","fallback_route":"anthropic","auth_set":true,"currently_bound":true,
+					"effective_route":"openrouter","fallback_route":"anthropic","auth_set":true,"currently_bound":true,
 					"model_routes":null}]}`,
 				version.Version, os.Getpid(), priorHash, priorHash, cfgPath)
 		})
@@ -613,7 +642,7 @@ door:
 		t.Setenv("OPENROUTER_SWITCH_ENV_FILE", filepath.Join(dir, "env"))
 		t.Setenv("OPENROUTER_SWITCH_LAUNCHD", "off")
 		t.Setenv("ANTHROPIC_BASE_URL", "")
-		t.Setenv("BASETEN_API_KEY", "")
+		t.Setenv("OPENROUTER_API_KEY", "")
 		t.Setenv(claudeSubagentEnvKey, "")
 		for _, k := range routeEnvSlotKeys() {
 			t.Setenv(k, "")

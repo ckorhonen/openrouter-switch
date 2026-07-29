@@ -11,9 +11,8 @@
 #
 # Usage: tests/fresh-install/run.sh [--no-key]
 #
-# Key sourcing (never printed): BASETEN_API_KEY from the host environment,
-# else parsed from ~/.config/openrouter-switch/env. With no
-# key (or --no-key) the routed-request step is replaced by a stub check
+# Key sourcing (never printed): OPENROUTER_API_KEY from the host environment.
+# With no key (or --no-key) the routed-request step is replaced by a stub check
 # that still proves the door -> router -> telemetry plumbing.
 #
 # The container publishes NO ports to the host; every check runs inside
@@ -45,16 +44,10 @@ esac
 PLATFORM="linux/$GOARCH"
 
 # ------------------------------------------------------------ key
-# Resolve the Baseten API key without ever echoing it.
-OPENROUTER_SWITCH_KEY="${BASETEN_API_KEY:-}"
+# Resolve the OpenRouter API key without ever echoing it.
+OPENROUTER_SWITCH_KEY="${OPENROUTER_API_KEY:-}"
 if [[ "$MODE" == keyed && -z "$OPENROUTER_SWITCH_KEY" ]]; then
-    ENV_FILE="$HOME/.config/openrouter-switch/env"
-    if [[ -r "$ENV_FILE" ]]; then
-        OPENROUTER_SWITCH_KEY="$(sed -n 's/^BASETEN_API_KEY=//p' "$ENV_FILE" | head -1 | sed -e "s/^[\"']//" -e "s/[\"']\$//")"
-    fi
-fi
-if [[ "$MODE" == keyed && -z "$OPENROUTER_SWITCH_KEY" ]]; then
-    echo "NOTICE: no Baseten API key in the host env or ~/.config/openrouter-switch/env."
+    echo "NOTICE: no OpenRouter API key in OPENROUTER_API_KEY."
     echo "NOTICE: falling back to --no-key mode (routed-request step will be skipped)."
     MODE=no-key
 fi
@@ -78,8 +71,8 @@ RUN_ARGS=(--rm --name "$CONTAINER" --platform "$PLATFORM")
 if [[ "$MODE" == keyed ]]; then
     # -e NAME (no value) copies from this process's environment, so the
     # key never appears in the docker argv or in any image layer.
-    export BASETEN_API_KEY="$OPENROUTER_SWITCH_KEY"
-    RUN_ARGS+=(-e BASETEN_API_KEY)
+    export OPENROUTER_API_KEY="$OPENROUTER_SWITCH_KEY"
+    RUN_ARGS+=(-e OPENROUTER_API_KEY)
 else
     RUN_ARGS+=(-e FRESH_INSTALL_NO_KEY=1)
 fi

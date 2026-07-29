@@ -65,30 +65,31 @@ func runConfigInit(path string, force bool, out io.Writer) int {
 
 	// Validate what was just written: it must load, the door section
 	// must resolve to specs, and the claude adapter must find the door
-	// port it points harnesses at. Failure here is a openrouter-switch bug (a
+	// port it points harnesses at. Failure here is an openrouter-switch bug (a
 	// broken template), never a user error.
 	f, err := config.Load(path)
 	if err != nil {
-		fmt.Fprintf(out, "config init: wrote %s but it does not load: %v (this is a openrouter-switch bug; please report it)\n", path, err)
+		fmt.Fprintf(out, "config init: wrote %s but it does not load: %v (this is an openrouter-switch bug; please report it)\n", path, err)
 		return 1
 	}
 	specs, err := door.SpecsFromConfig(f, door.SpecsOptions{Logf: func(string, ...any) {}})
 	if err != nil {
-		fmt.Fprintf(out, "config init: wrote %s but the door section does not resolve: %v (this is a openrouter-switch bug; please report it)\n", path, err)
+		fmt.Fprintf(out, "config init: wrote %s but the door section does not resolve: %v (this is an openrouter-switch bug; please report it)\n", path, err)
 		return 1
 	}
 	if _, _, _, err := claudeDoorPort(f); err != nil {
-		fmt.Fprintf(out, "config init: wrote %s but the claude adapter cannot resolve a door port from it: %v (this is a openrouter-switch bug; please report it)\n", path, err)
+		fmt.Fprintf(out, "config init: wrote %s but the claude adapter cannot resolve a door port from it: %v (this is an openrouter-switch bug; please report it)\n", path, err)
 		return 1
 	}
 
 	fmt.Fprintf(out, "wrote %s (single-port door topology: door %s -> router %s)\n", path, specs[0].ListenAddr, specs[0].RouterTarget)
 	fmt.Fprintf(out, "\nNext steps:\n")
-	fmt.Fprintf(out, "  1. baseten auth login       OAuth sign-in (preferred; no env file needed), or put\n")
-	fmt.Fprintf(out, "                              BASETEN_API_KEY=<key> and OPENROUTER_SWITCH_API_KEY_FALLBACK=1 in %s (mode 0600)\n", config.EnvFilePath())
+	fmt.Fprintf(out, "  1. openrouter-switch auth set-key   validate and store an OpenRouter API key in Keychain\n")
+	fmt.Fprintf(out, "     or inherit OPENROUTER_API_KEY for a headless session\n")
 	fmt.Fprintf(out, "  2. openrouter-switch up --install   start router + door with launchd supervision (plain 'openrouter-switch up' to skip launchd)\n")
-	fmt.Fprintf(out, "  3. openrouter-switch claude on      point Claude Code at the gateway door\n")
-	fmt.Fprintf(out, "  4. openrouter-switch status         verify everything is up\n")
+	fmt.Fprintf(out, "  3. openrouter-switch menubar        select an account model and turn routing on\n")
+	fmt.Fprintf(out, "  4. openrouter-switch claude on      point Claude Code at the gateway door\n")
+	fmt.Fprintf(out, "  5. openrouter-switch status         verify everything is up\n")
 	return 0
 }
 

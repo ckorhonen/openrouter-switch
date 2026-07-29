@@ -5,13 +5,13 @@
 # install-inside.sh places it on PATH, standing in for the go-build step that
 # run.sh performs on the host.
 #
-# No secrets are baked into any layer: the Baseten API key arrives only
+# No secrets are baked into any layer: the OpenRouter API key arrives only
 # as a docker run environment variable at runtime.
 
 FROM debian:stable-slim
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
+ && apt-get install -y --no-install-recommends ca-certificates curl jq \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --shell /bin/bash release-user
 

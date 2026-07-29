@@ -16,7 +16,7 @@
 // Test override points (the same seams the rest of the CLI uses):
 // OPENROUTER_SWITCH_CONFIG_PATH, OPENROUTER_SWITCH_ADMIN_ADDR, OPENROUTER_SWITCH_GATEWAY_PIDFILE,
 // OPENROUTER_SWITCH_DOOR_PIDFILE, OPENROUTER_SWITCH_CLAUDE_SETTINGS, OPENROUTER_SWITCH_CODEX_HOME,
-// OPENROUTER_SWITCH_BACKUP_DIR, OPENROUTER_SWITCH_AUTH_FILE + OPENROUTER_SWITCH_AUTH_NO_KEYRING, OPENROUTER_SWITCH_ENV_FILE,
+// OPENROUTER_SWITCH_BACKUP_DIR, OPENROUTER_SWITCH_ENV_FILE,
 // OPENROUTER_SWITCH_LAUNCHD=off.
 package main
 
@@ -180,14 +180,13 @@ func runDoctor(o doctorOpts) doctorReport {
 	unresolved := doctorConfigChecks(add, cfgPath, cfgErr, f, envFile, envFilePath, doorSpecNotices, len(doorSpecs))
 
 	// The router probe runs before section 3: the auth health check
-	// reads the running router's refresh outcomes, which the store-only
-	// signin check cannot see.
+	// reads the running router's validation outcomes, which the
+	// credential-store check cannot see.
 	routerState := probePort(adminAddr, routerHealthPath, routerHealthMarker)
 
 	// --- 3. auth ----------------------------------------------------------
 	doctorAuthCheck(add, f, unresolved, envFile, envFilePath)
 	doctorAuthHealthCheck(add, adminAddr, routerState == portOurs)
-	doctorBasetenCLICheck(add)
 
 	// --- 4. router --------------------------------------------------------
 	st := doctorRouterChecks(add, adminAddr, routerState)
@@ -296,7 +295,7 @@ func doctorMenubarBinaryCheck(add addCheck, adminAddr string, doorSpecs []door.C
 	if menubarVer == "" {
 		add("binary", "menubar", docWarn,
 			fmt.Sprintf("resolved the menubar binary at %s but '%s --version' did not print a version; the binary may be broken or too old for --version", resolved, resolved),
-			"reinstall openrouter-switch with brew reinstall basetenlabs/baseten/openrouter-switch")
+			"reinstall openrouter-switch with brew reinstall ckorhonen/openrouter-switch/openrouter-switch")
 		return
 	}
 
@@ -335,7 +334,7 @@ func doctorMenubarBinaryCheck(add addCheck, adminAddr string, doorSpecs []door.C
 	}
 	add("binary", "menubar", docWarn,
 		fmt.Sprintf("menubar would launch %s from %s but the running components are %s; the next Open Dashboard or Start click starts a stale component", menubarVer, resolved, strings.Join(running, ", ")),
-		"brew reinstall basetenlabs/baseten/openrouter-switch")
+		"brew reinstall ckorhonen/openrouter-switch/openrouter-switch")
 }
 
 // doctorConfigChecks runs the config-section checks and returns the
@@ -405,71 +404,35 @@ func doctorConfigChecks(add addCheck, cfgPath string, cfgErr error, f *config.Fi
 	return unresolved
 }
 
-// doctorAuthCheck reports the signed-in state from the credential
-// store (the same store the gateway reads). Not-signed-in is a FAIL
-// only when something actually depends on a Baseten credential: a
-// baseten-routed client, or an unresolved auth placeholder.
-func doctorAuthCheck(add addCheck, f *config.File, unresolved []string, envFile map[string]string, envFilePath string) {
-	tok, _, err := auth.Load("")
-	var ak *auth.APIKeyProfileError
-	switch {
-	case err != nil && errors.As(err, &ak):
-		if ak.Key != "" {
-			add("auth", "signin", docOK, fmt.Sprintf("signed in with API key (profile %q)", ak.Profile), "")
-		} else {
-			add("auth", "signin", docWarn, fmt.Sprintf("profile %q uses API key auth but the key is not readable", ak.Profile),
-				"check the keyring or auth.json, or run 'baseten auth login'")
-		}
-		return
-	case err != nil:
-		add("auth", "signin", docWarn, fmt.Sprintf("credential store unreadable: %v", err), "baseten auth login")
-		return
-	case tok != nil:
-		if !tok.Expiry.IsZero() && tok.Expiry.Before(time.Now()) {
-			add("auth", "signin", docWarn,
-				fmt.Sprintf("signed in (OAuth) but the access token expired %s; a refresh is attempted on the next request", tok.Expiry.UTC().Format(time.RFC3339)),
-				"openrouter-switch whoami --refresh   (verifies the refresh path; re-run 'baseten auth login' if it fails)",
-				"whoami", "--refresh")
-		} else {
-			add("auth", "signin", docOK, "signed in (OAuth)", "")
-		}
-		return
-	}
+// doctorAuthCheck reports credential availability through the same
+// Keychain-first, environment-second resolver used by the gateway. It never
+// prints the key or a reversible derivative.
+var doctorResolveAPIKey = auth.ResolveDefaultAPIKey
 
-	// Not signed in. BASETEN_API_KEY (env or env file) still counts as
-	// a credential, matching the gateway preflight.
-	apiKey := os.Getenv("BASETEN_API_KEY")
-	if apiKey == "" {
-		apiKey = envFile["BASETEN_API_KEY"]
-	}
-	if apiKey != "" {
-		add("auth", "signin", docOK, "no OAuth sign-in, but BASETEN_API_KEY is set (API key fallback)", "")
+func doctorAuthCheck(add addCheck, f *config.File, _ []string, _ map[string]string, _ string) {
+	_, source, err := doctorResolveAPIKey()
+	if err == nil {
+		add("auth", "key", docOK, fmt.Sprintf("OpenRouter API key configured (source: %s)", source), "")
 		return
 	}
-	bothFixes := fmt.Sprintf("baseten auth login   (or set the key in %s)", envFilePath)
-	if authVars := doctorAuthPlaceholders(f, unresolved); len(authVars) > 0 {
-		add("auth", "signin", docFail,
-			fmt.Sprintf("not signed in (no OAuth, no API key) and gateway.yaml references ${%s} which is unset; baseten-routed requests have no credential", strings.Join(authVars, "}, ${")),
-			fmt.Sprintf("baseten auth login   (or set %s=... in %s)", authVars[0], envFilePath))
+	fix := "openrouter-switch auth set-key   (or inherit OPENROUTER_API_KEY for a headless session)"
+	if !errors.Is(err, auth.ErrNoAPIKey) {
+		add("auth", "key", docWarn, "OpenRouter credential store is unreadable", fix)
 		return
 	}
-	if names := doctorBasetenRouted(f); len(names) > 0 {
-		add("auth", "signin", docFail,
-			"not signed in (no OAuth, no API key); these clients route to baseten and their requests will fail: "+strings.Join(names, ", "),
-			bothFixes)
+	if names := doctorOpenRouterRouted(f); len(names) > 0 {
+		add("auth", "key", docFail,
+			"no OpenRouter API key; these enabled clients require it: "+strings.Join(names, ", "),
+			fix)
 		return
 	}
-	add("auth", "signin", docWarn, "not signed in (no enabled client routes to baseten, so nothing breaks yet)", "baseten auth login")
+	add("auth", "key", docWarn, "no OpenRouter API key configured; routing is currently inactive", fix)
 }
 
-// doctorAuthHealthCheck reads the running router's credential health
-// (auth.health in /v1/admin/auth/status, derived from real refresh
-// outcomes). The store-based signin check above cannot detect a dead
-// refresh token: the credential is present, but the token endpoint rejects
-// it. The current admin contract requires the health field.
+// doctorAuthHealthCheck reads the running router's masked credential status.
 func doctorAuthHealthCheck(add addCheck, adminAddr string, routerUp bool) {
 	if !routerUp {
-		add("auth", "health", docSkip, "router not up; credential health is derived from the running router's refresh outcomes", "")
+		add("auth", "health", docSkip, "router not up; credential validation status unavailable", "")
 		return
 	}
 	httpC := &http.Client{Timeout: 2 * time.Second}
@@ -483,44 +446,39 @@ func doctorAuthHealthCheck(add addCheck, adminAddr string, routerUp bool) {
 		add("auth", "health", docSkip, fmt.Sprintf("auth status does not parse: %v", err), "")
 		return
 	}
-	health, _ := payload["health"].(string)
-	if health == "" {
+	status, _ := payload["status"].(string)
+	if status == "" {
 		add("auth", "health", docFail,
-			"router auth status omitted the required health field",
+			"router auth status omitted the required status field",
 			"openrouter-switch up   (restart the router onto the current binary)")
 		return
 	}
-	// last_refresh_error embeds token-endpoint response bytes verbatim
-	// (gateway noteAuthRefresh stores err.Error(), and x/oauth2 includes
-	// the raw body); a hostile or misconfigured endpoint could otherwise
-	// inject newlines/ANSI sequences that forge or hide check lines in
-	// the report, or flood the terminal.
-	lastErr := sanitizeAdminText(payload["last_refresh_error"], 200)
-	lastErrAt := sanitizeAdminText(payload["last_refresh_error_at"], 40)
-	switch health {
-	case "refresh_failed":
+	lastErr := sanitizeAdminText(payload["last_error"], 200)
+	switch status {
+	case "invalid", "forbidden":
 		detail := ""
 		if lastErr != "" {
 			detail = ": " + lastErr
 		}
-		if lastErrAt != "" {
-			detail += " (at " + lastErrAt + ")"
+		finding := "OpenRouter rejected the configured API key"
+		if status == "forbidden" {
+			finding = "OpenRouter denied access for the configured API key"
 		}
 		add("auth", "health", docFail,
-			"the router's Baseten credential is dead: the token endpoint rejects its refresh token"+detail+"; baseten-routed requests fail (or silently fall back) until reauth",
-			"openrouter-switch auth login   (or 'baseten auth login', then SIGHUP the router)")
+			finding+detail,
+			"openrouter-switch auth set-key")
 	case "error":
 		detail := ""
 		if lastErr != "" {
 			detail = ": " + lastErr
 		}
 		add("auth", "health", docWarn,
-			"the router's last token refresh failed transiently (network or endpoint error, not a rejected credential)"+detail,
-			"usually self-clears on the next refresh; re-run doctor, and check connectivity if it persists")
-	case "signed_out":
-		add("auth", "health", docSkip, "router has no credential loaded (see auth/signin)", "")
+			"the router could not validate the OpenRouter API key"+detail,
+			"check connectivity and re-run doctor")
+	case "missing":
+		add("auth", "health", docSkip, "router has no credential loaded (see auth/key)", "")
 	default:
-		add("auth", "health", docOK, "router reports credential health "+health, "")
+		add("auth", "health", docOK, "router reports credential status "+status, "")
 	}
 }
 
@@ -545,77 +503,19 @@ func sanitizeAdminText(v any, max int) string {
 	return strings.TrimSpace(b.String())
 }
 
-// doctorBasetenCLICheck scans PATH for Baseten CLI installs. More than one
-// distinct binary creates ambiguous login and credential ownership, so the
-// warning names paths and versions. PATH order decides which
-// `baseten auth login` runs.
-func doctorBasetenCLICheck(add addCheck) {
-	paths := scanBasetenCLIs()
-	switch len(paths) {
-	case 0:
-		add("auth", "cli", docSkip, "no baseten CLI on PATH ('openrouter-switch auth login' needs it; install: "+basetenBrewHint+")", "")
-	case 1:
-		add("auth", "cli", docOK, fmt.Sprintf("one baseten CLI on PATH: %s (%s)", paths[0], orDash(basetenCLIVersion(paths[0]))), "")
-	default:
-		var labeled []string
-		versions := map[string]bool{}
-		for _, p := range paths {
-			v := basetenCLIVersion(p)
-			versions[v] = true
-			labeled = append(labeled, fmt.Sprintf("%s (%s)", p, orDash(v)))
-		}
-		finding := fmt.Sprintf("%d baseten CLIs on PATH: %s", len(paths), strings.Join(labeled, ", "))
-		if len(versions) > 1 {
-			finding += "; the versions disagree, and different versions write incompatible credential-store formats (a login with one strands the other's consumers)"
-		} else {
-			finding += "; duplicate installs invite a version split, and different versions write incompatible credential-store formats"
-		}
-		add("auth", "cli", docWarn, finding,
-			"keep one baseten CLI and remove the stale copies (PATH order decides which one 'baseten auth login' runs)")
-	}
-}
-
-// doctorAuthPlaceholders filters the unresolved placeholder names to
-// those referenced from an auth position (global.auth values or a
-// client auth_token value).
-func doctorAuthPlaceholders(f *config.File, unresolved []string) []string {
-	if f == nil {
-		return nil
-	}
-	var vals []string
-	for _, v := range f.Global.Auth {
-		vals = append(vals, v)
-	}
-	for _, c := range f.Clients {
-		if c.AuthToken != nil {
-			vals = append(vals, c.AuthToken.Value)
-		}
-	}
-	var out []string
-	for _, n := range unresolved {
-		for _, v := range vals {
-			if strings.Contains(v, "${"+n+"}") {
-				out = append(out, n)
-				break
-			}
-		}
-	}
-	return out
-}
-
-// doctorBasetenRouted names enabled clients that can use Baseten under
-// the one global routing gate or through a Baseten fallback.
-func doctorBasetenRouted(f *config.File) []string {
+// doctorOpenRouterRouted names enabled clients whose saved OpenRouter policy
+// is active under the global routing switch.
+func doctorOpenRouterRouted(f *config.File) []string {
 	if f == nil {
 		return nil
 	}
 	var out []string
 	routingEnabled := f.Global.RoutingEnabled != nil && *f.Global.RoutingEnabled
+	if !routingEnabled {
+		return out
+	}
 	for _, c := range f.Clients {
-		if !c.Enabled {
-			continue
-		}
-		if routingEnabled || c.FallbackRoute == "baseten" {
+		if c.Enabled {
 			out = append(out, c.Name)
 		}
 	}
@@ -1136,13 +1036,13 @@ var codexDoctorCheckNames = []string{"overlay", "client", "auth_token", "config_
 // adapter's own seams (OPENROUTER_SWITCH_CODEX_HOME, OPENROUTER_SWITCH_BACKUP_DIR): the overlay
 // file state and its base_url target, the gateway client's
 // enabled/parked state against an installed overlay (parked with the
-// overlay installed means 'codex --profile baseten' points at a dead
+// overlay installed means 'codex --profile openrouter' points at a dead
 // route, the one FAIL combination), the Switch-managed
 // CODEX_AUTH_TOKEN placeholder in the gateway env file, the additive
 // invariant on the user's
 // config.toml (read-only peek; openrouter-switch never writes that file), the
 // on-state backup, and the responses_strip_tool_types knob on a
-// baseten-routed client. The whole section skips when no openai-shape
+// OpenRouter-routed client. The whole section skips when no openai-shape
 // client is configured: codex wiring is additive, so its absence is a
 // legitimate default, never a failure.
 func doctorCodexChecks(add addCheck, f *config.File, envFile map[string]string, envFilePath string) {
@@ -1206,7 +1106,7 @@ func doctorCodexChecks(add addCheck, f *config.File, envFile map[string]string, 
 		add("codex", "overlay", docOK, "no overlay at "+a.overlayPath+" (additive default state; 'openrouter-switch codex on' installs it)", "")
 	case !ours:
 		add("codex", "overlay", docWarn,
-			fmt.Sprintf("%s exists but is not openrouter-switch-managed; 'codex --profile baseten' loads it instead of the gateway overlay ('openrouter-switch codex on' refuses to overwrite it)", a.overlayPath),
+			fmt.Sprintf("%s exists but is not openrouter-switch-managed; 'codex --profile openrouter' loads it instead of the gateway overlay ('openrouter-switch codex on' refuses to overwrite it)", a.overlayPath),
 			"move the file aside and re-run 'openrouter-switch codex on'")
 	default:
 		if st, fnd := doctorPortTarget(sh.baseURL, a.desiredPort); st == docOK {
@@ -1224,7 +1124,7 @@ func doctorCodexChecks(add addCheck, f *config.File, envFile map[string]string, 
 		// side effect), so no fixArgv: `codex on` under --fix would read
 		// EOF and decline.
 		add("codex", "client", docFail,
-			fmt.Sprintf("the overlay is installed but the gateway %s client is parked (enabled: false); 'codex --profile baseten' points at a dead route", client.Name),
+			fmt.Sprintf("the overlay is installed but the gateway %s client is parked (enabled: false); 'codex --profile openrouter' points at a dead route", client.Name),
 			"openrouter-switch codex on   (offers to enable it), or set enabled: true on the "+client.Name+" client in gateway.yaml and SIGHUP the router")
 	default:
 		add("codex", "client", docOK, fmt.Sprintf("gateway %s client parked (enabled: false); no managed overlay depends on it ('openrouter-switch codex on' offers to enable it)", client.Name), "")
@@ -1263,8 +1163,8 @@ func doctorCodexChecks(add addCheck, f *config.File, envFile map[string]string, 
 
 // doctorCodexConfigTomlCheck is the additive-invariant peek at the
 // user's config.toml (READ-ONLY; the adapter never writes that file):
-// a root model_provider = "baseten" means every codex session routes
-// through the gateway, not just `--profile baseten` opt-ins. Absence of
+// a root model_provider = "openrouter" means every codex session routes
+// through the gateway, not just `--profile openrouter` opt-ins. Absence of
 // the file or the key is the invariant holding.
 func doctorCodexConfigTomlCheck(add addCheck, codexHome string) {
 	cfgToml := filepath.Join(codexHome, "config.toml")
@@ -1274,10 +1174,10 @@ func doctorCodexConfigTomlCheck(add addCheck, codexHome string) {
 		add("codex", "config_toml", docOK, "no "+cfgToml+" (additive invariant holds)", "")
 	case err != nil:
 		add("codex", "config_toml", docSkip, fmt.Sprintf("cannot read %s: %v", cfgToml, err), "")
-	case codexRootModelProvider(b) == "baseten":
+	case codexRootModelProvider(b) == "openrouter":
 		add("codex", "config_toml", docWarn,
-			fmt.Sprintf("root model_provider in %s is \"baseten\": EVERY codex session routes through the gateway, not just 'codex --profile baseten' (the additive invariant is flipped; openrouter-switch never writes this file)", cfgToml),
-			"remove the model_provider = \"baseten\" line from "+cfgToml+" and opt in per session with 'codex --profile baseten'")
+			fmt.Sprintf("root model_provider in %s is \"openrouter\": EVERY codex session routes through the gateway, not just 'codex --profile openrouter' (the additive invariant is flipped; openrouter-switch never writes this file)", cfgToml),
+			"remove the model_provider = \"openrouter\" line from "+cfgToml+" and opt in per session with 'codex --profile openrouter'")
 	default:
 		add("codex", "config_toml", docOK, "root model_provider in "+cfgToml+" does not point at the gateway (additive invariant holds)", "")
 	}
@@ -1463,14 +1363,14 @@ func doctorE2EChecks(add addCheck, o doctorOpts, doorSpecs []door.Config, doorUp
 // doctorProbeRouteCheck asserts the probe was served by the route the
 // config designates for the probe's model, so failover can no longer make
 // --probe pass while the configured path is dead. Evidence, in preference
-// order: the door's X-Baseten-Switch-Door response header (internal/door relay;
+// order: the door's X-OpenRouter-Switch-Door response header (internal/door relay;
 // "fallback" means the door replayed the probe against the native
 // provider and the router never saw it), then the probe's own telemetry
 // row. The expected route comes from gateway.ExpectedPrimaryRoute: a
 // model_routes mapping moves the designed route for the probe's model, and a
 // telemetry route_effective value alone cannot distinguish that mapping from
 // the router's fallback_route. The current door contract requires the
-// X-Baseten-Switch-Door stamp so the probe can be attributed safely.
+// X-OpenRouter-Switch-Door stamp so the probe can be attributed safely.
 func doctorProbeRouteCheck(add addCheck, port string, p *doctorProbeResult, probeStart time.Time, f *config.File, routerTarget, shape, telPath string) {
 	name := "route:" + port
 	if !doctorProbeOK(p) {
@@ -1491,13 +1391,13 @@ func doctorProbeRouteCheck(add addCheck, port string, p *doctorProbeResult, prob
 	expected := gateway.ExpectedPrimaryRoute(cli, globalRoutingEnabled, probeModel)
 	if p.DoorVia == "fallback" {
 		add("e2e", name, docFail,
-			fmt.Sprintf("the probe passed but the door's native failover served it (X-Baseten-Switch-Door: fallback), not the configured route %q; the %s path is broken behind a passing probe", configured, configured),
+			fmt.Sprintf("the probe passed but the door's native failover served it (X-OpenRouter-Switch-Door: fallback), not the configured route %q; the %s path is broken behind a passing probe", configured, configured),
 			"openrouter-switch status   (the door tripped; check the router and the auth/health check)")
 		return
 	}
 	if p.DoorVia != "router" {
 		add("e2e", name, docFail,
-			"the door response omitted the required X-Baseten-Switch-Door routing stamp",
+			"the door response omitted the required X-OpenRouter-Switch-Door routing stamp",
 			"openrouter-switch up   (restart the door onto the current binary)")
 		return
 	}

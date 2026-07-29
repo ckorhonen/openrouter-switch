@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
@@ -41,13 +42,13 @@ func TestParseReasoningPolicy(t *testing.T) {
 		wantDefault bool
 		wantErr     bool
 	}{
-		{args: []string{"baseten", "zai-org/GLM-5.2", "off"}, want: config.ReasoningPolicy{Mode: config.ReasoningOff}},
-		{args: []string{"baseten", "zai-org/GLM-5.2", "follow-harness"}, want: config.ReasoningPolicy{Mode: config.ReasoningFollowHarness}},
-		{args: []string{"baseten", "deepseek-ai/DeepSeek-V4-Pro", "effort", "high"}, want: config.ReasoningPolicy{Mode: config.ReasoningFixed, Effort: "high"}},
-		{args: []string{"baseten", "zai-org/GLM-5.2", "default"}, wantDefault: true},
+		{args: []string{"openrouter", "zai-org/GLM-5.2", "off"}, want: config.ReasoningPolicy{Mode: config.ReasoningOff}},
+		{args: []string{"openrouter", "zai-org/GLM-5.2", "follow-harness"}, want: config.ReasoningPolicy{Mode: config.ReasoningFollowHarness}},
+		{args: []string{"openrouter", "deepseek-ai/DeepSeek-V4-Pro", "effort", "high"}, want: config.ReasoningPolicy{Mode: config.ReasoningFixed, Effort: "high"}},
+		{args: []string{"openrouter", "zai-org/GLM-5.2", "default"}, wantDefault: true},
 		{args: []string{"openai", "gpt-5", "off"}, wantErr: true},
-		{args: []string{"baseten", "model", "effort"}, wantErr: true},
-		{args: []string{"baseten", "model", "off", "high"}, wantErr: true},
+		{args: []string{"openrouter", "model", "effort"}, wantErr: true},
+		{args: []string{"openrouter", "model", "off", "high"}, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
@@ -72,7 +73,7 @@ clients:
     protocol_shape: anthropic
     default_model: zai-org/GLM-5.2
     model_options:
-      baseten:
+      openrouter:
         "zai-org/GLM-5.2":
           reasoning:
             mode: follow_harness
@@ -81,7 +82,7 @@ clients:
 	installReasoningPreflight(t, preflight)
 	var out strings.Builder
 	rc := runClientReasoning("claude-code", []string{
-		"baseten", "zai-org/GLM-5.2", "default",
+		"openrouter", "zai-org/GLM-5.2", "default",
 		"--operation-id", "reasoning-default-test",
 	}, &out)
 	if rc != 0 {
@@ -97,7 +98,7 @@ clients:
 	if strings.Contains(string(body), "model_options:") {
 		t.Fatalf("default did not remove the client override:\n%s", body)
 	}
-	if !strings.Contains(out.String(), "claude-code reasoning: baseten/zai-org/GLM-5.2 -> default") {
+	if !strings.Contains(out.String(), "claude-code reasoning: openrouter/zai-org/GLM-5.2 -> default") {
 		t.Fatalf("output = %q", out.String())
 	}
 }
@@ -121,7 +122,7 @@ clients:
 	var out strings.Builder
 	rc := runClientReasoning(
 		"claude-code",
-		[]string{"baseten", "zai-org/GLM-5.2", "off"},
+		[]string{"openrouter", "zai-org/GLM-5.2", "off"},
 		&out,
 	)
 	if rc != 1 {
@@ -169,7 +170,7 @@ func TestHTTPReasoningPreflightUsesGatewaySnapshotAndClientProjection(t *testing
 	defer server.Close()
 	addr := strings.TrimPrefix(server.URL, "http://")
 
-	got, err := (httpReasoningPreflightClient{}).Check(addr, "claude-code", "baseten", "deepseek-ai/DeepSeek-V4-Pro", config.ReasoningPolicy{
+	got, err := (httpReasoningPreflightClient{}).Check(addr, "claude-code", "openrouter", "deepseek-ai/DeepSeek-V4-Pro", config.ReasoningPolicy{
 		Mode: config.ReasoningFixed, Effort: "high",
 	})
 	if err != nil {
@@ -179,7 +180,7 @@ func TestHTTPReasoningPreflightUsesGatewaySnapshotAndClientProjection(t *testing
 		t.Fatalf("warning = %q", got.Warning)
 	}
 
-	_, err = (httpReasoningPreflightClient{}).Check(addr, "claude-code", "baseten", "deepseek-ai/DeepSeek-V4-Pro", config.ReasoningPolicy{
+	_, err = (httpReasoningPreflightClient{}).Check(addr, "claude-code", "openrouter", "deepseek-ai/DeepSeek-V4-Pro", config.ReasoningPolicy{
 		Mode: config.ReasoningFixed, Effort: "xhigh",
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not advertise") {
@@ -195,11 +196,144 @@ func TestHTTPReasoningPreflightRequiresGatewayContract(t *testing.T) {
 	_, err := (httpReasoningPreflightClient{}).Check(
 		strings.TrimPrefix(server.URL, "http://"),
 		"claude-code",
-		"baseten",
+		"openrouter",
 		"zai-org/GLM-5.2",
 		config.ReasoningPolicy{Mode: config.ReasoningOff},
 	)
 	if err == nil || !strings.Contains(err.Error(), "preflight") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRequireEligibleOpenRouterModel(t *testing.T) {
+	tests := []struct {
+		name     string
+		response string
+		model    string
+		wantCode string
+	}{
+		{
+			name:     "eligible",
+			response: `{"state":"ready","models":[{"slug":"org/model","tool_capable":true}]}`,
+			model:    "org/model",
+		},
+		{
+			name:     "absent",
+			response: `{"state":"ready","models":[]}`,
+			model:    "org/model",
+			wantCode: "model_unavailable",
+		},
+		{
+			name:     "not tool capable",
+			response: `{"state":"ready","models":[{"slug":"org/model","tool_capable":false}]}`,
+			model:    "org/model",
+			wantCode: "model_unavailable",
+		},
+		{
+			name:     "catalog unavailable",
+			response: `{"state":"unavailable","models":[]}`,
+			model:    "org/model",
+			wantCode: "model_catalog_unavailable",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/admin/model-catalog" {
+					http.NotFound(w, r)
+					return
+				}
+				fmt.Fprint(w, tc.response)
+			}))
+			defer server.Close()
+			t.Setenv("OPENROUTER_SWITCH_ADMIN_ADDR", strings.TrimPrefix(server.URL, "http://"))
+			got := requireEligibleOpenRouterModel(tc.model)
+			if tc.wantCode == "" {
+				if got != nil {
+					t.Fatalf("error = %v", got)
+				}
+				return
+			}
+			if got == nil || got.code != tc.wantCode {
+				t.Fatalf("error = %#v, want code %q", got, tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestRequireEligibleOpenRouterModelAllowsSynchronousCatalogHydration(
+	t *testing.T,
+) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/admin/model-catalog" {
+			http.NotFound(w, r)
+			return
+		}
+		time.Sleep(600 * time.Millisecond)
+		fmt.Fprint(w, `{"state":"ready","models":[{"slug":"org/model","tool_capable":true}]}`)
+	}))
+	defer server.Close()
+	t.Setenv(
+		"OPENROUTER_SWITCH_ADMIN_ADDR",
+		strings.TrimPrefix(server.URL, "http://"),
+	)
+
+	if got := requireEligibleOpenRouterModel("org/model"); got != nil {
+		t.Fatalf("delayed catalog eligibility = %v", got)
+	}
+}
+
+func TestRequireEligibleOpenRouterModelMapsCredentialFailures(t *testing.T) {
+	tests := []struct {
+		name         string
+		reason       string
+		wantCode     string
+		wantGuidance []string
+	}{
+		{
+			name:         "invalid",
+			reason:       "invalid_credentials",
+			wantCode:     "invalid_credentials",
+			wantGuidance: []string{"auth set-key"},
+		},
+		{
+			name:         "forbidden",
+			reason:       "forbidden",
+			wantCode:     "forbidden_credentials",
+			wantGuidance: []string{"auth status", "auth set-key"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/v1/admin/model-catalog" {
+						http.NotFound(w, r)
+						return
+					}
+					fmt.Fprintf(
+						w,
+						`{"state":"unavailable","unavailable_reason":%q,"models":[]}`,
+						tc.reason,
+					)
+				},
+			))
+			defer server.Close()
+			t.Setenv(
+				"OPENROUTER_SWITCH_ADMIN_ADDR",
+				strings.TrimPrefix(server.URL, "http://"),
+			)
+
+			got := requireEligibleOpenRouterModel("org/model")
+
+			if got == nil || got.code != tc.wantCode || got.retriable {
+				t.Fatalf("error = %#v, want code %q non-retriable", got, tc.wantCode)
+			}
+			for _, guidance := range tc.wantGuidance {
+				if !strings.Contains(got.message, guidance) {
+					t.Fatalf("message = %q, want %q", got.message, guidance)
+				}
+			}
+		})
 	}
 }

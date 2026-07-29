@@ -115,6 +115,10 @@ final class ReasoningConfigurationTests: XCTestCase {
         let entry = LiveModelCatalogEntry(dict: [
             "slug": model,
             "display_name": "GLM 5.2",
+            "tool_capable": true,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supported_parameters": ["tools", "reasoning"],
             "reasoning": [
                 "supported": true,
                 "options": [
@@ -156,6 +160,10 @@ final class ReasoningConfigurationTests: XCTestCase {
         XCTAssertNil(LiveModelCatalogEntry(dict: [
             "slug": model,
             "display_name": "GLM 5.2",
+            "tool_capable": true,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supported_parameters": ["tools", "reasoning"],
             "reasoning": [
                 "supported": true,
                 "options": [
@@ -176,7 +184,7 @@ final class ReasoningConfigurationTests: XCTestCase {
             effective: ["mode": "fixed", "effort": "high"],
             availableModes: ["off", "follow_harness"],
             availableEfforts: ["low", "medium", "high"])
-        let status = client.modelOptions["baseten"]?[model]?.reasoning
+        let status = client.modelOptions["openrouter"]?[model]?.reasoning
 
         XCTAssertEqual(status?.configured.mode, .fixed)
         XCTAssertEqual(status?.configured.effort, "high")
@@ -216,7 +224,7 @@ final class ReasoningConfigurationTests: XCTestCase {
     func testPreflightPostsTypedPolicyForSelectedClient() async throws {
         ReasoningURLProtocol.responseData = Data("""
         {
-          "provider": "baseten",
+          "provider": "openrouter",
           "model": "zai-org/GLM-5.2",
           "policy": {"mode": "follow_harness"},
           "available": true,
@@ -249,7 +257,7 @@ final class ReasoningConfigurationTests: XCTestCase {
 
         let snapshot = try await client.preflightReasoning(
             client: "claude-code",
-            provider: "baseten",
+            provider: "openrouter",
             model: model,
             policy: ReasoningPolicyValue(mode: .followHarness))
 
@@ -262,7 +270,7 @@ final class ReasoningConfigurationTests: XCTestCase {
         XCTAssertFalse(body.isEmpty)
         let object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: body) as? [String: Any])
-        XCTAssertEqual(object["provider"] as? String, "baseten")
+        XCTAssertEqual(object["provider"] as? String, "openrouter")
         XCTAssertEqual(object["client"] as? String, "claude-code")
         XCTAssertEqual(object["model"] as? String, model)
         XCTAssertEqual(
@@ -316,7 +324,7 @@ final class ReasoningConfigurationTests: XCTestCase {
 
     func testDisplayAddsAnotherSelectedFamilyModel() {
         let kimi = "moonshotai/Kimi-K2.7-Code"
-        let kimiAlias = "claude-baseten-kimi-k2-7-code"
+        let kimiAlias = "claude-openrouter-kimi-k2-7-code"
         let client = reasoningVisibilityClient(
             defaultModel: model,
             families: [
@@ -373,7 +381,7 @@ final class ReasoningConfigurationTests: XCTestCase {
 
     func testDisplayIncludesActiveExplicitSubagentOverride() {
         let nemotron = "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
-        let nemotronAlias = "claude-baseten-nemotron-ultra"
+        let nemotronAlias = "claude-openrouter-nemotron-ultra"
         let client = reasoningVisibilityClient(
             defaultModel: model,
             families: [("opus", model)],
@@ -628,17 +636,17 @@ final class ReasoningConfigurationTests: XCTestCase {
         XCTAssertEqual(
             reasoningDispatchArgs(
                 client: "claude-code",
-                provider: "baseten",
+                provider: "openrouter",
                 model: model,
                 policy: ReasoningPolicyValue(mode: .followHarness)),
-            ["claude", "reasoning", "baseten", model, "follow-harness"])
+            ["claude", "reasoning", "openrouter", model, "follow-harness"])
         XCTAssertEqual(
             reasoningDispatchArgs(
                 client: "codex",
-                provider: "baseten",
+                provider: "openrouter",
                 model: model,
                 policy: ReasoningPolicyValue(mode: .fixed, effort: "high")),
-            ["codex", "reasoning", "baseten", model, "effort", "high"])
+            ["codex", "reasoning", "openrouter", model, "effort", "high"])
 
         let fixed = routingSnapshot(client: reasoningClient(
             configured: ["mode": "fixed", "effort": "high"],
@@ -648,13 +656,13 @@ final class ReasoningConfigurationTests: XCTestCase {
         XCTAssertTrue(reasoningMutationConfirmed(
             snapshot: fixed,
             client: "claude-code",
-            provider: "baseten",
+            provider: "openrouter",
             model: model,
             policy: ReasoningPolicyValue(mode: .fixed, effort: "high")))
         XCTAssertFalse(reasoningMutationConfirmed(
             snapshot: fixed,
             client: "claude-code",
-            provider: "baseten",
+            provider: "openrouter",
             model: model,
             policy: ReasoningPolicyValue(mode: .off)))
 
@@ -663,7 +671,7 @@ final class ReasoningConfigurationTests: XCTestCase {
         XCTAssertTrue(reasoningMutationConfirmed(
             snapshot: noProjection,
             client: "claude-code",
-            provider: "baseten",
+            provider: "openrouter",
             model: model,
             policy: ReasoningPolicyValue(mode: .default)))
     }
@@ -681,12 +689,12 @@ final class ReasoningConfigurationTests: XCTestCase {
 
         XCTAssertTrue(state.requestReasoning(
             client: "claude-code",
-            provider: "baseten",
+            provider: "openrouter",
             model: model,
             policy: ReasoningPolicyValue(mode: .followHarness)))
         XCTAssertFalse(state.requestReasoning(
             client: "claude-code",
-            provider: "baseten",
+            provider: "openrouter",
             model: "another/model",
             policy: ReasoningPolicyValue(mode: .off)))
         await waitUntil { state.pendingReasoning == nil }
@@ -699,7 +707,7 @@ final class ReasoningConfigurationTests: XCTestCase {
             [
                 "claude",
                 "reasoning",
-                "baseten",
+                "openrouter",
                 model,
                 "follow-harness",
             ])
@@ -719,7 +727,7 @@ final class ReasoningConfigurationTests: XCTestCase {
 
         XCTAssertTrue(state.requestReasoning(
             client: "claude-code",
-            provider: "baseten",
+            provider: "openrouter",
             model: model,
             policy: ReasoningPolicyValue(mode: .default)))
         await waitUntil { state.pendingReasoning == nil }
@@ -730,7 +738,7 @@ final class ReasoningConfigurationTests: XCTestCase {
         XCTAssertEqual(calls.count, 2)
         XCTAssertEqual(
             Array(calls[0].suffix(5)),
-            ["claude", "reasoning", "baseten", model, "default"])
+            ["claude", "reasoning", "openrouter", model, "default"])
         XCTAssertEqual(
             Array(calls[1].prefix(3)),
             ["--json", "mutation", "reconcile"])
@@ -779,7 +787,7 @@ final class ReasoningConfigurationTests: XCTestCase {
                 "available": true,
             ]],
             "model_options": [
-                "baseten": [
+                "openrouter": [
                     model: [
                         "reasoning": reasoningStatusDictionary(
                             configured: configured,
@@ -841,11 +849,11 @@ final class ReasoningConfigurationTests: XCTestCase {
         let retired = "moonshotai/Retired-Reasoner"
         let gpt = "openai/gpt-oss-120b"
         let catalogModels = [
-            (model, "GLM 5.2", "claude-baseten-glm-5-2"),
-            (kimi, "Kimi K2.7 Code", "claude-baseten-kimi-k2-7-code"),
-            (nemotron, "Nemotron Ultra", "claude-baseten-nemotron-ultra"),
-            (retired, "Retired Reasoner", "claude-baseten-retired-reasoner"),
-            (gpt, "GPT OSS 120B", "claude-baseten-gpt-oss-120b"),
+            (model, "GLM 5.2", "claude-openrouter-glm-5-2"),
+            (kimi, "Kimi K2.7 Code", "claude-openrouter-kimi-k2-7-code"),
+            (nemotron, "Nemotron Ultra", "claude-openrouter-nemotron-ultra"),
+            (retired, "Retired Reasoner", "claude-openrouter-retired-reasoner"),
+            (gpt, "GPT OSS 120B", "claude-openrouter-gpt-oss-120b"),
         ]
         let options = Dictionary(uniqueKeysWithValues: catalogModels.map {
             slug, _, _ in
@@ -901,7 +909,7 @@ final class ReasoningConfigurationTests: XCTestCase {
                     "available": !unavailableModels.contains($0.0),
                 ] as [String: Any]
             },
-            "model_options": ["baseten": options],
+            "model_options": ["openrouter": options],
         ])!
     }
 
@@ -909,6 +917,10 @@ final class ReasoningConfigurationTests: XCTestCase {
         LiveModelCatalogEntry(dict: [
             "slug": model,
             "display_name": "GLM 5.2",
+            "tool_capable": true,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supported_parameters": ["tools", "reasoning"],
             "reasoning": [
                 "supported": true,
                 "options": [["type": "toggle"]],
@@ -922,7 +934,7 @@ final class ReasoningConfigurationTests: XCTestCase {
     }
 
     private func routingSnapshot(client: ClientStatus) -> RoutingSnapshot {
-        let providerOptions = client.modelOptions["baseten"] ?? [:]
+        let providerOptions = client.modelOptions["openrouter"] ?? [:]
         return RoutingSnapshot(
             status: AdminStatusSnapshot(dict: [
                 "router_boot_id": "boot-a",
@@ -934,7 +946,7 @@ final class ReasoningConfigurationTests: XCTestCase {
                     "name": client.name,
                     "enabled": client.enabled,
                     "model_options": [
-                        "baseten": providerOptions.mapValues {
+                        "openrouter": providerOptions.mapValues {
                             option in
                             guard let reasoning = option.reasoning else {
                                 return [String: Any]()
@@ -965,7 +977,7 @@ final class ReasoningConfigurationTests: XCTestCase {
 
     private func preflightSnapshot() -> ReasoningPreflightSnapshot {
         ReasoningPreflightSnapshot(dict: [
-            "provider": "baseten",
+            "provider": "openrouter",
             "model": model,
             "policy": ["mode": "follow_harness"],
             "available": true,
@@ -1018,7 +1030,7 @@ final class ReasoningConfigurationTests: XCTestCase {
                 "enabled": true,
                 "bind_addr": "127.0.0.1:8789",
                 "model_options": [
-                    "baseten": [
+                    "openrouter": [
                         model: [
                             "reasoning": reasoningStatusDictionary(
                                 configured: ["mode": "default"],
@@ -1036,7 +1048,7 @@ final class ReasoningConfigurationTests: XCTestCase {
                 "CFBundleDisplayName": "OpenRouter Switch",
                 "CFBundleExecutable": "OpenRouterSwitch",
             ],
-            bundleIdentifier: "co.baseten.switch",
+            bundleIdentifier: "com.ckorhonen.openrouter-switch",
             runningExecutableName: "OpenRouterSwitch",
             homeDirectory: "/tmp/openrouter-switch-reasoning-tests",
             environment: ["OPENROUTER_SWITCH_GATEWAY_BIN": "/usr/bin/true"])

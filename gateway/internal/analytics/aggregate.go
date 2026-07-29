@@ -55,8 +55,8 @@ func Build(
 			Providers: []CostGroup{},
 			Models:    []CostGroup{},
 			Savings: Savings{
-				ByBasetenModel: []SavingsModel{},
-				Mappings:       []SavingsMapping{},
+				ByOpenRouterModel: []SavingsModel{},
+				Mappings:          []SavingsMapping{},
 			},
 		},
 		Performance: Performance{
@@ -138,14 +138,14 @@ func Build(
 			if provider == "Claude" {
 				response.Cost.Summary.ActualClaudeCostUSD += actualUSD
 			} else {
-				response.Cost.Summary.ActualBasetenCostUSD += actualUSD
+				response.Cost.Summary.ActualOpenRouterCostUSD += actualUSD
 			}
 		} else {
 			response.Coverage.UnpricedActualCostRows++
 			cost.unpriced++
 		}
 
-		if provider != "Baseten" {
+		if provider != "OpenRouter" {
 			continue
 		}
 		estimated, counterfactualPriced := persistedCounterfactualUSD(
@@ -160,7 +160,7 @@ func Build(
 		}
 
 		response.Coverage.SavingsEligibleRows++
-		response.Cost.Summary.EstimatedNativeCostForBasetenUSD += estimated
+		response.Cost.Summary.EstimatedNativeCostForOpenRouterUSD += estimated
 		savingsEligibleActual += actualUSD
 
 		sm := savingsModels[model.ID]
@@ -186,16 +186,16 @@ func Build(
 	}
 
 	response.Cost.Summary.SavedUSD =
-		response.Cost.Summary.EstimatedNativeCostForBasetenUSD -
+		response.Cost.Summary.EstimatedNativeCostForOpenRouterUSD -
 			savingsEligibleActual
 	response.Cost.Summary.SavedPercent = savedPercent(
 		response.Cost.Summary.SavedUSD,
-		response.Cost.Summary.EstimatedNativeCostForBasetenUSD,
+		response.Cost.Summary.EstimatedNativeCostForOpenRouterUSD,
 	)
 	response.Cost.Providers, response.Cost.Models = materializeCost(catalog, costGroups)
 	response.Performance.Providers, response.Performance.Models =
 		materializePerformance(catalog, perfGroups)
-	response.Cost.Savings.ByBasetenModel =
+	response.Cost.Savings.ByOpenRouterModel =
 		materializeSavingsModels(catalog, savingsModels)
 	response.Cost.Savings.Mappings =
 		materializeSavingsMappings(catalog, savingsMappings)
@@ -215,8 +215,8 @@ func providerFor(event telemetry.EventV1) (string, bool) {
 	switch strings.ToLower(event.EffectiveProvider) {
 	case "anthropic":
 		return "Claude", true
-	case "baseten":
-		return "Baseten", true
+	case "openrouter":
+		return "OpenRouter", true
 	default:
 		return "", false
 	}
@@ -269,10 +269,10 @@ func modelMetadata(
 	if provider == "Claude" {
 		return modelmeta.ResolveClaudeFamily(requestedFamily, requestedModel)
 	}
-	metadata := modelmeta.ResolveBaseten(modelID)
+	metadata := modelmeta.ResolveOpenRouter(modelID)
 	if catalog != nil {
 		if displayName, ok := catalog.DisplayName(
-			pricing.ProviderBaseten,
+			pricing.ProviderOpenRouter,
 			modelID,
 		); ok {
 			metadata.DisplayName = displayName
@@ -385,11 +385,11 @@ func materializeSavingsModels(
 	result := make([]SavingsModel, 0, len(groups))
 	for model, value := range groups {
 		saved := value.estimated - value.actual
-		metadata := modelMetadata(catalog, "Baseten", model, "", model)
+		metadata := modelMetadata(catalog, "OpenRouter", model, "", model)
 		result = append(result, SavingsModel{
 			ModelID: metadata.ID, DisplayName: metadata.DisplayName,
-			ActualBasetenCostUSD:   value.actual,
-			EstimatedNativeCostUSD: value.estimated, SavedUSD: saved,
+			ActualOpenRouterCostUSD: value.actual,
+			EstimatedNativeCostUSD:  value.estimated, SavedUSD: saved,
 			SavedPercent: savedPercent(saved, value.estimated),
 		})
 	}
@@ -404,16 +404,16 @@ func materializeSavingsMappings(
 	result := make([]SavingsMapping, 0, len(groups))
 	for key, value := range groups {
 		parts := strings.SplitN(key, "\x00", 2)
-		metadata := modelMetadata(catalog, "Baseten", parts[0], "", parts[0])
+		metadata := modelMetadata(catalog, "OpenRouter", parts[0], "", parts[0])
 		result = append(result, SavingsMapping{
-			BasetenModelID: metadata.ID, BasetenDisplayName: metadata.DisplayName,
-			RequestedClaudeFamily: parts[1],
-			ActualBasetenCostUSD:  value.actual, EstimatedNativeCostUSD: value.estimated,
+			OpenRouterModelID: metadata.ID, OpenRouterDisplayName: metadata.DisplayName,
+			RequestedClaudeFamily:   parts[1],
+			ActualOpenRouterCostUSD: value.actual, EstimatedNativeCostUSD: value.estimated,
 		})
 	}
 	sort.Slice(result, func(a, b int) bool {
-		if result[a].BasetenModelID != result[b].BasetenModelID {
-			return result[a].BasetenModelID < result[b].BasetenModelID
+		if result[a].OpenRouterModelID != result[b].OpenRouterModelID {
+			return result[a].OpenRouterModelID < result[b].OpenRouterModelID
 		}
 		return claudeFamilyOrder[strings.ToLower(result[a].RequestedClaudeFamily)] <
 			claudeFamilyOrder[strings.ToLower(result[b].RequestedClaudeFamily)]

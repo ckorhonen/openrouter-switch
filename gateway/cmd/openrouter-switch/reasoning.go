@@ -9,12 +9,99 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ckorhonen/openrouter-switch/gateway/cmd/gateway"
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 )
 
-const reasoningUsage = "usage: openrouter-switch <claude|codex> reasoning baseten <model> off|follow-harness|effort <value>|default"
+const reasoningUsage = "usage: openrouter-switch <claude|codex> reasoning openrouter <model> off|follow-harness|effort <value>|default"
+
+const modelCatalogHTTPTimeout = 25 * time.Second
+
+type eligibleModelCatalogResponse struct {
+	State             string `json:"state"`
+	UnavailableReason string `json:"unavailable_reason"`
+	Models            []struct {
+		Slug        string `json:"slug"`
+		ToolCapable bool   `json:"tool_capable"`
+	} `json:"models"`
+}
+
+type modelEligibilityError struct {
+	code      string
+	message   string
+	retriable bool
+}
+
+func (e *modelEligibilityError) Error() string { return e.message }
+
+// requireEligibleOpenRouterModel makes the running router's account-scoped
+// catalog authoritative for every new OpenRouter model selection.
+func requireEligibleOpenRouterModel(modelID string) *modelEligibilityError {
+	adminAddr := envDefault("OPENROUTER_SWITCH_ADMIN_ADDR", gateway.DefaultAdminAddr)
+	request, err := http.NewRequest(
+		http.MethodGet,
+		"http://"+adminAddr+"/v1/admin/model-catalog",
+		nil,
+	)
+	if err != nil {
+		return catalogUnavailableError()
+	}
+	client := &http.Client{Timeout: modelCatalogHTTPTimeout}
+	response, err := client.Do(request)
+	if err != nil {
+		return catalogUnavailableError()
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return catalogUnavailableError()
+	}
+	var catalog eligibleModelCatalogResponse
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 4<<20))
+	if err := decoder.Decode(&catalog); err != nil {
+		return catalogUnavailableError()
+	}
+	if catalog.State != "ready" {
+		switch catalog.UnavailableReason {
+		case "invalid_credentials":
+			return &modelEligibilityError{
+				code: "invalid_credentials",
+				message: "OpenRouter rejected the active API key; run " +
+					"'openrouter-switch auth set-key' to replace it",
+			}
+		case "forbidden":
+			return &modelEligibilityError{
+				code: "forbidden_credentials",
+				message: "OpenRouter denied access for the active API key; run " +
+					"'openrouter-switch auth status' to inspect it or " +
+					"'openrouter-switch auth set-key' to replace it",
+			}
+		default:
+			return catalogUnavailableError()
+		}
+	}
+	for _, model := range catalog.Models {
+		if model.Slug == modelID && model.ToolCapable {
+			return nil
+		}
+	}
+	return &modelEligibilityError{
+		code: "model_unavailable",
+		message: fmt.Sprintf(
+			"OpenRouter model %q is unavailable or not tool-capable for this account",
+			modelID,
+		),
+	}
+}
+
+func catalogUnavailableError() *modelEligibilityError {
+	return &modelEligibilityError{
+		code:      "model_catalog_unavailable",
+		message:   "OpenRouter eligible model catalog is unavailable; no new model selection was made",
+		retriable: true,
+	}
+}
 
 type reasoningCommandOptions struct {
 	Mutation mutationOptions
@@ -88,6 +175,17 @@ func runClientReasoning(
 			return failMutation(opts.Mutation, out, result, "router_unavailable",
 				"reasoning mutations other than default require a healthy running router", true, 1)
 		}
+		if eligibilityErr := requireEligibleOpenRouterModel(modelID); eligibilityErr != nil {
+			return failMutation(
+				opts.Mutation,
+				out,
+				result,
+				eligibilityErr.code,
+				eligibilityErr.message,
+				eligibilityErr.retriable,
+				1,
+			)
+		}
 		preflight, err := activeReasoningPreflightClient.Check(
 			envDefault("OPENROUTER_SWITCH_ADMIN_ADDR", gateway.DefaultAdminAddr),
 			clientName,
@@ -152,9 +250,9 @@ func parseReasoningPolicy(args []string) (string, string, config.ReasoningPolicy
 		return "", "", config.ReasoningPolicy{}, false, fmt.Errorf("provider, model, and policy are required")
 	}
 	provider, modelID, mode := args[0], args[1], args[2]
-	if provider != "baseten" {
+	if provider != "openrouter" {
 		return provider, modelID, config.ReasoningPolicy{}, false,
-			fmt.Errorf("provider %q is unsupported (allowed: baseten)", provider)
+			fmt.Errorf("provider %q is unsupported (allowed: openrouter)", provider)
 	}
 	if strings.TrimSpace(modelID) == "" {
 		return provider, modelID, config.ReasoningPolicy{}, false, fmt.Errorf("model cannot be empty")

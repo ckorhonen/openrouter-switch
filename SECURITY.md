@@ -11,7 +11,7 @@ are not supported release lines.
 Do not open a public issue for a suspected vulnerability.
 
 Use GitHub's
-[private vulnerability reporting form](https://github.com/basetenlabs/openrouter-switch/security/advisories/new)
+[private vulnerability reporting form](https://github.com/ckorhonen/openrouter-switch/security/advisories/new)
 to send the report directly to the repository's security maintainers. Include:
 
 - the affected version and operating system;

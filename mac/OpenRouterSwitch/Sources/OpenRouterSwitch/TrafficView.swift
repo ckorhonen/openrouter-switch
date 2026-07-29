@@ -221,19 +221,19 @@ private struct TrafficCostView: View {
             let summary = snapshot.cost.summary
             return [
                 TrafficSavingsChartGroup(
-                    id: "baseten",
-                    label: "Baseten traffic",
-                    actualBasetenCostUSD:
-                        trafficSavingsEligibleBasetenCost(summary),
+                    id: "openrouter",
+                    label: "OpenRouter traffic",
+                    actualOpenRouterCostUSD:
+                        trafficSavingsEligibleOpenRouterCost(summary),
                     estimatedNativeCostUSD:
-                        summary.estimatedNativeCostForBasetenUSD),
+                        summary.estimatedNativeCostForOpenRouterUSD),
             ]
         }
-        return snapshot.cost.savings.byBasetenModel.map {
+        return snapshot.cost.savings.byOpenRouterModel.map {
             TrafficSavingsChartGroup(
                 id: $0.id,
                 label: $0.label,
-                actualBasetenCostUSD: $0.actualBasetenCostUSD,
+                actualOpenRouterCostUSD: $0.actualOpenRouterCostUSD,
                 estimatedNativeCostUSD: $0.estimatedNativeCostUSD)
         }
     }
@@ -243,13 +243,13 @@ private struct TrafficCostView: View {
             let summary = snapshot.cost.summary
             return [
                 TrafficSavingsTableRow(
-                    id: "baseten",
-                    label: "Baseten",
+                    id: "openrouter",
+                    label: "OpenRouter",
                     requestedClaude: "All routed families",
-                    actualBasetenCostUSD:
-                        trafficSavingsEligibleBasetenCost(summary),
+                    actualOpenRouterCostUSD:
+                        trafficSavingsEligibleOpenRouterCost(summary),
                     estimatedNativeCostUSD:
-                        summary.estimatedNativeCostForBasetenUSD),
+                        summary.estimatedNativeCostForOpenRouterUSD),
             ]
         }
         return snapshot.cost.savings.mappings.map {
@@ -257,7 +257,7 @@ private struct TrafficCostView: View {
                 id: $0.id,
                 label: $0.label,
                 requestedClaude: $0.requestedClaudeFamily,
-                actualBasetenCostUSD: $0.actualBasetenCostUSD,
+                actualOpenRouterCostUSD: $0.actualOpenRouterCostUSD,
                 estimatedNativeCostUSD: $0.estimatedNativeCostUSD)
         }
     }
@@ -278,12 +278,12 @@ private struct TrafficCostView: View {
                         tokens(for: "Claude")),
                     brand: .claude)
                 TrafficMetricCard(
-                    title: "Actual Baseten spend",
+                    title: "Actual OpenRouter spend",
                     value: trafficCurrency(
-                        snapshot.cost.summary.actualBasetenCostUSD),
+                        snapshot.cost.summary.actualOpenRouterCostUSD),
                     detail: trafficTokenCount(
-                        tokens(for: "Baseten")),
-                    brand: .baseten)
+                        tokens(for: "OpenRouter")),
+                    brand: .openrouter)
                 TrafficMetricCard(
                     title: "Estimated savings",
                     value: trafficCurrency(
@@ -308,7 +308,7 @@ private struct TrafficCostView: View {
             TrafficSectionCard(
                 title: "Estimated savings",
                 description:
-                    "Baseten actual cost compared with the estimated Claude cost for the same routed traffic."
+                    "OpenRouter actual cost compared with the estimated Claude cost for the same routed traffic."
             ) {
                 SavingsStackedChart(groups: savingsGroups)
                 TrafficSavingsTable(
@@ -347,9 +347,9 @@ private struct TrafficPerformanceView: View {
         }
     }
 
-    private var baseten: TrafficPerformanceRow? {
+    private var openrouter: TrafficPerformanceRow? {
         snapshot.performance.providers.first {
-            $0.provider.caseInsensitiveCompare("Baseten") == .orderedSame
+            $0.provider.caseInsensitiveCompare("OpenRouter") == .orderedSame
         }
     }
 
@@ -364,7 +364,7 @@ private struct TrafficPerformanceView: View {
                 ForEach(
                     trafficPerformanceCardContents(
                         claude: claude,
-                        baseten: baseten)
+                        openrouter: openrouter)
                 ) { card in
                     TrafficMetricCard(
                         title: card.title,
@@ -401,59 +401,59 @@ struct TrafficPerformanceCardContent: Equatable, Identifiable {
 
 func trafficPerformanceCardContents(
     claude: TrafficPerformanceRow?,
-    baseten: TrafficPerformanceRow?
+    openrouter: TrafficPerformanceRow?
 ) -> [TrafficPerformanceCardContent] {
-    let basetenTTFT = baseten?.measuredMedianTTFTMS
+    let openrouterTTFT = openrouter?.measuredMedianTTFTMS
     let claudeTTFT = claude?.measuredMedianTTFTMS
-    let basetenTPS = baseten?.measuredMedianOutputTokensPerSecond
+    let openrouterTPS = openrouter?.measuredMedianOutputTokensPerSecond
     let claudeTPS = claude?.measuredMedianOutputTokensPerSecond
 
     return [
         TrafficPerformanceCardContent(
-            title: "Baseten median TTFT",
-            value: trafficMilliseconds(basetenTTFT),
+            title: "OpenRouter median TTFT",
+            value: trafficMilliseconds(openrouterTTFT),
             detail: trafficComparisonDetail(
                 value: "Claude \(trafficMilliseconds(claudeTTFT))",
                 comparison: trafficPerformanceSpeedComparison(
-                    baseten: basetenTTFT,
+                    openrouter: openrouterTTFT,
                     claude: claudeTTFT,
                     lowerIsBetter: true)),
-            brand: .baseten,
+            brand: .openrouter,
             detailBrand: .claude),
         TrafficPerformanceCardContent(
-            title: "Baseten median output speed",
-            value: trafficTPS(basetenTPS),
+            title: "OpenRouter median output speed",
+            value: trafficTPS(openrouterTPS),
             detail: trafficComparisonDetail(
                 value: "Claude \(trafficTPS(claudeTPS))",
                 comparison: trafficPerformanceSpeedComparison(
-                    baseten: basetenTPS,
+                    openrouter: openrouterTPS,
                     claude: claudeTPS,
                     lowerIsBetter: false)),
-            brand: .baseten,
+            brand: .openrouter,
             detailBrand: .claude),
         TrafficPerformanceCardContent(
-            title: "Baseten token volume",
-            value: trafficTokenCount(baseten?.tokens ?? 0),
+            title: "OpenRouter token volume",
+            value: trafficTokenCount(openrouter?.tokens ?? 0),
             detail:
                 "Claude \(trafficTokenCount(claude?.tokens ?? 0)) tokens",
-            brand: .baseten,
+            brand: .openrouter,
             detailBrand: .claude),
     ]
 }
 
 func trafficPerformanceSpeedComparison(
-    baseten: Double?,
+    openrouter: Double?,
     claude: Double?,
     lowerIsBetter: Bool
 ) -> String? {
-    guard let baseten, let claude,
-          baseten.isFinite, claude.isFinite,
-          baseten > 0, claude > 0 else {
+    guard let openrouter, let claude,
+          openrouter.isFinite, claude.isFinite,
+          openrouter > 0, claude > 0 else {
         return nil
     }
     let ratio = lowerIsBetter
-        ? claude / baseten
-        : baseten / claude
+        ? claude / openrouter
+        : openrouter / claude
     guard ratio.isFinite, ratio > 0 else { return nil }
     if abs(ratio - 1) < 0.05 {
         return "about the same"
@@ -652,11 +652,11 @@ private struct TrafficSavingsTableRow: Identifiable {
     let id: String
     let label: String
     let requestedClaude: String
-    let actualBasetenCostUSD: Double
+    let actualOpenRouterCostUSD: Double
     let estimatedNativeCostUSD: Double
 
     var savedUSD: Double {
-        estimatedNativeCostUSD - actualBasetenCostUSD
+        estimatedNativeCostUSD - actualOpenRouterCostUSD
     }
     var savedPercent: Double? {
         guard estimatedNativeCostUSD > 0 else { return nil }
@@ -696,11 +696,11 @@ private struct TrafficSavingsTable: View {
     private var wideSavingsTable: some View {
         VStack(spacing: 0) {
             HStack(spacing: 16) {
-                trafficTableHeader("Baseten model")
+                trafficTableHeader("OpenRouter model")
                     .frame(width: 160, alignment: .leading)
                 trafficTableHeader("Requested Claude")
                     .frame(width: 150, alignment: .leading)
-                trafficTableHeader("Baseten actual")
+                trafficTableHeader("OpenRouter actual")
                     .frame(width: 110, alignment: .trailing)
                 trafficTableHeader("Native estimate")
                     .frame(width: 110, alignment: .trailing)
@@ -717,14 +717,14 @@ private struct TrafficSavingsTable: View {
                 let row = visibleRows[index]
                 HStack(alignment: .top, spacing: 16) {
                     TrafficProviderLabel(
-                        provider: "Baseten",
+                        provider: "OpenRouter",
                         label: row.label)
                         .frame(width: 160, alignment: .leading)
                     Text(row.requestedClaude)
                         .frame(width: 150, alignment: .leading)
                     Text(
                         trafficCurrency(
-                            row.actualBasetenCostUSD))
+                            row.actualOpenRouterCostUSD))
                         .monospacedDigit()
                         .frame(width: 110, alignment: .trailing)
                     Text(
@@ -757,7 +757,7 @@ private struct TrafficSavingsTable: View {
                 let row = visibleRows[index]
                 VStack(alignment: .leading, spacing: 9) {
                     TrafficProviderLabel(
-                        provider: "Baseten",
+                        provider: "OpenRouter",
                         label: row.label)
                         .font(.body.weight(.medium))
 
@@ -770,9 +770,9 @@ private struct TrafficSavingsTable: View {
                             label: "Requested Claude",
                             value: row.requestedClaude)
                         compactSavingsField(
-                            label: "Baseten actual",
+                            label: "OpenRouter actual",
                             value: trafficCurrency(
-                                row.actualBasetenCostUSD))
+                                row.actualOpenRouterCostUSD))
                         compactSavingsField(
                             label: "Native estimate",
                             value: trafficCurrency(
@@ -824,7 +824,7 @@ private struct TrafficSavingsTable: View {
             : savedPercent(row)
         return
             "\(row.label), requested Claude \(row.requestedClaude), "
-            + "Baseten actual \(trafficCurrency(row.actualBasetenCostUSD)), "
+            + "OpenRouter actual \(trafficCurrency(row.actualOpenRouterCostUSD)), "
             + "native estimate "
             + "\(trafficCurrency(row.estimatedNativeCostUSD)), "
             + "savings \(trafficCurrency(row.savedUSD)), saved \(saved)"
@@ -983,9 +983,9 @@ private struct TrafficProviderLabel: View {
     var body: some View {
         HStack(spacing: 7) {
             TrafficBrandMark(
-                brand: provider.caseInsensitiveCompare("Baseten")
+                brand: provider.caseInsensitiveCompare("OpenRouter")
                     == .orderedSame
-                    ? .baseten
+                    ? .openrouter
                     : .claude,
                 size: 14)
             Text(label)

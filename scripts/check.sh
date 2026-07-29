@@ -8,7 +8,7 @@
 #
 # Usage: scripts/check.sh [--offline]
 #   --offline  skip steps that need the network or the real credential
-#              store (whoami); build, vet, tests, and scratch boots still run.
+#              store; build, vet, tests, and scratch boots still run.
 #
 # Scratch ports default to: 28081, 28082, 28083, 28182, 28183, 28786,
 # 28787. Override individual ports with the OPENROUTER_SWITCH_CHECK_*_PORT variables
@@ -124,6 +124,10 @@ echo "ok ($(grep -cE '^ok' "$TMPDIR_CHECK/gotest.out") packages)"
 # SwiftPM and Clang caches.
 if [[ "$(uname -s)" == "Darwin" ]]; then
     step "swift build / test"
+    if [[ -z "${DEVELOPER_DIR:-}" &&
+          -d /Applications/Xcode.app/Contents/Developer ]]; then
+        export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+    fi
     SWIFT_HOME="$TMPDIR_CHECK/swift-home"
     SWIFT_BUILD="$TMPDIR_CHECK/swift-build"
     SWIFT_CLANG_CACHE="$TMPDIR_CHECK/clang-module-cache"
@@ -174,51 +178,80 @@ for port in $ADMIN_PORT $CLIENT_PORT $DOOR_PORT $DEAD_ROUTER_PORT \
 done
 echo "ok"
 
-# ------------------------------------------------------- smoke: whoami
-# Exercises the real credential store (keychain + auth.json) and a live
-# /v1/users/me round trip. --refresh forces the token-refresh round trip
-# deterministically. The refreshed token persists to the same store the
-# normal path writes; otherwise this step is read-only.
-step "smoke: whoami --refresh (real credential store)"
-AUTH_JSON="$HOME/Library/Application Support/baseten/auth.json"
+# ------------------------------------------ smoke: OpenRouter auth + catalog
+# Exercises credential precedence without printing the key, validates it
+# through the product CLI, then proves the authenticated account catalog is
+# reachable. The key is written only to a 0600 scratch header file.
+step "smoke: OpenRouter key status + account catalog"
 if [[ "$OFFLINE" == 1 ]]; then
     echo "skipped (--offline)"
-elif [[ ! -f "$AUTH_JSON" ]]; then
-    echo "skipped (no baseten auth.json on this machine)"
 else
-    ./bin/openrouter-switch whoami --refresh > "$TMPDIR_CHECK/whoami.out" 2>&1 \
-        || { cat "$TMPDIR_CHECK/whoami.out"; fail "whoami --refresh exited non-zero against the real credential store"; }
-    grep -qE 'Email|API key' "$TMPDIR_CHECK/whoami.out" \
-        || { cat "$TMPDIR_CHECK/whoami.out"; fail "whoami output missing identity"; }
-    echo "ok ($(head -1 "$TMPDIR_CHECK/whoami.out"))"
+    OPENROUTER_CHECK_KEY=""
+    if command -v security >/dev/null 2>&1; then
+        OPENROUTER_CHECK_STORED="$(
+            security find-generic-password \
+                -s openrouter-switch -a openrouter -w 2>/dev/null || true
+        )"
+        if [[ "$OPENROUTER_CHECK_STORED" == go-keyring-base64:* ]]; then
+            OPENROUTER_CHECK_KEY="$(
+                printf '%s' \
+                    "${OPENROUTER_CHECK_STORED#go-keyring-base64:}" \
+                    | /usr/bin/base64 -D 2>/dev/null || true
+            )"
+        else
+            OPENROUTER_CHECK_KEY="$OPENROUTER_CHECK_STORED"
+        fi
+        unset OPENROUTER_CHECK_STORED
+    fi
+    if [[ -z "$OPENROUTER_CHECK_KEY" ]]; then
+        OPENROUTER_CHECK_KEY="${OPENROUTER_API_KEY:-}"
+    fi
+    if [[ -z "$OPENROUTER_CHECK_KEY" ]]; then
+        echo "skipped (no OpenRouter key in Keychain or OPENROUTER_API_KEY)"
+    else
+        ./bin/openrouter-switch auth status > "$TMPDIR_CHECK/auth-status.out" 2>&1 \
+            || { sed -E 's/(sk-or-v1-[A-Za-z0-9_-]+|sk-or-[A-Za-z0-9_-]+)/[REDACTED]/g' "$TMPDIR_CHECK/auth-status.out"; fail "OpenRouter auth status"; }
+        HEADER_FILE="$TMPDIR_CHECK/openrouter.headers"
+        umask 077
+        printf 'Authorization: Bearer %s\n' "$OPENROUTER_CHECK_KEY" > "$HEADER_FILE"
+        curl --fail --silent --show-error --location \
+            -H "@$HEADER_FILE" \
+            -o "$TMPDIR_CHECK/models-user.json" \
+            https://openrouter.ai/api/v1/models/user \
+            || fail "OpenRouter account catalog"
+        grep -q '"data"' "$TMPDIR_CHECK/models-user.json" \
+            || fail "OpenRouter account catalog omitted data"
+        unset OPENROUTER_CHECK_KEY
+        echo "ok (masked auth status + authenticated account catalog)"
+    fi
 fi
 
 # --------------------------------------------- smoke: scratch gateway
 # Boots a throwaway gateway on scratch ports with a config that has an
-# unresolved ${VAR} and a baseten-routed client with no credential, then
+# unresolved ${VAR} and an OpenRouter-routed client with no credential, then
 # asserts healthz plus both preflight warnings. Isolated via env: its own
-# config, pidfile, telemetry, admin addr, and a nonexistent OAuth profile.
+# config, pidfile, telemetry, admin address, and disabled Keychain access.
 step "smoke: scratch gateway boot + preflight"
 cat > "$TMPDIR_CHECK/gateway.yaml" <<EOF
 global:
     routing_enabled: true
     auth:
-        baseten: \${OPENROUTER_SWITCH_CHECK_MISSING}
+        anthropic: \${OPENROUTER_SWITCH_CHECK_MISSING}
     telemetry_dir: $TMPDIR_CHECK/telemetry
 clients:
     - name: check-client
       enabled: true
       bind_addr: 127.0.0.1:$CLIENT_PORT
       protocol_shape: openai
-      default_model: zai-org/GLM-5.2
+      default_model: test/account-model
       fallback_route: openai
 EOF
 env OPENROUTER_SWITCH_CONFIG_PATH="$TMPDIR_CHECK/gateway.yaml" \
     OPENROUTER_SWITCH_ENV_FILE="$TMPDIR_CHECK/nonexistent.env" \
     OPENROUTER_SWITCH_ADMIN_ADDR="127.0.0.1:$ADMIN_PORT" \
     OPENROUTER_SWITCH_GATEWAY_PIDFILE="$TMPDIR_CHECK/gw.pid" \
-    BASETEN_API_KEY= \
-    OPENROUTER_SWITCH_OAUTH_PROFILE=openrouter-switch-check-nonexistent \
+    OPENROUTER_API_KEY= \
+    OPENROUTER_SWITCH_AUTH_NO_KEYRING=1 \
     ./bin/openrouter-switch gateway start --foreground --port "$ADMIN_PORT" \
     > "$TMPDIR_CHECK/gateway.log" 2>&1 &
 GW_PID=$!
@@ -233,7 +266,7 @@ done
 [[ -n "$HEALTH" ]] || { cat "$TMPDIR_CHECK/gateway.log"; fail "scratch gateway never became healthy on $ADMIN_PORT"; }
 grep -q 'references \${OPENROUTER_SWITCH_CHECK_MISSING}' "$TMPDIR_CHECK/gateway.log" \
     || { cat "$TMPDIR_CHECK/gateway.log"; fail "preflight missing unresolved-placeholder warning"; }
-grep -q 'no Baseten credential found' "$TMPDIR_CHECK/gateway.log" \
+grep -q 'no OpenRouter API key found' "$TMPDIR_CHECK/gateway.log" \
     || { cat "$TMPDIR_CHECK/gateway.log"; fail "preflight missing no-credential banner"; }
 kill "$GW_PID" 2>/dev/null || true
 wait "$GW_PID" 2>/dev/null || true
@@ -288,7 +321,7 @@ clients:
       enabled: true
       bind_addr: 127.0.0.1:$UPDOWN_CLIENT_PORT
       protocol_shape: anthropic
-      default_model: zai-org/GLM-5.2
+      default_model: test/account-model
 door:
     cooldown: 5s
     probe_interval: 1s
@@ -314,8 +347,8 @@ updown() {
         OPENROUTER_SWITCH_GATEWAY_LOG="$UP_DIR/router.log" \
         OPENROUTER_SWITCH_DOOR_LOG="$UP_DIR/door.log" \
         OPENROUTER_SWITCH_TELEMETRY_DIR="$UP_DIR/telemetry" \
-        OPENROUTER_SWITCH_OAUTH_PROFILE=openrouter-switch-check-nonexistent \
-        BASETEN_API_KEY= \
+        OPENROUTER_SWITCH_AUTH_NO_KEYRING=1 \
+        OPENROUTER_API_KEY= \
         ./bin/openrouter-switch "$@"
 }
 

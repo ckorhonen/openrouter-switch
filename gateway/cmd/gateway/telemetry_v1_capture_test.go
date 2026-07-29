@@ -62,8 +62,8 @@ const telemetryVariantPricingFixture = `{
       }
     }
   },
-  "baseten": {
-    "id": "baseten",
+  "openrouter": {
+    "id": "openrouter",
     "models": {
       "zai-org/GLM-5.2": {
         "id": "zai-org/GLM-5.2",
@@ -89,11 +89,11 @@ func telemetryVariantPricing(t *testing.T, capturedAt time.Time) *pricing.Pricin
 	); err != nil {
 		t.Fatal(err)
 	}
-	replaceTelemetryBasetenPricing(t, prices, capturedAt, 1.4)
+	replaceTelemetryOpenRouterPricing(t, prices, capturedAt, 1.4)
 	return prices
 }
 
-func replaceTelemetryBasetenPricing(
+func replaceTelemetryOpenRouterPricing(
 	t *testing.T,
 	prices *pricing.Pricing,
 	capturedAt time.Time,
@@ -114,9 +114,9 @@ func replaceTelemetryBasetenPricing(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := prices.ReplaceBasetenCatalog(
+	if err := prices.ReplaceOpenRouterCatalog(
 		body,
-		"baseten_v1_models",
+		"openrouter_models_user",
 		capturedAt,
 		"zai-org/GLM-5.2",
 	); err != nil {
@@ -134,7 +134,7 @@ func TestTelemetryV1CaptureRetainsRequestAndAttemptPrices(t *testing.T) {
 		prices.Capture(),
 		startedAt,
 		"claude-code",
-		"baseten",
+		"openrouter",
 		"anthropic",
 		"claude-opus-5[1m]",
 		profile,
@@ -146,12 +146,12 @@ func TestTelemetryV1CaptureRetainsRequestAndAttemptPrices(t *testing.T) {
 	attempt := captureTelemetryAttemptV1(
 		prices.Capture(),
 		startedAt.Add(time.Millisecond),
-		"baseten",
+		"openrouter",
 		"zai-org/GLM-5.2",
 	)
 
 	// A live replacement after both captures must not affect this event.
-	replaceTelemetryBasetenPricing(
+	replaceTelemetryOpenRouterPricing(
 		t,
 		prices,
 		startedAt.Add(time.Second),
@@ -163,7 +163,7 @@ func TestTelemetryV1CaptureRetainsRequestAndAttemptPrices(t *testing.T) {
 	providerModel := "zai-org/GLM-5.2"
 	stopReason := "end_turn"
 	trigger := "http_500"
-	subagentModel := "claude-baseten-glm-5-2"
+	subagentModel := "claude-openrouter-glm-5-2"
 	reportedSpeed := "fast"
 	compatibility := &telemetry.ResponsesCompatibilityV1{
 		Considered:       []string{"responses.additional_tools_input"},
@@ -207,7 +207,7 @@ func TestTelemetryV1CaptureRetainsRequestAndAttemptPrices(t *testing.T) {
 		t.Fatalf("native counterfactual = %+v, want 253000 nano-USD",
 			event.NativeCounterfactualCost)
 	}
-	if got := prices.Quote("baseten", "zai-org/GLM-5.2").Price.Prompt; got != 9 {
+	if got := prices.Quote("openrouter", "zai-org/GLM-5.2").Price.Prompt; got != 9 {
 		t.Fatalf("test did not replace live price: prompt = %v", got)
 	}
 	if event.TTFTMS == nil || *event.TTFTMS != 240 {
@@ -216,7 +216,7 @@ func TestTelemetryV1CaptureRetainsRequestAndAttemptPrices(t *testing.T) {
 	if event.RequestedModel != "claude-opus-5[1m]" ||
 		request.canonicalModel != "claude-opus-5" ||
 		event.RequestedModelFamily != "opus" ||
-		event.EffectiveProvider != "baseten" ||
+		event.EffectiveProvider != "openrouter" ||
 		event.ServedModel != "zai-org/GLM-5.2" {
 		t.Fatalf("model attribution = %+v", event)
 	}
@@ -241,7 +241,7 @@ func TestTelemetryV1CaptureRetainsRequestAndAttemptPrices(t *testing.T) {
 	compatibility.Applied[0] = "changed"
 	if *event.ProviderReportedModel != "zai-org/GLM-5.2" ||
 		*event.Fallback.Trigger != "http_500" ||
-		*event.SubagentModel != "claude-baseten-glm-5-2" ||
+		*event.SubagentModel != "claude-openrouter-glm-5-2" ||
 		event.ResponsesCompatibility == nil ||
 		event.ResponsesCompatibility.Considered[0] != "responses.additional_tools_input" ||
 		event.ResponsesCompatibility.Applied[0] != "responses.additional_tools_input" {
@@ -362,9 +362,9 @@ func TestTelemetryV1UnsupportedPricingModifiersRemainUnpriced(t *testing.T) {
 			servedModel:       "claude-opus-5",
 		},
 		{
-			name:              "unknown requested speed keeps Baseten actual priced",
+			name:              "unknown requested speed keeps OpenRouter actual priced",
 			body:              `{"model":"claude-opus-5","speed":"turbo"}`,
-			effectiveProvider: pricing.ProviderBaseten,
+			effectiveProvider: pricing.ProviderOpenRouter,
 			servedModel:       "zai-org/GLM-5.2",
 			wantActualPriced:  true,
 		},
@@ -383,7 +383,7 @@ func TestTelemetryV1UnsupportedPricingModifiersRemainUnpriced(t *testing.T) {
 					"cache_control":{"type":"ephemeral","ttl":"1h"}
 				}]}]
 			}`,
-			effectiveProvider: pricing.ProviderBaseten,
+			effectiveProvider: pricing.ProviderOpenRouter,
 			servedModel:       "zai-org/GLM-5.2",
 			wantActualPriced:  true,
 			wantNativePriced:  true,
@@ -414,9 +414,9 @@ func TestTelemetryV1UnsupportedPricingModifiersRemainUnpriced(t *testing.T) {
 			servedModel:       "claude-opus-5",
 		},
 		{
-			name:              "US inference geo keeps Baseten actual priced",
+			name:              "US inference geo keeps OpenRouter actual priced",
 			body:              `{"model":"claude-opus-5","inference_geo":"us"}`,
-			effectiveProvider: pricing.ProviderBaseten,
+			effectiveProvider: pricing.ProviderOpenRouter,
 			servedModel:       "zai-org/GLM-5.2",
 			wantActualPriced:  true,
 		},
@@ -478,7 +478,7 @@ func TestTelemetryV1UnsupportedPricingModifiersRemainUnpriced(t *testing.T) {
 					event.EffectiveSpeed,
 				)
 			}
-			if test.effectiveProvider == pricing.ProviderBaseten {
+			if test.effectiveProvider == pricing.ProviderOpenRouter {
 				if event.NativeCounterfactualCost == nil ||
 					event.NativeCounterfactualCost.Priced !=
 						test.wantNativePriced {
@@ -612,14 +612,14 @@ func TestTelemetryV1CapturePreservesUnknownAndReportedZeroUsage(t *testing.T) {
 		"model": {Prompt: 1},
 	})
 	request, err := captureTelemetryRequestV1(
-		prices.Capture(), startedAt, "claude-code", "baseten", "anthropic", "unknown",
+		prices.Capture(), startedAt, "claude-code", "openrouter", "anthropic", "unknown",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.eventID = "00112233445566778899aabbccddeeff"
 	attempt := captureTelemetryAttemptV1(
-		prices.Capture(), startedAt, "baseten", "model",
+		prices.Capture(), startedAt, "openrouter", "model",
 	)
 	status := 200
 	zero := int64(0)
@@ -765,23 +765,23 @@ func TestTelemetryV1MixedTTLCacheWriteCosts(t *testing.T) {
 		t.Fatalf("missing used one-hour rate became priced: %+v", got)
 	}
 
-	baseten := costSnapshotV1(
-		prices.Quote(pricing.ProviderBaseten, "zai-org/GLM-5.2"),
+	openrouter := costSnapshotV1(
+		prices.Quote(pricing.ProviderOpenRouter, "zai-org/GLM-5.2"),
 		capturedAt,
 		observed,
 		true,
 		true,
 	)
-	if !baseten.Priced || baseten.NanoUSD == nil ||
-		*baseten.NanoUSD != 35_500 {
-		t.Fatalf("combined Baseten cache-write cost = %+v, want 35500 nano-USD", baseten)
+	if !openrouter.Priced || openrouter.NanoUSD == nil ||
+		*openrouter.NanoUSD != 35_500 {
+		t.Fatalf("combined OpenRouter cache-write cost = %+v, want 35500 nano-USD", openrouter)
 	}
-	if baseten.RatesNanoUSDPerToken == nil ||
-		baseten.RatesNanoUSDPerToken.CacheWrite5mInput == nil ||
-		baseten.RatesNanoUSDPerToken.CacheWrite1hInput == nil ||
-		*baseten.RatesNanoUSDPerToken.CacheWrite5mInput !=
-			*baseten.RatesNanoUSDPerToken.CacheWrite1hInput {
-		t.Fatalf("Baseten combined cache-write rates = %+v", baseten)
+	if openrouter.RatesNanoUSDPerToken == nil ||
+		openrouter.RatesNanoUSDPerToken.CacheWrite5mInput == nil ||
+		openrouter.RatesNanoUSDPerToken.CacheWrite1hInput == nil ||
+		*openrouter.RatesNanoUSDPerToken.CacheWrite5mInput !=
+			*openrouter.RatesNanoUSDPerToken.CacheWrite1hInput {
+		t.Fatalf("OpenRouter combined cache-write rates = %+v", openrouter)
 	}
 }
 
@@ -833,7 +833,7 @@ func TestObservedGatewayUsageV1CacheBucketInference(t *testing.T) {
 	}
 }
 
-func TestUnknownOneHourSplitKeepsBasetenActualButUnpricesNativeCounterfactual(
+func TestUnknownOneHourSplitKeepsOpenRouterActualButUnpricesNativeCounterfactual(
 	t *testing.T,
 ) {
 	startedAt := time.Date(2026, time.July, 26, 13, 0, 0, 0, time.UTC)
@@ -848,7 +848,7 @@ func TestUnknownOneHourSplitKeepsBasetenActualButUnpricesNativeCounterfactual(
 		prices.Capture(),
 		startedAt,
 		"claude-code",
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		pricing.ProviderAnthropic,
 		profile.RawModel,
 		profile,
@@ -860,7 +860,7 @@ func TestUnknownOneHourSplitKeepsBasetenActualButUnpricesNativeCounterfactual(
 	attempt := captureTelemetryAttemptV1(
 		prices.Capture(),
 		startedAt,
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		"zai-org/GLM-5.2",
 	)
 	status := http.StatusOK
@@ -880,7 +880,7 @@ func TestUnknownOneHourSplitKeepsBasetenActualButUnpricesNativeCounterfactual(
 		t.Fatal(err)
 	}
 	if !event.ActualCost.Priced || event.ActualCost.NanoUSD == nil {
-		t.Fatalf("Baseten actual cost = %+v", event.ActualCost)
+		t.Fatalf("OpenRouter actual cost = %+v", event.ActualCost)
 	}
 	if event.NativeCounterfactualCost == nil ||
 		event.NativeCounterfactualCost.Priced ||
@@ -936,13 +936,13 @@ func TestTelemetryV1CostOverflowBecomesUnpriced(t *testing.T) {
 func TestTelemetryV1CaptureJSONNulls(t *testing.T) {
 	startedAt := time.Date(2026, time.July, 25, 20, 0, 0, 0, time.UTC)
 	request, err := captureTelemetryRequestV1(
-		nil, startedAt, "claude-code", "baseten", "anthropic", "unknown",
+		nil, startedAt, "claude-code", "openrouter", "anthropic", "unknown",
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.eventID = "00112233445566778899aabbccddeeff"
-	attempt := captureTelemetryAttemptV1(nil, startedAt, "baseten", "unknown")
+	attempt := captureTelemetryAttemptV1(nil, startedAt, "openrouter", "unknown")
 	event, err := request.event(attempt, telemetryCompletionV1{
 		completedAt: startedAt.Add(time.Second),
 	})

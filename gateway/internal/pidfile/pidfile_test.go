@@ -74,14 +74,14 @@ func TestConfigStatePathNextToPidfile(t *testing.T) {
 
 func TestConfigStateRoundTrip(t *testing.T) {
 	pf := filepath.Join(t.TempDir(), "nested", "gw.pid")
-	if err := WriteConfigState(pf, "/tmp/baseten-qa/gateway.yaml"); err != nil {
+	if err := WriteConfigState(pf, "/tmp/openrouter-qa/gateway.yaml"); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ReadConfigState(pf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "/tmp/baseten-qa/gateway.yaml" {
+	if got != "/tmp/openrouter-qa/gateway.yaml" {
 		t.Fatalf("got %q", got)
 	}
 }

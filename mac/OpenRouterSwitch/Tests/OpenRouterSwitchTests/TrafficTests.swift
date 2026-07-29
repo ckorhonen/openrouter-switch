@@ -120,10 +120,10 @@ final class TrafficTests: XCTestCase {
         XCTAssertEqual(snapshot.coverage.requestRows, 1_184)
         XCTAssertTrue(snapshot.coverage.complete)
         XCTAssertEqual(snapshot.cost.summary.actualClaudeCostUSD, 172.4)
-        XCTAssertEqual(snapshot.cost.summary.actualBasetenCostUSD, 143.5)
+        XCTAssertEqual(snapshot.cost.summary.actualOpenRouterCostUSD, 143.5)
         XCTAssertEqual(snapshot.cost.summary.savedUSD, 595.1)
         XCTAssertEqual(snapshot.cost.providers.map(\.provider), [
-            "Claude", "Baseten",
+            "Claude", "OpenRouter",
         ])
         XCTAssertEqual(snapshot.cost.models.map(\.label), [
             "Fable", "Opus", "Sonnet", "Haiku", "GLM 5.2", "Kimi K3",
@@ -146,7 +146,7 @@ final class TrafficTests: XCTestCase {
                 #"""
                 [
                   {
-                    "provider": "Baseten",
+                    "provider": "OpenRouter",
                     "model_id": "org-a/shared",
                     "display_name": "Shared name",
                     "model": "ignored unknown label",
@@ -154,14 +154,14 @@ final class TrafficTests: XCTestCase {
                     "tokens": 2
                   },
                   {
-                    "provider": "Baseten",
+                    "provider": "OpenRouter",
                     "model_id": "org-b/shared",
                     "display_name": "Shared name",
                     "requests": 1,
                     "tokens": 2
                   },
                   {
-                    "provider": "Baseten",
+                    "provider": "OpenRouter",
                     "model_id": "moonshotai/Kimi-K2.7-Code",
                     "requests": 1,
                     "tokens": 2
@@ -184,11 +184,11 @@ final class TrafficTests: XCTestCase {
             from: Data(
                 #"""
                 {
-                  "by_baseten_model": [
+                  "by_openrouter_model": [
                     {
                       "model_id": "zai-org/GLM-5.2",
                       "display_name": "GLM 5.2",
-                      "actual_baseten_cost_usd": 1,
+                      "actual_openrouter_cost_usd": 1,
                       "estimated_native_cost_usd": 2,
                       "saved_usd": 1,
                       "saved_percent": 50
@@ -196,10 +196,10 @@ final class TrafficTests: XCTestCase {
                   ],
                   "mappings": [
                     {
-                      "baseten_model_id": "zai-org/GLM-5.2",
-                      "baseten_display_name": "GLM 5.2",
+                      "openrouter_model_id": "zai-org/GLM-5.2",
+                      "openrouter_display_name": "GLM 5.2",
                       "requested_claude_family": "Opus",
-                      "actual_baseten_cost_usd": 1,
+                      "actual_openrouter_cost_usd": 1,
                       "estimated_native_cost_usd": 2
                     }
                   ]
@@ -207,9 +207,9 @@ final class TrafficTests: XCTestCase {
                 """#.utf8))
 
         XCTAssertEqual(
-            savings.byBasetenModel[0].id,
+            savings.byOpenRouterModel[0].id,
             "zai-org/GLM-5.2")
-        XCTAssertEqual(savings.byBasetenModel[0].label, "GLM 5.2")
+        XCTAssertEqual(savings.byOpenRouterModel[0].label, "GLM 5.2")
         XCTAssertEqual(
             savings.mappings[0].id,
             "zai-org/GLM-5.2:Opus")
@@ -220,7 +220,7 @@ final class TrafficTests: XCTestCase {
             from: Data(
                 #"""
                 {
-                  "provider": "Baseten",
+                  "provider": "OpenRouter",
                   "model_id": "moonshotai/Kimi-K3",
                   "display_name": "Kimi K3",
                   "requests": 1,
@@ -231,7 +231,7 @@ final class TrafficTests: XCTestCase {
                   "median_output_tokens_per_second": 50
                 }
                 """#.utf8))
-        XCTAssertEqual(performance.id, "Baseten:moonshotai/Kimi-K3")
+        XCTAssertEqual(performance.id, "OpenRouter:moonshotai/Kimi-K3")
         XCTAssertEqual(performance.label, "Kimi K3")
     }
 
@@ -300,33 +300,33 @@ final class TrafficTests: XCTestCase {
             snapshot.performance.providers.first {
                 $0.provider == "Claude"
             })
-        let baseten = try XCTUnwrap(
+        let openrouter = try XCTUnwrap(
             snapshot.performance.providers.first {
-                $0.provider == "Baseten"
+                $0.provider == "OpenRouter"
             })
 
         XCTAssertEqual(
             trafficPerformanceCardContents(
                 claude: claude,
-                baseten: baseten),
+                openrouter: openrouter),
             [
                 TrafficPerformanceCardContent(
-                    title: "Baseten median TTFT",
+                    title: "OpenRouter median TTFT",
                     value: "245 ms",
                     detail: "Claude 610 ms · 2.5× faster",
-                    brand: .baseten,
+                    brand: .openrouter,
                     detailBrand: .claude),
                 TrafficPerformanceCardContent(
-                    title: "Baseten median output speed",
+                    title: "OpenRouter median output speed",
                     value: "138 tok/s",
                     detail: "Claude 54 tok/s · 2.6× faster",
-                    brand: .baseten,
+                    brand: .openrouter,
                     detailBrand: .claude),
                 TrafficPerformanceCardContent(
-                    title: "Baseten token volume",
+                    title: "OpenRouter token volume",
                     value: "96.3M",
                     detail: "Claude 18.4M tokens",
-                    brand: .baseten,
+                    brand: .openrouter,
                     detailBrand: .claude),
             ])
     }
@@ -334,28 +334,28 @@ final class TrafficTests: XCTestCase {
     func testPerformanceComparisonOmitsUnsafeRatios() {
         XCTAssertNil(
             trafficPerformanceSpeedComparison(
-                baseten: nil,
+                openrouter: nil,
                 claude: 10,
                 lowerIsBetter: true))
         XCTAssertNil(
             trafficPerformanceSpeedComparison(
-                baseten: 0,
+                openrouter: 0,
                 claude: 10,
                 lowerIsBetter: true))
         XCTAssertNil(
             trafficPerformanceSpeedComparison(
-                baseten: 10,
+                openrouter: 10,
                 claude: 0,
                 lowerIsBetter: false))
         XCTAssertNil(
             trafficPerformanceSpeedComparison(
-                baseten: .infinity,
+                openrouter: .infinity,
                 claude: 10,
                 lowerIsBetter: false))
 
         let cards = trafficPerformanceCardContents(
             claude: nil,
-            baseten: nil)
+            openrouter: nil)
         XCTAssertEqual(cards[0].detail, "Claude No data")
         XCTAssertEqual(cards[1].detail, "Claude No data")
     }
@@ -459,13 +459,13 @@ final class TrafficTests: XCTestCase {
         let group = TrafficSavingsChartGroup(
             id: "model",
             label: "Model",
-            actualBasetenCostUSD: 12,
+            actualOpenRouterCostUSD: 12,
             estimatedNativeCostUSD: 9)
         XCTAssertEqual(group.estimatedAdditionalClaudeCostUSD, 0)
         XCTAssertTrue(group.hasNegativeSavings)
 
         let fixtureGroup = try XCTUnwrap(
-            approvedFixture().cost.savings.byBasetenModel.first)
+            approvedFixture().cost.savings.byOpenRouterModel.first)
         XCTAssertEqual(
             fixtureGroup.estimatedAdditionalClaudeCostUSD,
             457.7,
@@ -474,13 +474,13 @@ final class TrafficTests: XCTestCase {
             TrafficSavingsChartGroup(
                 id: fixtureGroup.id,
                 label: fixtureGroup.label,
-                actualBasetenCostUSD: fixtureGroup.actualBasetenCostUSD,
+                actualOpenRouterCostUSD: fixtureGroup.actualOpenRouterCostUSD,
                 estimatedNativeCostUSD: fixtureGroup.estimatedNativeCostUSD)
                 .hasNegativeSavings)
         var summary = try approvedFixture().cost.summary
-        summary.actualBasetenCostUSD = 999
+        summary.actualOpenRouterCostUSD = 999
         XCTAssertEqual(
-            trafficSavingsEligibleBasetenCost(summary),
+            trafficSavingsEligibleOpenRouterCost(summary),
             143.5,
             accuracy: 0.0001)
     }

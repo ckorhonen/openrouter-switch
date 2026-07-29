@@ -41,14 +41,14 @@ import (
 )
 
 const (
-	DefaultPort         = 45273
-	DefaultBasetenURL   = "https://inference.baseten.co"
-	DefaultAnthropicURL = "https://api.anthropic.com"
-	DefaultOpenAIURL    = "https://api.openai.com"
-	DefaultAdminAddr    = "127.0.0.1:45273"
+	DefaultPort          = 45273
+	DefaultOpenRouterURL = auth.DefaultBaseURL
+	DefaultAnthropicURL  = "https://api.anthropic.com"
+	DefaultOpenAIURL     = "https://api.openai.com"
+	DefaultAdminAddr     = "127.0.0.1:45273"
 	// CodexCompatibilityModel is emitted by the managed Codex profile. It
 	// deliberately remains unknown to Codex so the CLI keeps the reduced
-	// request shape validated against Baseten. It is a routing sentinel, not
+	// request shape validated against OpenRouter. It is a routing sentinel, not
 	// an upstream model: global routing On resolves it through default_model,
 	// and it is never sent to a native OpenAI fallback.
 	CodexCompatibilityModel = "openrouter-switch-compat-v1"
@@ -64,13 +64,14 @@ type Config struct {
 	TelemetryEnabled       *bool
 	TelemetryRetentionDays int
 	PidFile                string
-	BasetenURL             string
+	OpenRouterURL          string
 	AnthropicURL           string
 	OpenAIURL              string
-	BasetenKey             string
-	OAuthProfile           string
-	OAuthHost              string
-	APIKeyFallback         bool
+	OpenRouterKey          string
+	CredentialSource       auth.Source
+	CredentialFingerprint  string
+	CredentialError        error
+	CredentialResolver     func() (string, auth.Source, error)
 	AdminAddr              string
 	ConfigPath             string
 }
@@ -95,26 +96,21 @@ func homeJoin(parts ...string) string {
 func LoadConfig() Config {
 	loadDotEnv()
 	pf := pidfile.Path()
-	oauthProfile := os.Getenv("OPENROUTER_SWITCH_OAUTH_PROFILE")
-	oauthHost := auth.DefaultHost()
-	apiKeyFallback := false
-	switch strings.ToLower(os.Getenv("OPENROUTER_SWITCH_API_KEY_FALLBACK")) {
-	case "1", "true", "yes":
-		apiKeyFallback = true
-	}
+	apiKey, credentialSource, credentialErr := auth.ResolveDefaultAPIKey()
 	telemetryEnabled := true
 	return Config{
 		TelemetryDir:           config.DefaultTelemetryDir(),
 		TelemetryEnabled:       &telemetryEnabled,
 		TelemetryRetentionDays: config.DefaultTelemetryRetentionDays,
 		PidFile:                pf,
-		BasetenURL:             env("BASETEN_BASE_URL", DefaultBasetenURL),
+		OpenRouterURL:          env("OPENROUTER_BASE_URL", DefaultOpenRouterURL),
 		AnthropicURL:           env("ANTHROPIC_API_BASE_URL", DefaultAnthropicURL),
 		OpenAIURL:              env("OPENAI_BASE_URL", DefaultOpenAIURL),
-		BasetenKey:             os.Getenv("BASETEN_API_KEY"),
-		OAuthProfile:           oauthProfile,
-		OAuthHost:              oauthHost,
-		APIKeyFallback:         apiKeyFallback,
+		OpenRouterKey:          apiKey,
+		CredentialSource:       credentialSource,
+		CredentialFingerprint:  auth.CredentialFingerprint(apiKey),
+		CredentialError:        credentialErr,
+		CredentialResolver:     auth.ResolveDefaultAPIKey,
 		AdminAddr:              env("OPENROUTER_SWITCH_ADMIN_ADDR", DefaultAdminAddr),
 		ConfigPath:             env("OPENROUTER_SWITCH_CONFIG_PATH", config.DefaultPath()),
 	}
@@ -153,20 +149,20 @@ type resolvedClientConfig struct {
 	Name          string
 	BindAddr      string
 	ProtocolShape string // anthropic | openai
-	Route         string // baseten | anthropic | openai | monitor
+	Route         string // openrouter | anthropic | openai | monitor
 	// GlobalRoutingEnabled carries the sole config routing gate into the
 	// immutable live resolver. Route is the derived effective base route:
-	// Baseten while On, and the protocol's native provider while Off.
+	// OpenRouter while On, and the protocol's native provider while Off.
 	// HasGlobalRoutingGate is true for every client resolved from the
 	// clean gateway.yaml schema. Direct in-process embedders may provide
 	// an already-resolved Route without a backing config gate.
 	HasGlobalRoutingGate bool
 	GlobalRoutingEnabled bool
 	DefaultModel         string
-	ModelAliases         map[string]string // anthropic shape only; alias id -> baseten slug
+	ModelAliases         map[string]string // anthropic shape only; alias id -> openrouter slug
 	// SubagentModel is the rewrite target for sidechain (subagent)
 	// requests carrying x-claude-code-agent-id: a gateway alias, a raw
-	// Baseten slug, or a native claude-*/anthropic-* id. Empty = no
+	// OpenRouter slug, or a native claude-*/anthropic-* id. Empty = no
 	// rewrite. Anthropic shape only. See the subagent-routing contract.
 	SubagentModel string
 	// SubagentRouting is the live toggle: "on" or "off". Absent means on
@@ -175,7 +171,7 @@ type resolvedClientConfig struct {
 	// ModelRoutes pins per-family routing for an anthropic-shape client,
 	// overriding the switch for matched traffic. Keys are the bare family
 	// words fable, opus, sonnet, and haiku; values are "native", a gateway
-	// alias (must exist in model_aliases), or a raw Baseten slug (contains
+	// alias (must exist in model_aliases), or a raw OpenRouter slug (contains
 	// "/"). Empty map means no pins. See config/schema.md.
 	ModelRoutes map[string]string
 	// ModelOptions is the immutable, client-scoped provider/model reasoning
@@ -183,9 +179,9 @@ type resolvedClientConfig struct {
 	ModelOptions    config.ModelOptions
 	SanitizeHistory bool
 	FallbackRoute   string // "" = no fallback
-	UpstreamShape   string // baseten route only; "" = listener shape
+	UpstreamShape   string // openrouter route only; "" = listener shape
 	// ResponsesStripToolTypes lists tools[] entry types stripped from
-	// /v1/responses bodies on baseten-route attempts. Openai shape
+	// /v1/responses bodies on openrouter-route attempts. Openai shape
 	// only; nil/empty = no strip. Config order from gateway.yaml is
 	// preserved. See the Responses compatibility contract.
 	ResponsesStripToolTypes []string
@@ -468,7 +464,7 @@ type Gateway struct {
 	cfg     Config
 	pricing *pricing.Pricing
 	client  *http.Client
-	// catalogRefresh owns the asynchronous Baseten /v1/models refresh
+	// catalogRefresh owns the asynchronous OpenRouter /v1/models refresh
 	// lifecycle. Pricing snapshots themselves live in g.pricing.
 	catalogRefresh       *catalogRefreshManager
 	publicCatalogRefresh *publicCatalogRefreshManager
@@ -510,54 +506,16 @@ type Gateway struct {
 	routingMu sync.RWMutex
 	reloadMu  sync.Mutex
 
-	// Shared auth state across all baseten-routed listeners.
-	oauthClient     *http.Client
-	oauthProfileErr error
-	// Credential-health state (all guarded by authMu). signed_in has
-	// always meant "a credential exists in the store"; these fields
-	// track whether that credential actually WORKS, fed by
-	// noteAuthRefresh on every token-refresh round trip
-	// (auth.HTTPClientWithNotify). authDead is set when the token
-	// endpoint rejects the grant (e.g. invalid_grant: refresh token
-	// expired, revoked, or lost a rotation race) and cleared on a
-	// successful refresh or when refreshAuth sees a different stored
-	// refresh token than the one that died (re-login detection, by
-	// fingerprint; the token value itself is never kept here).
-	authLastOKAt  time.Time
-	authLastErr   string
-	authLastErrAt time.Time
-	authDead      bool
-	// authCredFP fingerprints the refresh token of the CURRENT client
-	// lineage: set from the same store read that built the client
-	// (refreshAuth) and advanced on every successful refresh, because
-	// rotation moves the lineage's token without a client rebuild and a
-	// later death must be recorded against the token that actually died.
-	authCredFP string
-	authDeadFP string // authCredFP at the moment the credential went dead
-	// authGen counts client builds. Refresh outcomes carry the
-	// generation they were built under; a refresh in flight across a
-	// refreshAuth swap must not mark the new credential dead (or heal
-	// it) when it completes.
-	authGen int
-	// authTick performs one token acquisition through the same
-	// oauth2.ReuseTokenSource oauthClient uses (nil when signed out or
-	// on an API-key profile). Guarded by authMu like oauthClient, but
-	// only ever CALLED outside it: a tick can be a token-endpoint round
-	// trip and its outcome re-enters noteAuthRefresh.
-	authTick func() error
-	authMu   sync.Mutex
-	// Tick goroutine lifecycle. authTickStop is closed by Shutdown:
-	// callers may Shutdown without cancelling Serve's ctx, and wg.Wait
-	// would otherwise block on the tick goroutine until the deadline.
-	// authTickDone closes when the goroutine exits; tests assert on it
-	// to prove shutdown does not leak the goroutine. authTickKick
-	// (1-buffered) re-arms the loop's timer when the credential flips
-	// dead mid-arm, so the tight dead cadence engages immediately
-	// instead of after the remainder of a healthy-interval wait.
-	authTickStop     chan struct{}
-	authTickStopOnce sync.Once
-	authTickDone     chan struct{}
-	authTickKick     chan struct{}
+	// Shared static-key auth state across all OpenRouter-routed listeners.
+	authLastOKAt       time.Time
+	authLastErr        string
+	authLastErrAt      time.Time
+	authStatus         string
+	authSource         auth.Source
+	authFingerprint    string
+	authMetadata       auth.KeyMetadata
+	catalogFingerprint string
+	authMu             sync.Mutex
 
 	emailMu        sync.Mutex
 	emailCached    string
@@ -629,9 +587,6 @@ func newGatewayWithSnapshot(
 		adminListener:        adminListener,
 		clients:              map[string]*clientListener{},
 		groups:               map[string]*listenerGroup{},
-		authTickStop:         make(chan struct{}),
-		authTickDone:         make(chan struct{}),
-		authTickKick:         make(chan struct{}, 1),
 		catalogRefresh:       newCatalogRefreshManager(),
 		publicCatalogRefresh: newPublicCatalogRefreshManager(),
 		routerBootID:         newRouterBootID(),
@@ -803,240 +758,165 @@ func (g *Gateway) refreshAuth() {
 	cfg := g.runtimeConfig()
 	g.authMu.Lock()
 	defer g.authMu.Unlock()
-	// Each build is a new lineage: outcomes from clients built before
-	// this swap are stale and noteAuthRefresh drops them by generation.
-	g.authGen++
-	gen := g.authGen
-	notify := func(fp string, err error) { g.noteAuthRefresh(gen, fp, err) }
-	client, tick, credFP, err := auth.HTTPClientWithNotify(context.Background(), cfg.OAuthProfile, cfg.OAuthHost, notify)
+	g.authSource = cfg.CredentialSource
+	g.authFingerprint = configCredentialFingerprint(cfg)
+	g.authMetadata = auth.KeyMetadata{}
+	g.authLastErr = ""
+	g.authLastErrAt = time.Time{}
 	switch {
-	case err == nil:
-		g.oauthClient = client
-		g.authTick = tick
-		g.oauthProfileErr = nil
-	case errors.Is(err, auth.ErrNotSignedIn):
-		g.oauthClient = nil
-		g.authTick = nil
-		g.oauthProfileErr = err
-	case errors.Is(err, auth.ErrAPIKeyProfile):
-		// The baseten CLI profile authenticates with an API key, not
-		// OAuth: a valid state, served via the API-key fallback path
-		// when configured, so no failure log.
-		g.oauthClient = nil
-		g.authTick = nil
-		g.oauthProfileErr = err
+	case cfg.CredentialError == nil && cfg.OpenRouterKey != "":
+		g.authStatus = "configured"
+	case cfg.OpenRouterKey == "" &&
+		(cfg.CredentialError == nil ||
+			errors.Is(cfg.CredentialError, auth.ErrNoAPIKey)):
+		g.authStatus = "missing"
+	case errors.Is(cfg.CredentialError, auth.ErrInvalidAPIKey):
+		g.authStatus = "invalid"
+		g.authLastErr = cfg.CredentialError.Error()
+		g.authLastErrAt = time.Now()
 	default:
-		g.oauthClient = nil
-		g.authTick = nil
-		g.oauthProfileErr = err
-		fmt.Fprintf(os.Stderr, "[gateway] auth refresh failed: %v\n", err)
+		g.authStatus = "error"
+		if cfg.CredentialError != nil {
+			g.authLastErr = cfg.CredentialError.Error()
+			g.authLastErrAt = time.Now()
+		}
 	}
-	// Re-login detection: if the credential was marked dead but the
-	// store now holds a DIFFERENT refresh token than the one that died
-	// (the user ran 'baseten auth login' again), clear the dead state so
-	// health recovers on reload instead of lingering until the next
-	// successful refresh (which could be up to an access-token lifetime
-	// away). Compared by fingerprint; token values are never retained.
-	// credFP comes from the SAME store read that built the client: a
-	// login landing between two separate reads would pin the fingerprint
-	// to a credential this client was never built from, permanently
-	// hiding the re-login from the dead-tick store watch.
-	g.authCredFP = credFP
-	if g.authDead && credFP != g.authDeadFP {
-		g.authDead = false
-		g.authDeadFP = ""
-		g.authLastErr = ""
-		g.authLastErrAt = time.Time{}
-	}
-	fmt.Fprintf(os.Stderr, "[gateway] auth: profile=%s signed_in=%t health=%s fallback=%t\n",
-		cfg.OAuthProfile, g.oauthClient != nil, g.authHealthLocked(), cfg.APIKeyFallback)
+	fmt.Fprintf(
+		os.Stderr,
+		"[gateway] auth: source=%s status=%s\n",
+		g.authSource,
+		g.authStatus,
+	)
 	g.kickCatalogRefresh()
 }
 
-// noteAuthRefresh records the outcome of one OAuth token-refresh round
-// trip (auth.CachingTokenSource.Notify). A token-endpoint rejection
-// (invalid_grant and friends) marks the credential dead: the store still
-// HAS a credential (signed_in stays true) but every baseten-routed
-// request will fail until the user re-authenticates. Transient errors
-// (network, timeout) record last_error without marking dead. gen is the
-// client generation the outcome was built under: a refresh in flight
-// across a refreshAuth swap completes against the OLD credential, and
-// letting it mark the new lineage dead (with the new fingerprint) would
-// disarm both the dead-tick store watch and the re-login clear right
-// after a successful reauth. fp identifies the refresh token the outcome
-// belongs to (see auth.CachingTokenSource); on success it advances
-// authCredFP so rotation keeps the lineage fingerprint truthful. Runs on
-// request goroutines; must stay fast.
-func (g *Gateway) noteAuthRefresh(gen int, fp string, err error) {
-	g.authMu.Lock()
-	defer g.authMu.Unlock()
-	if gen != g.authGen {
-		return
+func configCredentialFingerprint(cfg Config) string {
+	if cfg.CredentialFingerprint != "" {
+		return cfg.CredentialFingerprint
 	}
+	return auth.CredentialFingerprint(cfg.OpenRouterKey)
+}
+
+func (g *Gateway) reloadCredentials() {
+	cfg := g.runtimeConfig()
+	key, source, err := resolveConfigCredential(cfg)
+	g.cfgMu.Lock()
+	g.cfg.OpenRouterKey = key
+	g.cfg.CredentialSource = source
+	g.cfg.CredentialFingerprint = auth.CredentialFingerprint(key)
+	g.cfg.CredentialError = err
+	g.cfgMu.Unlock()
+	g.refreshAuth()
+}
+
+var resolveDefaultAPIKey = auth.ResolveDefaultAPIKey
+
+func resolveConfigCredential(cfg Config) (string, auth.Source, error) {
+	if cfg.CredentialResolver != nil {
+		return cfg.CredentialResolver()
+	}
+	return resolveDefaultAPIKey()
+}
+
+func (g *Gateway) validateAuth(ctx context.Context) error {
+	cfg := g.runtimeConfig()
+	return g.validateAuthForConfig(ctx, cfg)
+}
+
+func (g *Gateway) validateAuthForConfig(
+	ctx context.Context,
+	cfg Config,
+) error {
+	if cfg.OpenRouterKey == "" {
+		return auth.ErrNoAPIKey
+	}
+	expectedFingerprint := configCredentialFingerprint(cfg)
+	metadata, err := auth.ValidateAPIKey(
+		ctx,
+		g.client,
+		cfg.OpenRouterURL,
+		cfg.OpenRouterKey,
+	)
 	now := time.Now()
-	if err == nil {
+	if err != nil {
+		g.updateAuthForCredential(expectedFingerprint, func() {
+			switch {
+			case auth.IsValidationStatus(err, http.StatusUnauthorized):
+				g.authStatus = "invalid"
+			case auth.IsValidationStatus(err, http.StatusForbidden):
+				g.authStatus = "forbidden"
+			default:
+				g.authStatus = "error"
+			}
+			g.authLastErr = err.Error()
+			g.authLastErrAt = now
+		})
+		return err
+	}
+	g.updateAuthForCredential(expectedFingerprint, func() {
+		g.authStatus = "valid"
+		g.authMetadata = metadata
 		g.authLastOKAt = now
 		g.authLastErr = ""
 		g.authLastErrAt = time.Time{}
-		g.authDead = false
-		g.authDeadFP = ""
-		if fp != "" {
-			g.authCredFP = fp
-		}
-		return
-	}
-	g.authLastErr = err.Error()
-	g.authLastErrAt = now
-	if code := auth.RefreshErrorCode(err); code != "" {
-		if !g.authDead {
-			fmt.Fprintf(os.Stderr,
-				"[gateway] auth: token refresh rejected (%s); the stored Baseten credential is dead and baseten-routed requests will fail. Fix: 'baseten auth login', then SIGHUP the gateway (or 'openrouter-switch up')\n",
-				code)
-			// Nudge the tick loop onto the dead cadence now: the timer
-			// may be mid-way through a healthy-interval arm, and the
-			// store watch must engage within authTickDeadInterval (the
-			// ~30s self-heal auth login promises).
-			select {
-			case g.authTickKick <- struct{}{}:
-			default:
-			}
-		}
-		g.authDead = true
-		g.authDeadFP = fp
-		if fp == "" {
-			g.authDeadFP = g.authCredFP
-		}
-	}
+	})
+	return nil
 }
 
-// Background auth-tick cadences. Package vars so tests can shrink them.
-// The normal tick rides oauth2.ReuseTokenSource, so real refresh traffic
-// stays at roughly one token-endpoint round trip per access-token lifetime
-// (~1h) regardless of the tick rate. The dead cadence only re-reads the
-// local credential store (no network), so it can run much tighter to pick
-// up a re-login quickly.
-var (
-	authTickInterval     = 5 * time.Minute
-	authTickDeadInterval = 30 * time.Second
-)
-
-// runAuthTick keeps credential health truthful on an idle gateway and
-// self-heals after a re-login without SIGHUP (the credential-refresh contract,
-// "Gateway self-heal"). Without it, a credential that dies overnight is
-// only discovered by the next harness request. Exits on Serve ctx cancel
-// or Shutdown (whichever first); authTickDone closes on exit.
-func (g *Gateway) runAuthTick(ctx context.Context) {
-	defer g.wg.Done()
-	defer close(g.authTickDone)
-	timer := time.NewTimer(g.authTickPeriod())
-	defer timer.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-g.authTickStop:
-			return
-		case <-g.authTickKick:
-			// A request-path refresh failure flipped the credential dead
-			// mid-arm; re-arm on the dead cadence instead of waiting out
-			// the remainder of a healthy-interval arm (the failure that
-			// kicked was itself a refresh outcome, so no tick here).
-			timer.Reset(g.authTickPeriod())
-			continue
-		case <-timer.C:
-		}
-		g.authTickOnce()
-		timer.Reset(g.authTickPeriod())
+func (g *Gateway) updateAuthForCredential(
+	expectedFingerprint string,
+	update func(),
+) bool {
+	if expectedFingerprint == "" {
+		return false
 	}
-}
-
-// authTickPeriod picks the wait before the next tick: tight while the
-// credential is dead or absent (the tick is then a local store read and
-// recovery latency is what the user feels after a login), relaxed
-// otherwise.
-func (g *Gateway) authTickPeriod() time.Duration {
+	g.cfgMu.RLock()
+	defer g.cfgMu.RUnlock()
+	if configCredentialFingerprint(g.cfg) != expectedFingerprint {
+		return false
+	}
 	g.authMu.Lock()
 	defer g.authMu.Unlock()
-	if g.authDead || errors.Is(g.oauthProfileErr, auth.ErrNotSignedIn) {
-		return authTickDeadInterval
-	}
-	return authTickInterval
+	update()
+	return true
 }
 
-// authTickOnce performs one background tick. State is snapshotted under
-// authMu and acted on outside it: the healthy-path tick can hit the token
-// endpoint (and re-enters noteAuthRefresh), and the self-heal path calls
-// refreshAuth, which takes authMu itself.
-func (g *Gateway) authTickOnce() {
-	cfg := g.runtimeConfig()
+func (g *Gateway) markAuthInvalid(expectedFingerprint string) {
+	g.updateAuthForCredential(expectedFingerprint, func() {
+		g.authStatus = "invalid"
+		g.authLastErr = "OpenRouter rejected the API key"
+		g.authLastErrAt = time.Now()
+	})
+}
+
+func (g *Gateway) markAuthForbidden(expectedFingerprint string) {
+	g.updateAuthForCredential(expectedFingerprint, func() {
+		g.authStatus = "forbidden"
+		g.authLastErr = "OpenRouter denied access for the active API key"
+		g.authLastErrAt = time.Now()
+	})
+}
+
+func (g *Gateway) catalogMatchesCredential() bool {
 	g.authMu.Lock()
-	dead := g.authDead
-	deadFP := g.authDeadFP
-	tick := g.authTick
-	profile := cfg.OAuthProfile
-	signedOut := errors.Is(g.oauthProfileErr, auth.ErrNotSignedIn)
-	g.authMu.Unlock()
-	if dead {
-		// A dead credential never comes back on its own; replaying the
-		// refresh would only burn token-endpoint calls. Watch the store
-		// (local read, no network) for a refresh token that differs from
-		// the one that died: that is a re-login, so rebuild the client
-		// through the same path SIGHUP uses.
-		tok, _, err := auth.Load(profile)
-		if err != nil || tok == nil {
-			return
-		}
-		if auth.CredFingerprint(tok.RefreshToken) == deadFP {
-			return
-		}
-		fmt.Fprintf(os.Stderr, "[gateway] auth: stored credential changed after refresh failure; reloading credential (re-login detected, no SIGHUP needed)\n")
-		g.refreshAuth()
-		return
-	}
-	if signedOut {
-		// A FIRST login is otherwise invisible: with no credential at
-		// boot there is no client and no tick to notice one appearing,
-		// and auth login's SIGHUP fallback promises the router picks it
-		// up on its own. Local store read, no network.
-		tok, _, err := auth.Load(profile)
-		if err != nil || tok == nil {
-			return
-		}
-		fmt.Fprintf(os.Stderr, "[gateway] auth: credential appeared in the store; loading it (login detected, no SIGHUP needed)\n")
-		g.refreshAuth()
-		return
-	}
-	if tick == nil {
-		return
-	}
-	// Rides oauth2.ReuseTokenSource: the cached access token is returned
-	// while valid; only a near-expiry token triggers a real refresh, whose
-	// outcome reaches noteAuthRefresh via Notify.
-	_ = tick()
+	defer g.authMu.Unlock()
+	return g.authFingerprint != "" &&
+		g.catalogFingerprint == g.authFingerprint
 }
 
-// authHealthLocked derives the health enum. Caller holds authMu.
-//   - signed_out:     no OAuth credential in the store
-//   - refresh_failed: credential present but the token endpoint rejected
-//     it (dead until re-login)
-//   - error:          last refresh attempt failed transiently
-//   - ok:             credential present, no known problem
 func (g *Gateway) authHealthLocked() string {
-	switch {
-	case g.oauthClient == nil:
-		return "signed_out"
-	case g.authDead:
-		return "refresh_failed"
-	case g.authLastErr != "":
-		return "error"
-	default:
-		return "ok"
+	if g.authStatus == "" {
+		return "missing"
 	}
+	return g.authStatus
 }
 
 // authHealthState is the snapshot the admin handlers render.
 type authHealthState struct {
 	Health      string
+	Source      auth.Source
+	Fingerprint string
+	Metadata    auth.KeyMetadata
 	LastError   string
 	LastErrorAt time.Time
 	LastOKAt    time.Time
@@ -1047,6 +927,9 @@ func (g *Gateway) authHealth() authHealthState {
 	defer g.authMu.Unlock()
 	return authHealthState{
 		Health:      g.authHealthLocked(),
+		Source:      g.authSource,
+		Fingerprint: g.authFingerprint,
+		Metadata:    g.authMetadata,
 		LastError:   g.authLastErr,
 		LastErrorAt: g.authLastErrAt,
 		LastOKAt:    g.authLastOKAt,
@@ -1063,26 +946,7 @@ func rfc3339OrEmpty(t time.Time) string {
 
 func (g *Gateway) authState() (signedIn bool, fallbackInUse bool) {
 	cfg := g.runtimeConfig()
-	g.authMu.Lock()
-	defer g.authMu.Unlock()
-	signedIn = g.oauthClient != nil
-	if !signedIn && cfg.APIKeyFallback && cfg.BasetenKey != "" {
-		fallbackInUse = true
-	}
-	return
-}
-
-func (g *Gateway) basetenAuthClient() (useOAuth bool, client *http.Client, fallback bool) {
-	cfg := g.runtimeConfig()
-	g.authMu.Lock()
-	defer g.authMu.Unlock()
-	if g.oauthClient != nil {
-		return true, g.oauthClient, false
-	}
-	if cfg.APIKeyFallback && cfg.BasetenKey != "" {
-		return false, g.client, true
-	}
-	return false, nil, false
+	return cfg.OpenRouterKey != "", false
 }
 
 func defaultTransport() *http.Transport {
@@ -1265,16 +1129,16 @@ func (g *Gateway) handleClient(cl *clientListener, w http.ResponseWriter, r *htt
 // still rejected.
 func shapeCompatible(shape, rt string) bool {
 	switch {
-	case shape == "anthropic" && (rt == "baseten" || rt == "anthropic" || rt == "monitor" || rt == "openai"):
+	case shape == "anthropic" && (rt == "openrouter" || rt == "anthropic" || rt == "monitor" || rt == "openai"):
 		return true
-	case shape == "openai" && (rt == "baseten" || rt == "openai" || rt == "monitor"):
+	case shape == "openai" && (rt == "openrouter" || rt == "openai" || rt == "monitor"):
 		return true
 	}
 	return false
 }
 
 // upstreamShapeFor resolves the wire shape used toward the upstream for
-// one attempted route: native routes fix the shape, baseten follows the
+// one attempted route: native routes fix the shape, openrouter follows the
 // listener unless upstream_shape overrides it.
 func upstreamShapeFor(rc resolvedClientConfig, rt string) string {
 	switch rt {
@@ -1282,7 +1146,7 @@ func upstreamShapeFor(rc resolvedClientConfig, rt string) string {
 		return "anthropic"
 	case "openai":
 		return "openai"
-	case "baseten":
+	case "openrouter":
 		if rc.UpstreamShape != "" {
 			return rc.UpstreamShape
 		}
@@ -1309,8 +1173,17 @@ func (g *Gateway) reject(w http.ResponseWriter, code int, msg string) {
 }
 
 func (g *Gateway) rejectNeedsLogin(w http.ResponseWriter) {
-	w.Header().Set("X-Baseten-Switch", "needs-login")
-	g.reject(w, 503, "not signed in; run 'baseten auth login'")
+	w.Header().Set("X-OpenRouter-Switch", "credential-required")
+	g.reject(w, 503, "OpenRouter API key is not configured; run 'openrouter-switch auth set-key'")
+}
+
+func (g *Gateway) rejectCatalogUnavailable(w http.ResponseWriter) {
+	w.Header().Set("X-OpenRouter-Switch", "catalog-unavailable")
+	g.reject(
+		w,
+		http.StatusServiceUnavailable,
+		"OpenRouter account model catalog is unavailable; retry after the catalog refreshes",
+	)
 }
 
 func (g *Gateway) adminRoot(w http.ResponseWriter, r *http.Request) {
@@ -1355,12 +1228,12 @@ func (g *Gateway) healthzClient(cl *clientListener, w http.ResponseWriter, r *ht
 	_, _ = w.Write(body)
 }
 
-// upstreamModelFor resolves the slug a baseten-routed request should
-// be rewritten to. For non-baseten routes it returns "" (meaning
+// upstreamModelFor resolves the slug a openrouter-routed request should
+// be rewritten to. For non-openrouter routes it returns "" (meaning
 // passthrough: the upstream model = the requested model). For
-// baseten it returns the per-listener default model.
+// openrouter it returns the per-listener default model.
 func (g *Gateway) upstreamModelFor(rc resolvedClientConfig) string {
-	if rc.Route != "baseten" {
+	if rc.Route != "openrouter" {
 		return ""
 	}
 	return rc.DefaultModel
@@ -1368,18 +1241,22 @@ func (g *Gateway) upstreamModelFor(rc resolvedClientConfig) string {
 
 func (g *Gateway) forwardModelsGet(cl *clientListener, w http.ResponseWriter, r *http.Request) {
 	cfg := g.runtimeConfig()
-	if cl.cfg.ProtocolShape == "anthropic" && len(cl.cfg.ModelAliases) > 0 {
+	if cl.cfg.ProtocolShape == "anthropic" {
 		g.aliasModelsGet(cl, w, r)
 		return
 	}
 	rt := cl.cfg.Route
+	if cl.cfg.ProtocolShape == "openai" && rt == "openrouter" {
+		g.accountOpenAIModelsGet(w)
+		return
+	}
 	if !shapeCompatible(cl.cfg.ProtocolShape, rt) {
 		g.rejectCrossShape(w)
 		return
 	}
 	var upstream string
-	if rt == "baseten" {
-		upstream = cfg.BasetenURL
+	if rt == "openrouter" {
+		upstream = cfg.OpenRouterURL
 	} else if rt == "anthropic" {
 		upstream = cfg.AnthropicURL
 	} else if rt == "openai" {
@@ -1397,17 +1274,13 @@ func (g *Gateway) forwardModelsGet(cl *clientListener, w http.ResponseWriter, r 
 	}
 	req.Header.Set("Accept", "application/json")
 	var upClient *http.Client
-	if rt == "baseten" {
-		useOAuth, c, fallback := g.basetenAuthClient()
-		if useOAuth {
-			upClient = c
-		} else if fallback {
-			upClient = c
-			req.Header.Set("Authorization", "Api-Key "+cfg.BasetenKey)
-		} else {
+	if rt == "openrouter" {
+		if cfg.OpenRouterKey == "" {
 			g.rejectNeedsLogin(w)
 			return
 		}
+		upClient = g.client
+		req.Header.Set("Authorization", "Bearer "+cfg.OpenRouterKey)
 	} else {
 		upClient = g.client
 		if v := r.Header.Get("Authorization"); v != "" {
@@ -1434,6 +1307,37 @@ func (g *Gateway) forwardModelsGet(cl *clientListener, w http.ResponseWriter, r 
 	_, _ = w.Write(body)
 }
 
+func (g *Gateway) accountOpenAIModelsGet(w http.ResponseWriter) {
+	models := make([]map[string]any, 0)
+	if g.catalogMatchesCredential() {
+		snapshot := g.pricing.Capture()
+		for _, record := range snapshot.Models(pricing.ProviderOpenRouter) {
+			if !eligibleOpenRouterModel(
+				snapshot,
+				record.CanonicalModelID,
+			) {
+				continue
+			}
+			models = append(models, map[string]any{
+				"id":       record.CanonicalModelID,
+				"object":   "model",
+				"created":  int64(0),
+				"owned_by": "openrouter",
+			})
+		}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"object": "list",
+		"data":   models,
+	})
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	h.Set("Content-Length", itoa(len(body)))
+	h.Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
 // aliasModelCreatedAt is a constant so the synthesized list is
 // byte-stable across restarts: Claude Code only rewrites its picker
 // cache (~/.claude/cache/gateway-models.json) when the list changes.
@@ -1443,7 +1347,10 @@ const aliasModelCreatedAt = "2026-07-07T00:00:00Z"
 // model_aliases in the Anthropic list-entry shape, sorted by alias id
 // for stable ordering. display_name is populated but the picker does
 // not render it (validated 2026-07-07): the alias id IS the UX.
-func aliasModelEntries(aliases map[string]string) []map[string]any {
+func aliasModelEntries(
+	aliases map[string]string,
+	snapshot *pricing.Snapshot,
+) []map[string]any {
 	ids := make([]string, 0, len(aliases))
 	for id := range aliases {
 		ids = append(ids, id)
@@ -1451,67 +1358,161 @@ func aliasModelEntries(aliases map[string]string) []map[string]any {
 	out := make([]map[string]any, 0, len(ids))
 	for _, id := range sortedKeys(ids) {
 		slug := aliases[id]
-		short := slug
-		if i := strings.LastIndex(slug, "/"); i >= 0 {
-			short = slug[i+1:]
+		displayName := slug
+		if snapshot != nil {
+			if record, ok := snapshot.Model(
+				pricing.ProviderOpenRouter,
+				slug,
+			); ok && record.DisplayName != "" {
+				displayName = record.DisplayName
+			}
 		}
 		out = append(out, map[string]any{
 			"type":         "model",
 			"id":           id,
-			"display_name": short + " via Baseten",
+			"display_name": displayName + " via OpenRouter",
 			"created_at":   aliasModelCreatedAt,
 		})
 	}
 	return out
 }
 
-// catalogAnthropicModelEntries projects catalog-ready provider-public models
-// into Anthropic's list-entry shape. Account availability can remain unknown:
-// this list is discovery metadata, while the provider still enforces access on
-// inference. Exact standard pricing is required so Baseten never publishes a
-// picker entry that its Traffic view cannot price.
-func (g *Gateway) catalogAnthropicModelEntries() []map[string]any {
-	records := g.pricing.Capture().Models(pricing.ProviderAnthropic)
-	out := make([]map[string]any, 0, len(records))
-	for _, record := range records {
-		if !discoveryPrefixOK(record.CanonicalModelID) {
-			continue
-		}
-		if _, priced := record.Prices[pricing.ProfileStandard]; !priced {
-			continue
-		}
-		out = append(out, map[string]any{
-			"type":         "model",
-			"id":           record.CanonicalModelID,
-			"display_name": record.DisplayName,
-			"created_at":   aliasModelCreatedAt,
-		})
+func eligibleOpenRouterModel(
+	snapshot *pricing.Snapshot,
+	canonicalID string,
+) bool {
+	if snapshot == nil {
+		return false
 	}
-	return out
+	record, ok := snapshot.Model(pricing.ProviderOpenRouter, canonicalID)
+	if !ok || !record.ToolCapable ||
+		record.Availability.Account == nil ||
+		record.Availability.Account.Provenance.LoadedFrom !=
+			pricing.LoadedFromLive {
+		return false
+	}
+	return modalityAllowsText(record.InputModalities) &&
+		modalityAllowsText(record.OutputModalities)
+}
+
+func modalityAllowsText(modalities []string) bool {
+	if len(modalities) == 0 {
+		return true
+	}
+	for _, modality := range modalities {
+		if modality == "text" {
+			return true
+		}
+	}
+	return false
+}
+
+func aliasToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var out strings.Builder
+	lastHyphen := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+			lastHyphen = false
+			continue
+		}
+		if !lastHyphen && out.Len() > 0 {
+			out.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	return strings.Trim(out.String(), "-")
+}
+
+func dynamicOpenRouterAlias(slug string) string {
+	short := slug
+	if index := strings.LastIndex(slug, "/"); index >= 0 {
+		short = slug[index+1:]
+	}
+	token := aliasToken(short)
+	if token == "" {
+		token = aliasToken(slug)
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(slug)))
+	return "claude-openrouter-" + token + "-" +
+		hex.EncodeToString(sum[:6])
+}
+
+func eligibleOpenRouterAliases(
+	snapshot *pricing.Snapshot,
+	configured map[string]string,
+) map[string]string {
+	aliases := make(map[string]string)
+	for _, alias := range sortedKeysMap(configured) {
+		slug := configured[alias]
+		if eligibleOpenRouterModel(snapshot, slug) {
+			aliases[alias] = slug
+		}
+	}
+	if snapshot == nil {
+		return aliases
+	}
+	for _, record := range snapshot.Models(pricing.ProviderOpenRouter) {
+		slug := record.CanonicalModelID
+		if !eligibleOpenRouterModel(snapshot, slug) {
+			continue
+		}
+		alias := dynamicOpenRouterAlias(slug)
+		if existing, found := aliases[alias]; found {
+			if existing == slug {
+				continue
+			}
+			sum := sha256.Sum256([]byte(slug))
+			alias += "-" + hex.EncodeToString(sum[6:12])
+		}
+		aliases[alias] = slug
+	}
+	return aliases
+}
+
+func sortedKeysMap(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return sortedKeys(keys)
+}
+
+// accountOpenRouterModelEntries projects only current-key, account-available,
+// tool-capable OpenRouter models into stable Claude picker aliases.
+func (g *Gateway) accountOpenRouterModelEntries(
+	snapshot *pricing.Snapshot,
+	configured map[string]string,
+) ([]map[string]any, map[string]string) {
+	if !g.catalogMatchesCredential() {
+		return []map[string]any{}, map[string]string{}
+	}
+	aliases := eligibleOpenRouterAliases(snapshot, configured)
+	return aliasModelEntries(aliases, snapshot), aliases
 }
 
 // aliasModelsGet serves GET /v1/models locally for anthropic-shape
 // listeners with model_aliases configured (the model-discovery contract).
 // Alias entries are synthesized without any upstream call: Claude
 // Code's discovery timeout is ~3s and the list must never hang on
-// Baseten or Anthropic availability. On the native anthropic route
+// OpenRouter or Anthropic availability. On the native anthropic route
 // (switch OFF) the native list is additionally proxied with a short
 // deadline and appended after the aliases, keeping the native escape
 // hatch visible; a failed native fetch degrades to aliases-only
 // rather than failing discovery.
 func (g *Gateway) aliasModelsGet(cl *clientListener, w http.ResponseWriter, r *http.Request) {
-	entries := make([]any, 0, len(cl.cfg.ModelAliases))
-	seen := map[string]bool{}
-	for _, e := range aliasModelEntries(cl.cfg.ModelAliases) {
-		entries = append(entries, e)
-		if id, ok := e["id"].(string); ok {
-			seen[id] = true
-		}
+	snapshot := g.pricing.Capture()
+	accountEntries := []map[string]any{}
+	if !cl.cfg.globalRoutingOff() {
+		accountEntries, _ = g.accountOpenRouterModelEntries(
+			snapshot,
+			cl.cfg.ModelAliases,
+		)
 	}
-	for _, e := range g.catalogAnthropicModelEntries() {
-		if id, ok := e["id"].(string); ok && seen[id] {
-			continue
-		}
+	entries := make([]any, 0, len(accountEntries))
+	seen := map[string]bool{}
+	for _, e := range accountEntries {
 		entries = append(entries, e)
 		if id, ok := e["id"].(string); ok {
 			seen[id] = true
@@ -1675,8 +1676,8 @@ func (g *Gateway) monitorModels(cl *clientListener, w http.ResponseWriter, r *ht
 func (g *Gateway) upstreamURL(rt string) string {
 	cfg := g.runtimeConfig()
 	switch rt {
-	case "baseten":
-		return cfg.BasetenURL
+	case "openrouter":
+		return cfg.OpenRouterURL
 	case "anthropic":
 		return cfg.AnthropicURL
 	case "openai":
@@ -1706,14 +1707,11 @@ func upstreamResponsesEndpoint(baseURL string) string {
 
 // buildUpstreamClient returns the HTTP client, auth mode and api-key
 // to use for forwarding to the given route.
-func (g *Gateway) buildUpstreamClient(rt string) (mode proxy.UpstreamAuthMode, basetenKey string, upClient *http.Client, ok bool) {
-	if rt == "baseten" {
-		useOAuth, c, fallback := g.basetenAuthClient()
-		if useOAuth {
-			return proxy.UpstreamModeOAuth, "", c, true
-		}
-		if fallback {
-			return proxy.UpstreamModeAPIKey, g.runtimeConfig().BasetenKey, c, true
+func (g *Gateway) buildUpstreamClient(rt string) (mode proxy.UpstreamAuthMode, openrouterKey string, upClient *http.Client, ok bool) {
+	if rt == "openrouter" {
+		key := g.runtimeConfig().OpenRouterKey
+		if key != "" {
+			return proxy.UpstreamModeOpenRouter, key, g.client, true
 		}
 		return 0, "", nil, false
 	}
@@ -1756,6 +1754,8 @@ func (g *Gateway) forwardMessages(cl *clientListener, w http.ResponseWriter, r *
 	if err != nil {
 		if errors.Is(err, errNeedsLogin) {
 			g.rejectNeedsLogin(w)
+		} else if errors.Is(err, errAccountCatalogUnavailable) {
+			g.rejectCatalogUnavailable(w)
 		} else {
 			g.reject(w, 400, err.Error())
 		}
@@ -1793,6 +1793,8 @@ func (g *Gateway) forwardChatCompletions(cl *clientListener, w http.ResponseWrit
 	if err != nil {
 		if errors.Is(err, errNeedsLogin) {
 			g.rejectNeedsLogin(w)
+		} else if errors.Is(err, errAccountCatalogUnavailable) {
+			g.rejectCatalogUnavailable(w)
 		} else {
 			g.reject(w, 400, err.Error())
 		}
@@ -1809,7 +1811,7 @@ func (g *Gateway) forwardChatCompletions(cl *clientListener, w http.ResponseWrit
 // forwardResponses handles openai-shape POST /v1/responses (the
 // OpenAI Responses API path that codex CLI uses). It is a close
 // sibling of forwardChatCompletions: same route-aware model rewrite
-// (baseten only; passthrough routes forward verbatim), same
+// (openrouter only; passthrough routes forward verbatim), same
 // buildUpstreamClient + streamForward pipeline, only the upstream
 // path differs (/v1/responses instead of /v1/chat/completions).
 func (g *Gateway) forwardResponses(cl *clientListener, w http.ResponseWriter, r *http.Request) {
@@ -1832,6 +1834,8 @@ func (g *Gateway) forwardResponses(cl *clientListener, w http.ResponseWriter, r 
 	if err != nil {
 		if errors.Is(err, errNeedsLogin) {
 			g.rejectNeedsLogin(w)
+		} else if errors.Is(err, errAccountCatalogUnavailable) {
+			g.rejectCatalogUnavailable(w)
 		} else {
 			g.reject(w, 400, err.Error())
 		}
@@ -1856,6 +1860,9 @@ type upstreamAttempt struct {
 	headers      http.Header
 	client       *http.Client
 	modelForCost string
+	// credentialFingerprint binds auth-state mutations caused by this
+	// attempt to the exact OpenRouter key used to build its Bearer header.
+	credentialFingerprint string
 	// catalogSnapshot is captured once per logical harness request and shared
 	// by routing, policy resolution, every attempt, forwarding, and telemetry.
 	catalogSnapshot *pricing.Snapshot
@@ -1867,7 +1874,7 @@ type upstreamAttempt struct {
 	// subagent rewriting, provider translation, or model canonicalization.
 	requestProfile requestprofile.Profile
 	// imageInput is derived once from the original protocol request. It gates
-	// only the exact Baseten multimodal-rejection retry.
+	// only the exact OpenRouter multimodal-rejection retry.
 	imageInput bool
 	// providerStateful marks Responses requests whose provider-owned state
 	// cannot safely move to the native provider.
@@ -1882,11 +1889,6 @@ type upstreamAttempt struct {
 	// shape to openai chat.completions, and the response must be
 	// converted back before reaching the client.
 	translate bool
-	// normalizeAnthropicUsage marks a baseten-route attempt whose upstream
-	// speaks the Anthropic shape (pass-through, no translation). Its usage
-	// objects must have input_tokens de-double-counted before relay; see
-	// usage.NormalizeAnthropicUsage for the Baseten inclusive-input bug.
-	normalizeAnthropicUsage bool
 	// fallbackTrigger records why this fallback attempt was selected, including
 	// an earlier attempt failure, an active cooldown, or unavailable primary
 	// credentials. It flows into telemetry as fallback_trigger.
@@ -1907,13 +1909,13 @@ type upstreamAttempt struct {
 	subagentModel string
 	// strippedToolTypes names the tools[] entry types the responses
 	// sanitizer removed from this attempt's body, in body order. Set
-	// only on baseten responses attempts whose strip fired; fallback
+	// only on openrouter responses attempts whose strip fired; fallback
 	// attempts are built from the original bytes and never carry it.
 	// Flows into the telemetry row's stripped_tool_types field.
 	strippedToolTypes []string
 	// responsesCompatibility owns per-logical-request request retries,
 	// stream repair counts, and the telemetry summary. It is present only
-	// for Baseten /v1/responses attempts with configured compatibility work.
+	// for OpenRouter /v1/responses attempts with configured compatibility work.
 	responsesCompatibility *responsesCompatibilityRequest
 }
 
@@ -1943,14 +1945,73 @@ func fallbackTriggerStatus(code int) bool {
 	return code == 429 || code >= 500
 }
 
+const retryAfterMaxDelay = 2 * time.Second
+
+func retryableOpenRouterStatus(code int) bool {
+	return code == http.StatusTooManyRequests ||
+		code == http.StatusBadGateway ||
+		code == http.StatusServiceUnavailable
+}
+
+func boundedRetryAfter(
+	value string,
+	now time.Time,
+) (time.Duration, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		// A transient status still receives one bounded immediate retry when
+		// OpenRouter omits Retry-After. A present header controls the delay.
+		return 0, true
+	}
+	var delay time.Duration
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds < 0 {
+			return 0, false
+		}
+		if seconds == 0 {
+			return 0, true
+		}
+		if seconds > int64(retryAfterMaxDelay/time.Second) {
+			return retryAfterMaxDelay, true
+		}
+		delay = time.Duration(seconds) * time.Second
+	} else if when, err := http.ParseTime(value); err == nil {
+		delay = when.Sub(now)
+		if delay <= 0 {
+			return 0, true
+		}
+	} else {
+		return 0, false
+	}
+	if delay > retryAfterMaxDelay {
+		return retryAfterMaxDelay, true
+	}
+	return delay, true
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // fallbackTriggerTTFT is the telemetry fallback_trigger value for an
 // attempt abandoned by the time-to-first-byte deadline.
 const fallbackTriggerTTFT = "ttft_timeout"
 
 const (
-	fallbackTriggerCooldown         = "cooldown"
-	fallbackTriggerAuthUnavailable  = "auth_unavailable"
-	fallbackTriggerImageUnsupported = "image_input_unsupported"
+	fallbackTriggerCooldown           = "cooldown"
+	fallbackTriggerAuthUnavailable    = "auth_unavailable"
+	fallbackTriggerCatalogUnavailable = "catalog_unavailable"
+	fallbackTriggerImageUnsupported   = "image_input_unsupported"
 )
 
 func allowsImageTranslationFallback(err error) bool {
@@ -2033,15 +2094,23 @@ func (g *Gateway) tripFallback(name string) {
 }
 
 // errNeedsLogin marks an attempt whose route has no usable credentials
-// (baseten without a CLI login or API-key fallback).
-var errNeedsLogin = errors.New("baseten route needs login")
+// (openrouter without a CLI login or API-key fallback).
+var errNeedsLogin = errors.New("openrouter route needs login")
+
+// errAccountCatalogUnavailable marks an already-configured OpenRouter route
+// that cannot yet be authorized against the active credential. New explicit
+// selections remain terminal; configured routes may use native fallback while
+// the authenticated catalog refreshes.
+var errAccountCatalogUnavailable = errors.New(
+	"OpenRouter account model catalog is unavailable",
+)
 
 type routingDisabledModelError struct {
 	model string
 }
 
 func (e routingDisabledModelError) Error() string {
-	return fmt.Sprintf("global routing is Off, so Baseten model %q cannot be used; select a native model or turn routing On", e.model)
+	return fmt.Sprintf("global routing is Off, so OpenRouter model %q cannot be used; select a native model or turn routing On", e.model)
 }
 
 // attemptPath returns the upstream endpoint path for a handler kind and
@@ -2076,7 +2145,7 @@ func inspectRequestedReasoning(
 // request body and handler kind. When the upstream speaks a different
 // shape than the listener (anthropic listener, openai upstream) the body
 // is translated before model rewriting. Tier model rewriting applies
-// only when the attempted route is baseten;
+// only when the attempted route is openrouter;
 // passthrough routes preserve the model except for documented harness
 // decorations such as a literal trailing [1m], which is canonicalized.
 func (g *Gateway) buildAttempt(cl *clientListener, r *http.Request, body []byte, rt, kind string) (upstreamAttempt, error) {
@@ -2096,7 +2165,7 @@ func (g *Gateway) buildAttempt(cl *clientListener, r *http.Request, body []byte,
 }
 
 // buildAttemptTarget is buildAttempt with an optional forced target
-// model: forced attempts carry an explicitly chosen Baseten slug
+// model: forced attempts carry an explicitly chosen OpenRouter slug
 // (alias mapping or raw slug) and bypasses the default model.
 func (g *Gateway) buildAttemptTarget(cl *clientListener, r *http.Request, body []byte, rt, kind, forcedModel string, forced bool) (upstreamAttempt, error) {
 	requested, observed := inspectRequestedReasoning(kind, body)
@@ -2163,15 +2232,15 @@ func (g *Gateway) buildAttemptTargetWithSnapshot(
 		body, _, _ = requestprofile.RemoveUnsupportedFastProfile(body, nil)
 	}
 	targetModel := forcedModel
-	if rt == "baseten" && !forced {
+	if rt == "openrouter" && !forced {
 		rc := cl.cfg
-		rc.Route = "baseten"
+		rc.Route = "openrouter"
 		targetModel = g.upstreamModelFor(rc)
 	}
 	reasoningTelemetry := reasoningTelemetryV1{}
-	if rt == "baseten" {
+	if rt == "openrouter" {
 		var err error
-		body, reasoningTelemetry, err = applyBasetenReasoningPolicy(
+		body, reasoningTelemetry, err = applyOpenRouterReasoningPolicy(
 			snapshot,
 			cl.cfg,
 			body,
@@ -2195,12 +2264,12 @@ func (g *Gateway) buildAttemptTargetWithSnapshot(
 	var strippedTypes []string
 	switch {
 	case forced:
-		if rt == "baseten" && kind == "responses" && len(cl.cfg.ResponsesStripToolTypes) > 0 {
+		if rt == "openrouter" && kind == "responses" && len(cl.cfg.ResponsesStripToolTypes) > 0 {
 			res, strippedTypes = stripAndRewriteResponses(body, cl.cfg.ResponsesStripToolTypes, forcedModel)
 			break
 		}
 		res = proxy.RewriteModelInBody(body, forcedModel)
-	case rt == "baseten":
+	case rt == "openrouter":
 		if kind == "responses" && len(cl.cfg.ResponsesStripToolTypes) > 0 {
 			res, strippedTypes = stripAndRewriteResponses(body, cl.cfg.ResponsesStripToolTypes, targetModel)
 			break
@@ -2213,11 +2282,11 @@ func (g *Gateway) buildAttemptTargetWithSnapshot(
 	if modelForCost == "" {
 		modelForCost = res.RequestedModel
 	}
-	mode, basetenKey, upClient, ok := g.buildUpstreamClient(rt)
+	mode, openrouterKey, upClient, ok := g.buildUpstreamClient(rt)
 	if !ok {
 		return upstreamAttempt{}, errNeedsLogin
 	}
-	headers, err := proxy.BuildUpstreamHeaders(r.Header, mode, basetenKey)
+	headers, err := proxy.BuildUpstreamHeaders(r.Header, mode, openrouterKey)
 	if err != nil {
 		// Empty API key in APIKey mode is a credential problem; surface
 		// it as needs-login rather than sending an unauthenticated
@@ -2242,18 +2311,18 @@ func (g *Gateway) buildAttemptTargetWithSnapshot(
 		headers:                    headers,
 		client:                     upClient,
 		modelForCost:               modelForCost,
+		credentialFingerprint:      auth.CredentialFingerprint(openrouterKey),
 		catalogSnapshot:            snapshot,
 		requestedReasoning:         requestedReasoning,
 		requestedReasoningObserved: requestedObserved,
 		telemetryAttempt:           telemetryAttempt,
 		translate:                  needsTranslate,
-		normalizeAnthropicUsage:    rt == "baseten" && upShape == "anthropic",
 		strippedToolTypes:          strippedTypes,
 	}, nil
 }
 
 // stripAndRewriteResponses applies the responses tool-type strip and
-// the baseten model rewrite on one decode of the body: codex turn
+// the openrouter model rewrite on one decode of the body: codex turn
 // bodies run 80 KB+, so the two-step path (RewriteModelInBody plus a
 // second full parse for the strip) would double the JSON work. The
 // result mirrors proxy.RewriteModelInBody and preserves the
@@ -2293,7 +2362,7 @@ func stripAndRewriteResponses(body []byte, types []string, target string) (proxy
 // through to the default model or to Anthropic: unknown ones are a loud
 // 400, because a stale ~/.claude/cache/gateway-models.json keeps
 // offering aliases after they are removed from config.
-var aliasNamespacePrefixes = []string{"claude-baseten-", "anthropic-baseten-"}
+var aliasNamespacePrefixes = []string{"claude-openrouter-", "anthropic-openrouter-"}
 
 // InAliasNamespace is exported so the openrouter-switch claude adapter
 // (`claude subagents`) shares this one namespace resolution instead of
@@ -2310,25 +2379,50 @@ func InAliasNamespace(id string) bool {
 // unknownAliasError names the rejected id, the configured aliases and
 // the fix, so a request for a removed alias is actionable instead of
 // a silent default-model route.
-func unknownAliasError(rc resolvedClientConfig, id string) error {
-	fix := fmt.Sprintf("add it to model_aliases for client %q in gateway.yaml and reload the gateway (kill -HUP $(cat ~/.config/openrouter-switch/gateway.pid)), or pick another model; Claude Code refreshes its cached picker list (~/.claude/cache/gateway-models.json) at next launch", rc.Name)
-	if len(rc.ModelAliases) == 0 {
-		return fmt.Errorf("unknown gateway model %q: client %q has no model_aliases configured. Fix: %s", id, rc.Name, fix)
+func unknownAliasError(
+	rc resolvedClientConfig,
+	id string,
+	eligibleAliases map[string]string,
+) error {
+	fix := "refresh OpenRouter credentials and restart Claude Code to reload " +
+		"its account-scoped model picker"
+	if len(eligibleAliases) == 0 {
+		return fmt.Errorf(
+			"unknown or unavailable OpenRouter model %q for client %q; %s",
+			id,
+			rc.Name,
+			fix,
+		)
 	}
-	ids := make([]string, 0, len(rc.ModelAliases))
-	for a := range rc.ModelAliases {
+	ids := make([]string, 0, len(eligibleAliases))
+	for a := range eligibleAliases {
 		ids = append(ids, a)
 	}
-	return fmt.Errorf("unknown gateway model %q: configured model_aliases for client %q are [%s]. Fix: %s", id, rc.Name, strings.Join(sortedKeys(ids), ", "), fix)
+	return fmt.Errorf(
+		"unknown or unavailable OpenRouter model %q for client %q; "+
+			"eligible aliases are [%s]; %s",
+		id,
+		rc.Name,
+		strings.Join(sortedKeys(ids), ", "),
+		fix,
+	)
+}
+
+func unavailableOpenRouterModelError(id string) error {
+	return fmt.Errorf(
+		"OpenRouter model %q is not tool-capable and available in the "+
+			"active account catalog",
+		id,
+	)
 }
 
 // resolveExplicitModelAttempt implements explicit-choice-wins routing
 // (the model-discovery contract): configured aliases remain an Anthropic-shape
-// feature, while a raw Baseten slug (contains "/") is explicit on every
+// feature, while a raw OpenRouter slug (contains "/") is explicit on every
 // request shape. Both are single attempts with no fallback_route: silently
 // substituting a native provider would violate the user's model selection.
 // On Anthropic-shape listeners, an unrecognized
-// claude-baseten-*/anthropic-baseten-* id is a loud 400, never a default-model route.
+// claude-openrouter-*/anthropic-openrouter-* id is a loud 400, never a default-model route.
 func (g *Gateway) resolveExplicitModelAttempt(cl *clientListener, r *http.Request, body []byte, kind string) (upstreamAttempt, bool, error) {
 	requested, observed := inspectRequestedReasoning(kind, body)
 	return g.resolveExplicitModelAttemptWithSnapshot(
@@ -2355,17 +2449,36 @@ func (g *Gateway) resolveExplicitModelAttemptWithSnapshot(
 	if requested == "" {
 		return upstreamAttempt{}, false, nil
 	}
+	catalogCurrent := g.catalogMatchesCredential()
+	aliases := map[string]string{}
+	if catalogCurrent {
+		aliases = eligibleOpenRouterAliases(
+			snapshot,
+			cl.cfg.ModelAliases,
+		)
+	}
 	target := ""
 	if strings.Contains(requested, "/") {
 		target = requested
 	} else if cl.cfg.ProtocolShape != "anthropic" {
 		return upstreamAttempt{}, false, nil
-	} else if slug, ok := cl.cfg.ModelAliases[requested]; ok {
+	} else if slug, ok := aliases[requested]; ok {
 		target = slug
+	} else if slug, configured := cl.cfg.ModelAliases[requested]; configured {
+		return upstreamAttempt{}, false,
+			unavailableOpenRouterModelError(slug)
 	} else if InAliasNamespace(requested) {
-		return upstreamAttempt{}, false, unknownAliasError(cl.cfg, requested)
+		return upstreamAttempt{}, false, unknownAliasError(
+			cl.cfg,
+			requested,
+			aliases,
+		)
 	} else {
 		return upstreamAttempt{}, false, nil
+	}
+	if !catalogCurrent || !eligibleOpenRouterModel(snapshot, target) {
+		return upstreamAttempt{}, false,
+			unavailableOpenRouterModelError(target)
 	}
 	at, err := g.buildAttemptTargetWithSnapshot(
 		snapshot,
@@ -2374,7 +2487,7 @@ func (g *Gateway) resolveExplicitModelAttemptWithSnapshot(
 		cl,
 		r,
 		body,
-		"baseten",
+		"openrouter",
 		kind,
 		target,
 		true,
@@ -2393,8 +2506,8 @@ func (g *Gateway) resolveExplicitModelAttemptWithSnapshot(
 // the fallback is promoted to primary and tried alone. A non-auth error
 // building the primary (e.g. untranslatable content) is returned to the
 // caller; fallback build errors just drop the fallback. Explicitly
-// chosen Baseten models (alias or raw slug) preempt all of this with a
-// single baseten attempt.
+// chosen OpenRouter models (alias or raw slug) preempt all of this with a
+// single openrouter attempt.
 //
 // Subagent gate (the subagent-routing contract): on an anthropic-shape
 // listener with subagent routing enabled, a request carrying a
@@ -2493,9 +2606,9 @@ func (g *Gateway) resolveAttemptsLadderWithSnapshot(
 	requested := proxy.RewriteModelInBody(body, "").RequestedModel
 	if cl.cfg.globalRoutingOff() {
 		// The global routing gate is terminal. Inspect the requested model only
-		// to reject explicit Baseten choices clearly; otherwise build one
+		// to reject explicit OpenRouter choices clearly; otherwise build one
 		// protocol-native attempt. Do not consult aliases, pins, subagent
-		// policy, fallback, cooldown, or Baseten credentials.
+		// policy, fallback, cooldown, or OpenRouter credentials.
 		if _, alias := cl.cfg.ModelAliases[requested]; alias ||
 			InAliasNamespace(requested) ||
 			strings.Contains(requested, "/") ||
@@ -2548,6 +2661,7 @@ func (g *Gateway) resolveAttemptsLadderWithSnapshot(
 	)
 	if perr != nil &&
 		!errors.Is(perr, errNeedsLogin) &&
+		!errors.Is(perr, errAccountCatalogUnavailable) &&
 		!allowsImageTranslationFallback(perr) &&
 		!reasoning.AllowsFallback(perr) {
 		return nil, perr
@@ -2557,8 +2671,8 @@ func (g *Gateway) resolveAttemptsLadderWithSnapshot(
 		attempts = append(attempts, primary)
 	}
 	// The managed Codex profile's compatibility model is an instruction to
-	// use this client's configured Baseten target, never an OpenAI model.
-	// Suppress the native fallback even when the Baseten attempt cannot be
+	// use this client's configured OpenRouter target, never an OpenAI model.
+	// Suppress the native fallback even when the OpenRouter attempt cannot be
 	// built or later fails.
 	if cl.cfg.ProtocolShape == "openai" &&
 		requested == CodexCompatibilityModel {
@@ -2597,6 +2711,13 @@ func (g *Gateway) resolveAttemptsLadderWithSnapshot(
 				if errors.Is(perr, errNeedsLogin) {
 					fba.fallbackCount = 1
 					fba.fallbackTrigger = fallbackTriggerAuthUnavailable
+				} else if errors.Is(
+					perr,
+					errAccountCatalogUnavailable,
+				) {
+					fba.fallbackCount = 1
+					fba.fallbackTrigger =
+						fallbackTriggerCatalogUnavailable
 				} else if allowsImageTranslationFallback(perr) {
 					fba.fallbackCount = 1
 					fba.fallbackTrigger = fallbackTriggerImageUnsupported
@@ -2613,6 +2734,9 @@ func (g *Gateway) resolveAttemptsLadderWithSnapshot(
 			return nil, perr
 		}
 		if allowsImageTranslationFallback(perr) {
+			return nil, perr
+		}
+		if errors.Is(perr, errAccountCatalogUnavailable) {
 			return nil, perr
 		}
 		return nil, errNeedsLogin
@@ -2673,7 +2797,7 @@ func resolveModelRoutePinWithFamily(
 
 // modelRoutePinValue interprets one model_routes pin VALUE into the pin
 // decision: "native" pins to the client's native route; anything else is
-// a Baseten target, resolved through model_aliases so all callers see
+// a OpenRouter target, resolved through model_aliases so all callers see
 // the same slug. Shared by resolveModelRoutePin (request path) and
 // computeFamilies (admin status).
 func modelRoutePinValue(rc resolvedClientConfig, pin string) modelRoutePin {
@@ -2684,7 +2808,7 @@ func modelRoutePinValue(rc resolvedClientConfig, pin string) modelRoutePin {
 	if alias, ok := rc.ModelAliases[pin]; ok {
 		target = alias
 	}
-	return modelRoutePin{route: "baseten", forcedModel: target, forced: true, pinned: true}
+	return modelRoutePin{route: "openrouter", forcedModel: target, forced: true, pinned: true}
 }
 
 type modelPolicyDecision struct {
@@ -2726,12 +2850,12 @@ func resolveNativeModelPolicyWithFamily(
 			source: pin.source, forced: pin.forced,
 		}
 	}
-	if rc.Route != "baseten" {
+	if rc.Route != "openrouter" {
 		return modelPolicyDecision{route: rc.Route, source: "native_mapping"}
 	}
 	target := rc.DefaultModel
 	return modelPolicyDecision{
-		route: "baseten", model: target, source: "default_baseten", forced: target != "",
+		route: "openrouter", model: target, source: "default_openrouter", forced: target != "",
 	}
 }
 
@@ -2742,7 +2866,7 @@ func resolveNativeModelPolicyWithFamily(
 //     for an anthropic-shape listener), with only documented harness model
 //     decorations canonicalized.
 //   - target (alias resolved through model_aliases, slug verbatim):
-//     primary attempt is baseten with the upstream model FORCED to the
+//     primary attempt is openrouter with the upstream model FORCED to the
 //     target (default model bypassed for this request), body rewritten
 //     via proxy.RewriteModelInBody.
 //
@@ -2787,6 +2911,19 @@ func (g *Gateway) resolveModelRoutePrimaryWithSnapshot(
 		requested,
 		catalogFamily,
 	)
+	runtimeCfg := g.runtimeConfig()
+	if decision.route == pricing.ProviderOpenRouter &&
+		runtimeCfg.OpenRouterKey != "" &&
+		decision.model != "" {
+		if !g.catalogMatchesCredential() {
+			g.kickCatalogRefreshForPricingMiss()
+			return upstreamAttempt{}, errAccountCatalogUnavailable
+		}
+		if !eligibleOpenRouterModel(snapshot, decision.model) {
+			return upstreamAttempt{},
+				unavailableOpenRouterModelError(decision.model)
+		}
+	}
 	if decision.forced {
 		return g.buildAttemptTargetWithSnapshot(
 			snapshot,
@@ -2825,14 +2962,14 @@ func routeEffective(cl *clientListener, at upstreamAttempt) string {
 // ExpectedPrimaryRoute resolves the route a healthy request for
 // requestedID is served by on one config client: native while global
 // routing is Off, otherwise a matching model_routes family pin or the
-// Baseten default. Exported for doctor --probe's served-route check, which
+// OpenRouter default. Exported for doctor --probe's served-route check, which
 // must share the request path's pin resolution:
 // a pin-served probe is the designed route, not fallback evidence, and a
 // telemetry route_effective value alone cannot tell the two apart. An
-// empty requestedID matches no pin and yields the Baseten default.
+// empty requestedID matches no pin and yields the OpenRouter default.
 func ExpectedPrimaryRoute(c config.Client, globalRoutingEnabled bool, requestedID string) string {
 	shape := c.ProtocolShape
-	rt := "baseten"
+	rt := "openrouter"
 	if !globalRoutingEnabled {
 		rt = config.NativeRoute(shape)
 	}
@@ -2896,7 +3033,7 @@ func (g *Gateway) streamForward(cl *clientListener, w http.ResponseWriter, r *ht
 			continue
 		}
 		g.kickPublicCatalogRefresh()
-		if candidate.route == pricing.ProviderBaseten {
+		if candidate.route == pricing.ProviderOpenRouter {
 			g.kickCatalogRefreshForPricingMiss()
 		}
 	}
@@ -2959,11 +3096,9 @@ attemptLoop:
 		}
 
 		ttftExpired := false
+		transientRetries := 0
 		var err error
 		for {
-			var classifierBody []byte
-			classifierReadAttempted := false
-			classifierBodyComplete := false
 			var watch upstreamTTFTWatch
 			resp, err, ttftExpired, watch = startUpstreamSubAttempt(
 				reqCtx,
@@ -2975,6 +3110,35 @@ attemptLoop:
 				watch.stop()
 				watch.cancel()
 				break
+			}
+
+			if at.route == pricing.ProviderOpenRouter {
+				if resp.StatusCode == http.StatusUnauthorized {
+					g.markAuthInvalid(at.credentialFingerprint)
+				}
+			}
+
+			if at.route == pricing.ProviderOpenRouter &&
+				transientRetries == 0 &&
+				retryableOpenRouterStatus(resp.StatusCode) {
+				delay, retry := boundedRetryAfter(
+					resp.Header.Get("Retry-After"),
+					time.Now(),
+				)
+				if retry {
+					watch.stop()
+					_, _ = io.Copy(
+						io.Discard,
+						io.LimitReader(resp.Body, 64<<10),
+					)
+					resp.Body.Close()
+					watch.cancel()
+					if err = waitForRetry(reqCtx, delay); err != nil {
+						break
+					}
+					transientRetries++
+					continue
+				}
 			}
 
 			if !last && fallbackTriggerStatus(resp.StatusCode) {
@@ -3020,58 +3184,6 @@ attemptLoop:
 			// The winning response body still uses this sub-attempt context.
 			// Cancel it only after relay completes.
 			defer watch.cancel()
-			if !last &&
-				reactiveImageFallbackEligible(
-					cl,
-					at,
-					attempts[i+1],
-					resp,
-				) {
-				if !classifierReadAttempted {
-					if !hasDeclaredBoundedClassifierBody(resp) {
-						break
-					}
-					var classifierReadExpired bool
-					classifierBody,
-						classifierBodyComplete,
-						classifierReadExpired =
-						bufferBoundedClassifierBody(
-							resp,
-							ttftDeadline,
-							watch.cancel,
-						)
-					if classifierReadExpired {
-						ttftExpired = true
-						watch.stop()
-						watch.cancel()
-						break
-					}
-				}
-				if classifierBodyComplete &&
-					isBasetenMultimodalUnsupported(
-						at,
-						resp.StatusCode,
-						classifierBody,
-					) {
-					_ = resp.Body.Close()
-					watch.cancel()
-					fmt.Fprintf(
-						os.Stderr,
-						"[gateway] fallback client=%s route=%s trigger=%s -> trying %s\n",
-						cl.cfg.Name,
-						at.route,
-						fallbackTriggerImageUnsupported,
-						attempts[i+1].route,
-					)
-					if at.hasActiveResponsesCompatibility() {
-						attempts[i+1].responsesCompatibility =
-							at.responsesCompatibility
-					}
-					attempts[i+1].fallbackTrigger =
-						fallbackTriggerImageUnsupported
-					continue attemptLoop
-				}
-			}
 			break
 		}
 
@@ -3152,11 +3264,6 @@ attemptLoop:
 		g.relayTranslated(cl, w, resp, at, isStream, start)
 		return
 	}
-	if at.normalizeAnthropicUsage {
-		g.relayBasetenAnthropic(cl, w, resp, at, isStream, start)
-		return
-	}
-
 	upstreamCT := resp.Header.Get("Content-Type")
 	sse := strings.Contains(strings.ToLower(upstreamCT), "text/event-stream")
 	var responsesGuard *responsescompat.SSEGuard
@@ -3320,140 +3427,6 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 		fw.f.Flush()
 	}
 	return n, err
-}
-
-// relayBasetenAnthropic relays a baseten-route, Anthropic-shape (pass-through,
-// untranslated) response while de-double-counting cached tokens in its usage
-// (see usage.NormalizeAnthropicUsage for the Baseten inclusive-input bug,
-// 2026-07-21). Non-streaming bodies are rewritten in full; SSE is normalized
-// per event as it flows so streams are never buffered end to end. Telemetry
-// parses the emitted (normalized) bytes so it matches what the client sees.
-func (g *Gateway) relayBasetenAnthropic(cl *clientListener, w http.ResponseWriter, resp *http.Response, at upstreamAttempt, isStream bool, start time.Time) {
-	res := at.res
-	upstreamCE := resp.Header.Get("Content-Encoding")
-	upstreamCT := resp.Header.Get("Content-Type")
-	sse := strings.Contains(strings.ToLower(upstreamCT), "text/event-stream")
-
-	if !sse {
-		body, readErr := io.ReadAll(resp.Body)
-		decoded := usage.MaybeDecompress(body, upstreamCE)
-		wasCompressed := !bytes.Equal(decoded, body)
-		h := w.Header()
-		proxy.CopyHeader(h, resp.Header)
-		out := body
-		if normalized, changed := usage.NormalizeAnthropicBody(decoded); changed {
-			// We now emit decompressed bytes; the copied Content-Encoding
-			// and Content-Length no longer describe them.
-			out = normalized
-			if wasCompressed {
-				h.Del("Content-Encoding")
-			}
-			h.Set("Content-Length", itoa(len(out)))
-		}
-		w.WriteHeader(resp.StatusCode)
-		_, writeErr := w.Write(out)
-		md := usage.ParseUsageWithSaw(
-			usage.MaybeDecompress(out, h.Get("Content-Encoding")),
-		)
-		status := resp.StatusCode
-		responseComplete := readErr == nil && writeErr == nil
-		contextErr := readErr
-		if writeErr != nil {
-			contextErr = writeErr
-		}
-		g.recordTelemetryV1(cl, at, telemetryCompletionV1{
-			completedAt:           time.Now(),
-			providerReportedModel: optionalStringPointer(md.Model),
-			status:                &status,
-			isStream:              isStream,
-			responseComplete:      responseComplete,
-			contextErr:            contextErr,
-			usageComplete:         md.Saw && responseComplete,
-			usage: observedGatewayUsageV1(
-				md.Usage,
-				md.Saw && responseComplete,
-				telemetryRequestedOneHourCache(at),
-			),
-			actualPricingUnsupported: md.Usage.CacheCreationTokenBreakdownInconsistent,
-			requestBytes:             len(res.NewBody),
-		})
-		return
-	}
-
-	h := w.Header()
-	proxy.CopyHeader(h, resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	flusher, _ := w.(http.Flusher)
-	collected := &bytes.Buffer{}
-	var firstDeltaAt time.Time
-	responseComplete := false
-	var relayErr error
-	br := bufio.NewReader(resp.Body)
-	for {
-		line, rerr := br.ReadBytes('\n')
-		if len(line) > 0 {
-			out := line
-			// Rewrite only the JSON on data: lines; event:/blank framing
-			// lines pass through byte for byte.
-			if trimmed := bytes.TrimSpace(line); bytes.HasPrefix(trimmed, []byte("data:")) {
-				payload := bytes.TrimSpace(trimmed[len("data:"):])
-				if len(payload) > 0 && !bytes.Equal(payload, []byte("[DONE]")) {
-					if nb, changed := usage.NormalizeAnthropicBody(payload); changed {
-						out = append(append([]byte("data: "), nb...), '\n')
-					}
-				}
-			}
-			_, werr := w.Write(out)
-			if flusher != nil {
-				flusher.Flush()
-			}
-			collected.Write(out)
-			if werr != nil {
-				relayErr = werr
-				break
-			}
-			if firstDeltaAt.IsZero() && containsOutputDelta(collected.Bytes()) {
-				firstDeltaAt = time.Now()
-			}
-		}
-		if rerr != nil {
-			responseComplete = errors.Is(rerr, io.EOF)
-			if !responseComplete {
-				relayErr = rerr
-			}
-			break
-		}
-	}
-	md := usage.ParseSSEUsageWithSaw(usage.MaybeDecompress(collected.Bytes(), upstreamCE))
-	status := resp.StatusCode
-	var firstOutputAt *time.Time
-	if !firstDeltaAt.IsZero() {
-		firstOutputAt = &firstDeltaAt
-	}
-	var stopReason *string
-	if md.StopReason != "" {
-		stopReason = &md.StopReason
-	}
-	usageComplete := md.Saw && md.Complete && responseComplete
-	g.recordTelemetryV1(cl, at, telemetryCompletionV1{
-		completedAt:           time.Now(),
-		providerReportedModel: optionalStringPointer(md.Model),
-		status:                &status,
-		isStream:              isStream,
-		firstOutputAt:         firstOutputAt,
-		responseComplete:      responseComplete,
-		contextErr:            relayErr,
-		usageComplete:         usageComplete,
-		usage: observedGatewayUsageV1(
-			md.Usage,
-			usageComplete,
-			telemetryRequestedOneHourCache(at),
-		),
-		actualPricingUnsupported: md.Usage.CacheCreationTokenBreakdownInconsistent,
-		providerStopReason:       stopReason,
-		toolCalls:                md.ToolCalls,
-		requestBytes:             len(res.NewBody),
-	})
 }
 
 // relayTranslated converts an openai chat.completions response (SSE or
@@ -3730,8 +3703,6 @@ func (g *Gateway) monitorStubOpenAIResponses(cl *clientListener, w http.Response
 
 func (g *Gateway) Serve(ctx context.Context) error {
 	g.ctx = ctx
-	g.wg.Add(1)
-	go g.runAuthTick(ctx)
 	errCh := make(chan error, 2)
 	go func() { errCh <- g.adminServer.Serve(g.adminListener) }()
 	for _, lg := range g.snapshotGroups() {
@@ -3785,7 +3756,6 @@ func (g *Gateway) snapshotGroups() []*listenerGroup {
 }
 
 func (g *Gateway) Shutdown(ctx context.Context) error {
-	g.authTickStopOnce.Do(func() { close(g.authTickStop) })
 	g.stopCatalogRefresh()
 	g.stopPublicCatalogRefresh()
 	var firstErr error
@@ -3910,7 +3880,7 @@ func resolveFromFile(f *config.File) ([]resolvedClientConfig, error) {
 			}
 			claimed[k] = c.Name
 		}
-		rt := "baseten"
+		rt := "openrouter"
 		if !*f.Global.RoutingEnabled {
 			rt = config.NativeRoute(shape)
 		}
@@ -3948,14 +3918,14 @@ func resolveFromFile(f *config.File) ([]resolvedClientConfig, error) {
 				c.Name, fb, shape)
 			fb = ""
 		}
-		// upstream_shape stays live on non-baseten routes when
+		// upstream_shape stays live on non-openrouter routes when
 		// model_aliases exist: explicit alias/slug choices still produce
-		// baseten attempts with the switch off.
+		// openrouter attempts with the switch off.
 		us := c.UpstreamShape
-		if us != "" && ((rt != "baseten" && len(c.ModelAliases) == 0) || (us != "anthropic" && us != "openai") ||
+		if us != "" && ((rt != "openrouter" && len(c.ModelAliases) == 0) || (us != "anthropic" && us != "openai") ||
 			(shape == "openai" && us == "anthropic")) {
 			fmt.Fprintf(os.Stderr,
-				"[gateway] client %s: ignoring upstream_shape %q (baseten route or model_aliases only, anthropic|openai, reverse translation not implemented)\n",
+				"[gateway] client %s: ignoring upstream_shape %q (openrouter route or model_aliases only, anthropic|openai, reverse translation not implemented)\n",
 				c.Name, us)
 			us = ""
 		}
@@ -3998,7 +3968,7 @@ var modelFamilySet = []string{"fable", "opus", "sonnet", "haiku"}
 
 // bracketSuffixRe matches one trailing harness context selection like [1m].
 // Claude Code normally removes this decoration before provider inference. If
-// it reaches the gateway, Baseten captures it separately and strips it from the
+// it reaches the gateway, OpenRouter captures it separately and strips it from the
 // canonical provider model.
 var bracketSuffixRe = regexp.MustCompile(`\[[^\]]*\]$`)
 
@@ -4052,13 +4022,13 @@ func validateModelAliases(c config.Client, shape string) error {
 	}
 	for _, id := range sortedKeys(ids) {
 		if c.ModelAliases[id] == "" {
-			return fmt.Errorf("client %q: model_aliases[%q] has an empty Baseten slug", c.Name, id)
+			return fmt.Errorf("client %q: model_aliases[%q] has an empty OpenRouter slug", c.Name, id)
 		}
 		if !discoveryPrefixOK(id) {
-			return fmt.Errorf("client %q: model_aliases id %q would be dropped by Claude Code's discovery filter (ids must begin with \"claude\" or \"anthropic\"); rename it, e.g. claude-baseten-%s", c.Name, id, id)
+			return fmt.Errorf("client %q: model_aliases id %q would be dropped by Claude Code's discovery filter (ids must begin with \"claude\" or \"anthropic\"); rename it, e.g. claude-openrouter-%s", c.Name, id, id)
 		}
 		if reservedAnthropicModelRe.MatchString(id) {
-			return fmt.Errorf("client %q: model_aliases id %q collides with real Anthropic model names and would hijack native requests; use the claude-baseten-/anthropic-baseten- namespace instead", c.Name, id)
+			return fmt.Errorf("client %q: model_aliases id %q collides with real Anthropic model names and would hijack native requests; use the claude-openrouter-/anthropic-openrouter- namespace instead", c.Name, id)
 		}
 	}
 	return nil
@@ -4087,7 +4057,7 @@ func validateSubagentConfig(c config.Client, shape string) error {
 		return nil
 	}
 	// Three value classes, same as the CLI: a configured alias, a raw
-	// Baseten slug (contains "/"), or a native claude-*/anthropic-* id.
+	// OpenRouter slug (contains "/"), or a native claude-*/anthropic-* id.
 	if _, ok := c.ModelAliases[c.SubagentModel]; ok {
 		return nil
 	}
@@ -4104,7 +4074,7 @@ func validateSubagentConfig(c config.Client, shape string) error {
 	if discoveryPrefixOK(c.SubagentModel) {
 		return nil
 	}
-	return fmt.Errorf("client %q: subagent_model %q is not a configured alias, a raw Baseten slug (must contain \"/\"), or a native claude-*/anthropic-* id; fix the value in gateway.yaml", c.Name, c.SubagentModel)
+	return fmt.Errorf("client %q: subagent_model %q is not a configured alias, a raw OpenRouter slug (must contain \"/\"), or a native claude-*/anthropic-* id; fix the value in gateway.yaml", c.Name, c.SubagentModel)
 }
 
 // ValidModelRouteKey reports whether key is one of the supported
@@ -4144,7 +4114,7 @@ func validateModelRoutes(c config.Client, shape string) error {
 	for _, key := range sortedKeys(keys) {
 		val := c.ModelRoutes[key]
 		if val == "" {
-			return fmt.Errorf("client %q: model_routes[%q] has an empty value; use \"native\", a configured alias, or a Baseten slug (contains \"/\")", c.Name, key)
+			return fmt.Errorf("client %q: model_routes[%q] has an empty value; use \"native\", a configured alias, or a OpenRouter slug (contains \"/\")", c.Name, key)
 		}
 		if !ValidModelRouteKey(key) {
 			return fmt.Errorf("client %q: model_routes key %q is invalid (allowed: %s); fix the key in gateway.yaml", c.Name, key, strings.Join(modelFamilySet, ", "))
@@ -4166,7 +4136,7 @@ func validateModelRoutes(c config.Client, shape string) error {
 		if strings.Contains(val, "/") {
 			continue
 		}
-		return fmt.Errorf("client %q: model_routes[%q] value %q is not \"native\", a configured alias, or a raw Baseten slug (must contain \"/\"); fix the value in gateway.yaml", c.Name, key, val)
+		return fmt.Errorf("client %q: model_routes[%q] value %q is not \"native\", a configured alias, or a raw OpenRouter slug (must contain \"/\"); fix the value in gateway.yaml", c.Name, key, val)
 	}
 	return nil
 }
@@ -4250,11 +4220,13 @@ func (g *Gateway) reloadConfig() {
 	// Apply validated auth/environment values only after topology preparation
 	// succeeds, so a rejected reload cannot partially mutate runtime config.
 	applyConfigEnv(activeFile)
-	if v := os.Getenv("BASETEN_API_KEY"); v != "" {
-		candidateCfg.BasetenKey = v
-	}
-	if v := os.Getenv("BASETEN_BASE_URL"); v != "" {
-		candidateCfg.BasetenURL = v
+	key, source, credentialErr := resolveConfigCredential(candidateCfg)
+	candidateCfg.OpenRouterKey = key
+	candidateCfg.CredentialSource = source
+	candidateCfg.CredentialFingerprint = auth.CredentialFingerprint(key)
+	candidateCfg.CredentialError = credentialErr
+	if v := os.Getenv("OPENROUTER_BASE_URL"); v != "" {
+		candidateCfg.OpenRouterURL = v
 	}
 	if v := os.Getenv("ANTHROPIC_API_BASE_URL"); v != "" {
 		candidateCfg.AnthropicURL = v
@@ -4379,18 +4351,25 @@ func Run(cfg Config) error {
 		return err
 	}
 	resolved := snapshot.clients
-	// Apply global.auth from those same accepted bytes before anything reads
-	// cfg.BasetenKey (pricing hydration, listeners).
+	// Apply native-provider auth from the accepted bytes, then resolve the
+	// OpenRouter credential through the Keychain-first resolver. Never let a
+	// gateway.yaml value override the credential store.
 	applyConfigEnv(snapshot.file)
-	if v := os.Getenv("BASETEN_API_KEY"); v != "" {
-		cfg.BasetenKey = v
-	}
+	key, source, credentialErr := resolveConfigCredential(cfg)
+	cfg.OpenRouterKey = key
+	cfg.CredentialSource = source
+	cfg.CredentialFingerprint = auth.CredentialFingerprint(key)
+	cfg.CredentialError = credentialErr
 	adminL, err := net.Listen("tcp", cfg.AdminAddr)
 	if err != nil {
 		return fmt.Errorf("bind admin %s: %w", cfg.AdminAddr, err)
 	}
 	p := pricing.New()
-	loadProviderCatalogCaches(p, cfg.ConfigPath)
+	loadProviderCatalogCaches(
+		p,
+		cfg.ConfigPath,
+		configCredentialFingerprint(cfg),
+	)
 	if err := pidfile.WriteAt(cfg.PidFile, os.Getpid()); err != nil {
 		return fmt.Errorf("write pidfile: %w", err)
 	}
@@ -4403,15 +4382,15 @@ func Run(cfg Config) error {
 		fmt.Fprintf(os.Stderr, "[gateway] warning: could not record config path next to pidfile: %v\n", err)
 	}
 	// Fail-fast preflight (warn-only): unresolved ${VAR} placeholders and
-	// baseten-routed clients without a usable credential.
+	// openrouter-routed clients without a usable credential.
 	runPreflight(&cfg, resolved, os.Stderr)
 	g, err := newGatewayWithSnapshot(cfg, p, adminL, resolved, snapshot)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr,
-		"[gateway] admin on %s; baseten=%s anthropic=%s openai=%s config_path=%s clients=%d\n",
-		cfg.AdminAddr, cfg.BasetenURL, cfg.AnthropicURL, cfg.OpenAIURL, cfg.ConfigPath, len(resolved))
+		"[gateway] admin on %s; openrouter=%s anthropic=%s openai=%s config_path=%s clients=%d\n",
+		cfg.AdminAddr, cfg.OpenRouterURL, cfg.AnthropicURL, cfg.OpenAIURL, cfg.ConfigPath, len(resolved))
 	for _, cl := range g.snapshotClients() {
 		fmt.Fprintf(os.Stderr, "[gateway] listener %q on %s shape=%s route=%s\n",
 			cl.name, cl.Addr().String(), cl.cfg.ProtocolShape, cl.cfg.Route)

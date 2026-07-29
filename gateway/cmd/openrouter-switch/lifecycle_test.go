@@ -181,15 +181,39 @@ func fakeAdmin(t *testing.T) *httptest.Server {
 	})
 	mux.HandleFunc("/v1/admin/status", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"clients":[
-			{"name":"claude-code","enabled":true,"bind_addr":"127.0.0.1:18081","effective_route":"baseten","protocol_shape":"anthropic"},
+			{"name":"claude-code","enabled":true,"bind_addr":"127.0.0.1:18081","effective_route":"openrouter","protocol_shape":"anthropic"},
 			{"name":"codex","enabled":true,"bind_addr":"127.0.0.1:18081","effective_route":"openai","protocol_shape":"openai"},
-			{"name":"parked","enabled":false,"bind_addr":"127.0.0.1:18082","effective_route":"baseten","protocol_shape":"openai"}
+			{"name":"parked","enabled":false,"bind_addr":"127.0.0.1:18082","effective_route":"openrouter","protocol_shape":"openai"}
 		]}`)
 	})
 	mux.HandleFunc("/v1/admin/auth/status", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"signed_in":true,"email":"user@example.com","fallback_enabled":false,"fallback_in_use":false}`)
+		fmt.Fprint(w, `{"status":"valid","source":"environment"}`)
 	})
 	return httptest.NewServer(mux)
+}
+
+func TestAuthLineUsesOpenRouterCredentialStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"configured", `{"status":"configured","source":"keychain"}`, "OpenRouter API key configured (keychain)"},
+		{"valid", `{"status":"valid","source":"environment"}`, "OpenRouter API key valid (environment)"},
+		{"invalid", `{"status":"invalid"}`, "OpenRouter API key invalid (run 'openrouter-switch auth set-key')"},
+		{"missing", `{"status":"missing"}`, "OpenRouter API key not configured (run 'openrouter-switch auth set-key' or set OPENROUTER_API_KEY)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fmt.Fprint(w, tc.payload)
+			}))
+			defer srv.Close()
+			if got := authLine(hostPort(t, srv.URL), true); got != tc.want {
+				t.Fatalf("authLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func fakeDoor(t *testing.T) *httptest.Server {
@@ -245,7 +269,7 @@ func TestPrintStatusExitCodes(t *testing.T) {
 			0,
 			[]string{"Router:  up", "claude-code", "switch ON", "codex", "switch OFF",
 				"Door:    up", "not tripped", "3 fallback rules",
-				"Auth:    signed in (OAuth, user@example.com)"},
+				"Auth:    OpenRouter API key valid (environment)"},
 		},
 		{
 			"router down",

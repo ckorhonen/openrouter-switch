@@ -89,7 +89,7 @@ type AdapterAvailability struct {
 
 // PolicyError is a local request preflight error. Gateway routing may advance
 // mapped/default traffic to its already-resolved native fallback, while
-// explicit Baseten selections remain loud local errors.
+// explicit OpenRouter selections remain loud local errors.
 type PolicyError struct {
 	Model     string
 	Mode      Mode
@@ -102,7 +102,7 @@ type PolicyError struct {
 
 func (e *PolicyError) Error() string {
 	return fmt.Sprintf(
-		"reasoning_policy_error: Baseten model %q cannot apply reasoning mode %q on %s: %s",
+		"reasoning_policy_error: OpenRouter model %q cannot apply reasoning mode %q on %s: %s",
 		e.Model,
 		e.Mode,
 		e.WireShape,
@@ -210,7 +210,7 @@ func Resolve(in Input) (Decision, error) {
 // uses this to preserve and explain unavailable saved values. Resolve performs
 // the request-time capability and adapter validation afterward.
 func EffectivePolicy(in Input) Decision {
-	if in.Provider != "baseten" {
+	if in.Provider != "openrouter" {
 		return Decision{
 			Mode:   ModePassthrough,
 			Source: SourceInternalPassthrough,
@@ -243,7 +243,7 @@ func ReviewedAdapterAvailability(in Input) AdapterAvailability {
 		Modes:   []Mode{},
 		Efforts: []string{},
 	}
-	if in.Provider != "baseten" ||
+	if in.Provider != "openrouter" ||
 		in.WireShape != WireAnthropicMessages ||
 		!in.Capability.Known ||
 		!in.Capability.Supported {
@@ -265,7 +265,7 @@ func ReviewedAdapterAvailability(in Input) AdapterAvailability {
 }
 
 func supportsMessagesOff(in Input) bool {
-	return in.Provider == "baseten" &&
+	return in.Provider == "openrouter" &&
 		in.WireShape == WireAnthropicMessages &&
 		in.Capability.Known &&
 		in.Capability.Supported &&
@@ -273,7 +273,7 @@ func supportsMessagesOff(in Input) bool {
 }
 
 func supportsMessagesFollowHarness(in Input) bool {
-	return in.Provider == "baseten" &&
+	return in.Provider == "openrouter" &&
 		in.WireShape == WireAnthropicMessages &&
 		in.Capability.Known &&
 		in.Capability.Supported &&
@@ -333,7 +333,7 @@ func InspectAnthropicMessages(body []byte) RequestedReasoning {
 // ApplyAnthropicMessages applies a reviewed same-shape Messages policy.
 // Passthrough preserves the original bytes. Follow Harness preserves reviewed
 // enabled and disabled controls, and normalizes Claude's adaptive control to
-// the Baseten Messages toggle shape. Off replaces only the top-level reasoning
+// the OpenRouter Messages toggle shape. Off replaces only the top-level reasoning
 // control. Every transform retains all other JSON fields.
 func ApplyAnthropicMessages(body []byte, decision Decision) ([]byte, error) {
 	switch decision.Mode {

@@ -27,8 +27,8 @@ receive security review.
 - Prefer a vetted dependency when implementing security-sensitive platform
   behavior by hand would create greater risk.
 
-The current direct Go dependencies provide OS keychain access, OAuth support,
-and YAML parsing. The Swift app has no external packages. Changes to Go
+The current direct Go dependencies provide OS keychain access and YAML parsing.
+The Swift app has no external packages. Changes to Go
 modules, Nix inputs, GitHub Actions, vendored material, or remote network
 destinations must describe their effect on the dependency and trust boundary.
 
@@ -45,9 +45,8 @@ scripts/check.sh --offline
 ```
 
 Maintainers run `scripts/check.sh` before accepting a release candidate. The
-full gate includes a live identity refresh against the maintainer's existing
-Baseten CLI credential store. It must not be run with credentials supplied by
-an untrusted pull request.
+full gate includes authenticated OpenRouter key and account-catalog probes. It
+must not be run with credentials supplied by an untrusted pull request.
 
 ## Pull requests
 

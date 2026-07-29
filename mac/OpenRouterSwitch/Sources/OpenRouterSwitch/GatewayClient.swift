@@ -236,13 +236,14 @@ struct ModelCatalogEntry: Equatable, Sendable {
 
 enum LiveModelCatalogResponseState: String, Equatable, Sendable {
     case ready
-    case signedOut = "signed_out"
+    case unavailable
     case error
 }
 
-enum LiveModelCatalogSignedOutReason: String, Equatable, Sendable {
-    case notSignedIn = "not_signed_in"
-    case sessionExpired = "session_expired"
+enum LiveModelCatalogUnavailableReason: String, Equatable, Sendable {
+    case missingCredentials = "missing_credentials"
+    case invalidCredentials = "invalid_credentials"
+    case forbidden
 }
 
 enum ReasoningOptionType: String, Equatable, Sendable {
@@ -331,16 +332,30 @@ struct ReasoningCapability: Equatable, Sendable {
 struct LiveModelCatalogEntry: Equatable, Sendable {
     let slug: String
     let displayName: String
+    let toolCapable: Bool
+    let contextTokens: Int64?
+    let maxOutputTokens: Int64?
+    let inputModalities: [String]
+    let outputModalities: [String]
+    let supportedParameters: [String]
     let reasoning: ReasoningCapability?
 
     init?(dict: [String: Any]) {
         guard let slug = dict["slug"] as? String,
               !slug.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let displayName = dict["display_name"] as? String else {
+              let displayName = dict["display_name"] as? String,
+              let toolCapable = dict["tool_capable"] as? Bool else {
             return nil
         }
         self.slug = slug
         self.displayName = displayName
+        self.toolCapable = toolCapable
+        contextTokens = Self.int64(dict["context_tokens"])
+        maxOutputTokens = Self.int64(dict["max_output_tokens"])
+        inputModalities = dict["input_modalities"] as? [String] ?? []
+        outputModalities = dict["output_modalities"] as? [String] ?? []
+        supportedParameters =
+            dict["supported_parameters"] as? [String] ?? []
         if let rawReasoning = dict["reasoning"] {
             guard let reasoningDict = rawReasoning as? [String: Any],
                   let reasoning = ReasoningCapability(
@@ -355,6 +370,20 @@ struct LiveModelCatalogEntry: Equatable, Sendable {
 
     var displayLabel: String {
         displayName.isEmpty ? slug : displayName
+    }
+
+    var selectable: Bool {
+        toolCapable && supportedParameters.contains("tools")
+    }
+
+    private static func int64(_ value: Any?) -> Int64? {
+        if let value = value as? NSNumber {
+            return value.int64Value
+        }
+        if let value = value as? String {
+            return Int64(value)
+        }
+        return nil
     }
 }
 
@@ -544,7 +573,7 @@ struct ReasoningPreflightSnapshot: Equatable, Sendable {
 
 struct LiveModelCatalogSnapshot: Equatable, Sendable {
     let state: LiveModelCatalogResponseState
-    let signedOutReason: LiveModelCatalogSignedOutReason?
+    let unavailableReason: LiveModelCatalogUnavailableReason?
     let models: [LiveModelCatalogEntry]
     let fetchedAt: String
     let error: String
@@ -552,23 +581,22 @@ struct LiveModelCatalogSnapshot: Equatable, Sendable {
     init?(dict: [String: Any]) {
         guard let rawState = dict["state"] as? String,
               let state = LiveModelCatalogResponseState(rawValue: rawState),
-              let rawSignedOutReason = dict["signed_out_reason"] as? String,
-              let array = dict["models"] as? [[String: Any]],
-              let fetchedAt = dict["fetched_at"] as? String,
-              let error = dict["error"] as? String else {
+              let array = dict["models"] as? [[String: Any]] else {
             return nil
         }
+        let rawUnavailableReason =
+            dict["unavailable_reason"] as? String ?? ""
         self.state = state
         switch state {
-        case .signedOut:
-            guard let reason = LiveModelCatalogSignedOutReason(
-                rawValue: rawSignedOutReason) else {
+        case .unavailable:
+            guard let reason = LiveModelCatalogUnavailableReason(
+                rawValue: rawUnavailableReason) else {
                 return nil
             }
-            signedOutReason = reason
+            unavailableReason = reason
         case .ready, .error:
-            guard rawSignedOutReason.isEmpty else { return nil }
-            signedOutReason = nil
+            guard rawUnavailableReason.isEmpty else { return nil }
+            unavailableReason = nil
         }
         var models: [LiveModelCatalogEntry] = []
         for row in array {
@@ -578,8 +606,8 @@ struct LiveModelCatalogSnapshot: Equatable, Sendable {
             models.append(model)
         }
         self.models = models
-        self.fetchedAt = fetchedAt
-        self.error = error
+        fetchedAt = dict["fetched_at"] as? String ?? ""
+        error = dict["error"] as? String ?? ""
     }
 }
 
@@ -589,20 +617,73 @@ struct HealthSnapshot: Equatable, Sendable {
 }
 
 struct AuthStatus: Equatable, Sendable {
-    var signedIn: Bool
-    var profile: String
-    var fallbackEnabled: Bool
-    var fallbackInUse: Bool
-    var health: String
-    var lastRefreshError: String
+    var status: String
+    var source: String
+    var maskedLabel: String
+    var limit: Double?
+    var limitRemaining: Double?
+    var limitReset: String
+    var isFreeTier: Bool?
+    var expiresAt: String
+    var validatedAt: String
+    var error: String
 
     init(dict: [String: Any]) {
-        signedIn = dict["signed_in"] as? Bool ?? false
-        profile = dict["profile"] as? String ?? ""
-        fallbackEnabled = dict["fallback_enabled"] as? Bool ?? false
-        fallbackInUse = dict["fallback_in_use"] as? Bool ?? false
-        health = dict["health"] as? String ?? ""
-        lastRefreshError = dict["last_refresh_error"] as? String ?? ""
+        if let value = dict["status"] as? String {
+            status = value
+        } else if let value = dict["health"] as? String {
+            status = value
+        } else if dict["signed_in"] as? Bool == true {
+            status = "valid"
+        } else {
+            status = "unknown"
+        }
+        source = dict["source"] as? String ?? ""
+        maskedLabel = dict["masked_label"] as? String
+            ?? dict["label"] as? String
+            ?? ""
+        limit = Self.number(dict["limit"])
+        limitRemaining = Self.number(dict["limit_remaining"])
+        limitReset = dict["limit_reset"] as? String
+            ?? dict["limit_reset_interval"] as? String
+            ?? ""
+        isFreeTier = dict["is_free_tier"] as? Bool
+        expiresAt = dict["expires_at"] as? String ?? ""
+        validatedAt = dict["validated_at"] as? String
+            ?? dict["last_ok_at"] as? String
+            ?? ""
+        error = dict["error"] as? String
+            ?? dict["last_validation_error"] as? String
+            ?? dict["last_error"] as? String
+            ?? ""
+    }
+
+    var isConfigured: Bool {
+        status != "missing" && status != "signed_out"
+    }
+
+    var isValid: Bool {
+        status == "valid" || status == "ok"
+    }
+
+    var needsAttention: Bool {
+        status == "invalid"
+            || status == "missing"
+            || status == "signed_out"
+            || status == "forbidden"
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        if value is Bool {
+            return nil
+        }
+        if let value = value as? NSNumber {
+            return value.doubleValue
+        }
+        if let value = value as? String {
+            return Double(value)
+        }
+        return nil
     }
 }
 
@@ -663,9 +744,18 @@ protocol ReasoningPreflightReading: Sendable {
     ) async throws -> ReasoningPreflightSnapshot
 }
 
+protocol CredentialReloading: Sendable {
+    func reloadCredentials() async throws -> AuthStatus
+}
+
 final class GatewayAPIClient: AdminStatusReading, ModelCatalogReading,
-                              ReasoningPreflightReading,
+                              ReasoningPreflightReading, CredentialReloading,
                               @unchecked Sendable {
+    private static let defaultRequestTimeout: TimeInterval = 2
+    private static let credentialReloadRequestTimeout: TimeInterval = 7
+    private static let modelCatalogRequestTimeout: TimeInterval = 22
+    private static let maximumResourceTimeout: TimeInterval = 25
+
     private let runtime: RuntimeProfile
     private let session: URLSession
 
@@ -675,8 +765,10 @@ final class GatewayAPIClient: AdminStatusReading, ModelCatalogReading,
             self.session = session
         } else {
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 2
-            configuration.timeoutIntervalForResource = 5
+            configuration.timeoutIntervalForRequest =
+                Self.defaultRequestTimeout
+            configuration.timeoutIntervalForResource =
+                Self.maximumResourceTimeout
             configuration.waitsForConnectivity = false
             configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
             configuration.urlCache = nil
@@ -705,7 +797,9 @@ final class GatewayAPIClient: AdminStatusReading, ModelCatalogReading,
     }
 
     func fetchModelCatalog() async throws -> LiveModelCatalogSnapshot {
-        let object = try await getJSON("v1/admin/model-catalog")
+        let object = try await getJSON(
+            "v1/admin/model-catalog",
+            timeout: Self.modelCatalogRequestTimeout)
         guard let dict = object as? [String: Any],
               let snapshot = LiveModelCatalogSnapshot(dict: dict) else {
             throw GatewayClientError.invalidPayload
@@ -735,8 +829,23 @@ final class GatewayAPIClient: AdminStatusReading, ModelCatalogReading,
         return snapshot
     }
 
-    private func getJSON(_ path: String,
-                         query: [URLQueryItem] = []) async throws -> Any {
+    func reloadCredentials() async throws -> AuthStatus {
+        let object = try await postJSON(
+            "v1/admin/auth/reload",
+            body: [:],
+            timeout: Self.credentialReloadRequestTimeout)
+        guard let envelope = object as? [String: Any] else {
+            throw GatewayClientError.invalidPayload
+        }
+        let row = envelope["auth"] as? [String: Any] ?? envelope
+        return AuthStatus(dict: row)
+    }
+
+    private func getJSON(
+        _ path: String,
+        query: [URLQueryItem] = [],
+        timeout: TimeInterval = GatewayAPIClient.defaultRequestTimeout
+    ) async throws -> Any {
         var url = adminBaseURL(runtime: runtime)
         url.appendPathComponent(path)
         if !query.isEmpty,
@@ -746,7 +855,9 @@ final class GatewayAPIClient: AdminStatusReading, ModelCatalogReading,
                 url = queriedURL
             }
         }
-        let (data, response) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else {
             throw GatewayClientError.badResponse(
@@ -757,11 +868,13 @@ final class GatewayAPIClient: AdminStatusReading, ModelCatalogReading,
 
     private func postJSON(
         _ path: String,
-        body: [String: Any]
+        body: [String: Any],
+        timeout: TimeInterval = GatewayAPIClient.defaultRequestTimeout
     ) async throws -> Any {
         var request = URLRequest(
             url: adminBaseURL(runtime: runtime)
                 .appendingPathComponent(path))
+        request.timeoutInterval = timeout
         request.httpMethod = "POST"
         request.setValue(
             "application/json",

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,14 +15,31 @@ import (
 	"time"
 
 	"github.com/ckorhonen/openrouter-switch/gateway/cmd/gateway"
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/version"
 )
 
+func captureStdout(t *testing.T, fn func() int) (string, int) {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	code := fn()
+	_ = w.Close()
+	os.Stdout = old
+	b, _ := io.ReadAll(r)
+	_ = r.Close()
+	return string(b), code
+}
+
 // All doctor tests are hermetic: every path and address goes through
 // the documented env seams (OPENROUTER_SWITCH_CONFIG_PATH, OPENROUTER_SWITCH_ADMIN_ADDR,
-// OPENROUTER_SWITCH_CLAUDE_SETTINGS, OPENROUTER_SWITCH_BACKUP_DIR, OPENROUTER_SWITCH_AUTH_FILE,
+// OPENROUTER_SWITCH_CLAUDE_SETTINGS, OPENROUTER_SWITCH_BACKUP_DIR,
 // telemetry_dir, OPENROUTER_SWITCH_LAUNCHD=off, ...) so the real
 // ~/.claude/settings.json, ~/.config/openrouter-switch, launchd domain, and
 // credential store are never read or written, and no running gateway
@@ -33,14 +51,13 @@ type doctorFixtureCfg struct {
 	adminDown        bool              // nothing listens on the admin addr
 	adminForeign     bool              // a non-router process owns the admin addr
 	doorRouter       string            // /doorz-reported router addr ("" = the bound client listener)
-	signedIn         bool              // set by newDoctorFixture default; false = empty auth store
-	globalAuth       string            // extra global.auth yaml block ("" = none)
+	hasAPIKey        bool              // set by newDoctorFixture default; false = no OpenRouter API key
 	settingsJSON     string            // claude settings content ("" = pointing at the door)
 	subagentModel    string            // sets subagent_model on the claude-code client in gateway.yaml
 	subagentRouting  string            // sets subagent_routing on the claude-code client ("" = omitted)
 	subagentEnvModel string            // adds CLAUDE_CODE_SUBAGENT_MODEL to the settings env block
 	modelAliases     map[string]string // model_aliases on the claude-code client (nil = none)
-	clientRoute      string            // admin-reported route ("" = baseten)
+	clientRoute      string            // admin-reported route ("" = openrouter)
 	fallbackRoute    string            // admin-reported fallback_route ("" = none)
 	// telRows writes synthetic telemetry rows: each is (ts, subagent).
 	// ts is seconds offset from now (negative = past).
@@ -63,19 +80,13 @@ type doctorFixtureCfg struct {
 	// ANTHROPIC_DEFAULT_*_MODEL) to the settings env block. Used by the
 	// doctor model_env check (the fireconnect survey hazard).
 	modelEnvVars map[string]string
-	// authHealth sets the health field the fake admin serves at
+	// authHealth sets the status field the fake admin serves at
 	// /v1/admin/auth/status ("-" omits the required field).
 	authHealth string
-	// authLastError sets last_refresh_error alongside authHealth.
+	// authLastError sets last_error alongside authHealth.
 	authLastError string
-	// basetenVersions writes one fake baseten CLI per entry (each in
-	// its own fake PATH dir printing the entry for --version). nil = a
-	// single "baseten 0.2.0" so the green chain sees one healthy CLI.
-	basetenVersions []string
-	// noBasetenCLI empties the fake PATH so the two-CLI check skips.
-	noBasetenCLI bool
 	// doorProbe makes the fake door answer probe POSTs, stamping
-	// X-Baseten-Switch-Door with this value ("router" or "fallback"; "none"
+	// X-OpenRouter-Switch-Door with this value ("router" or "fallback"; "none"
 	// answers without the required header). "" leaves the door /doorz-only
 	// (non-probe tests unaffected).
 	doorProbe string
@@ -181,7 +192,7 @@ func startClientListener(t *testing.T) string {
 
 func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture {
 	t.Helper()
-	cfg := doctorFixtureCfg{signedIn: true, authHealth: "ok"}
+	cfg := doctorFixtureCfg{hasAPIKey: true, authHealth: "valid"}
 	if mut != nil {
 		mut(&cfg)
 	}
@@ -208,27 +219,27 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 		})
 		clientRoute := cfg.clientRoute
 		if clientRoute == "" {
-			clientRoute = "baseten"
+			clientRoute = "openrouter"
 		}
 		mux.HandleFunc("/v1/admin/status", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `{"uptime_seconds":42,"version":%q,
-				"auth":{"signed_in":true,"profile":"doc","fallback_enabled":false,"fallback_in_use":false},
+				"auth":{"status":"valid","source":"keychain"},
 				"clients":[{"name":"claude-code","enabled":true,"bind_addr":%q,"protocol_shape":"anthropic",
 					"effective_route":%q,"fallback_route":%q,"auth_set":true,"currently_bound":true}]}`,
 				version.Version, fx.clientAddr, clientRoute, cfg.fallbackRoute)
 		})
 		mux.HandleFunc("/v1/admin/auth/status", func(w http.ResponseWriter, r *http.Request) {
-			healthPart := ""
+			statusPart := ""
 			if cfg.authHealth != "-" {
 				// json.Marshal, not %q: the error text is server
 				// controlled and may hold bytes Go escapes in ways JSON
 				// does not accept (\x..), exactly like the real admin
 				// endpoint's encoder handles them.
 				errJSON, _ := json.Marshal(cfg.authLastError)
-				healthPart = fmt.Sprintf(`"health":%q,"last_refresh_error":%s,"last_refresh_error_at":"2026-07-13T09:55:00Z",`,
+				statusPart = fmt.Sprintf(`"status":%q,"last_error":%s,`,
 					cfg.authHealth, errJSON)
 			}
-			fmt.Fprintf(w, `{"signed_in":true,%s"profile":"doc","fallback_enabled":false,"fallback_in_use":false,"email":"doc@example.com"}`, healthPart)
+			fmt.Fprintf(w, `{%s"source":"keychain"}`, statusPart)
 		})
 		srv := httptest.NewServer(mux)
 		t.Cleanup(srv.Close)
@@ -271,7 +282,7 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 							completedAt.Add(time.Nanosecond),
 							2,
 							"claude-code",
-							"baseten",
+							"openrouter",
 							"anthropic",
 							cfg.probeConcurrentModel,
 							http.StatusOK,
@@ -283,7 +294,7 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 					}
 				}
 				if cfg.doorProbe != "none" {
-					w.Header().Set("X-Baseten-Switch-Door", cfg.doorProbe)
+					w.Header().Set("X-OpenRouter-Switch-Door", cfg.doorProbe)
 				}
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprint(w, `{"model":"probe-model"}`)
@@ -302,9 +313,6 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 		"global:\n  routing_enabled: true\n  telemetry_dir: %q\n",
 		telDir,
 	)
-	if cfg.globalAuth != "" {
-		globalBlock += "  auth:\n    baseten: " + cfg.globalAuth + "\n"
-	}
 	aliasBlock := ""
 	if len(cfg.modelAliases) > 0 {
 		aliasBlock = "    model_aliases:\n"
@@ -386,23 +394,18 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 		t.Fatal(err)
 	}
 
-	// Auth store.
-	if cfg.signedIn {
-		expiry := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-		writeAuthJSON(t, fmt.Sprintf(`{
-  "version": 1,
-  "current": "doc@example.com",
-  "profiles": {
-    "doc@example.com": {
-      "remote_url": "https://app.example.com",
-      "auth_type": "oauth",
-      "oauth_credential": {"access_token": "at", "refresh_token": "rt", "expiry": %q}
-    }
-  }
-}`, expiry))
+	// Auth resolver seam: doctor tests never touch the real Keychain.
+	oldResolveAPIKey := doctorResolveAPIKey
+	if cfg.hasAPIKey {
+		doctorResolveAPIKey = func() (string, auth.Source, error) {
+			return "sk-or-v1-test", auth.SourceKeychain, nil
+		}
 	} else {
-		writeAuthJSON(t, `{"version":1,"profiles":{}}`)
+		doctorResolveAPIKey = func() (string, auth.Source, error) {
+			return "", "", auth.ErrNoAPIKey
+		}
 	}
+	t.Cleanup(func() { doctorResolveAPIKey = oldResolveAPIKey })
 
 	// Telemetry v1 store. Default: one fresh request event (no subagent).
 	// When cfg.telRows is set, write those events instead.
@@ -413,8 +416,8 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 				time.Unix(row.TS, 0),
 				index+1,
 				"claude-code",
-				"baseten",
-				"baseten",
+				"openrouter",
+				"openrouter",
 				"",
 				http.StatusOK,
 				row.Subagent,
@@ -425,8 +428,8 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 			time.Now(),
 			1,
 			"claude-code",
-			"baseten",
-			"baseten",
+			"openrouter",
+			"openrouter",
 			"",
 			http.StatusOK,
 			false,
@@ -473,29 +476,6 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 	menubarLocalBin = func() string { return filepath.Join(dir, "nope-local", "openrouter-switch") }
 	t.Cleanup(func() { menubarLocalBin = oldLocal })
 
-	// Baseten CLI scan: fake PATH dirs with scripted binaries, swapped
-	// in via the basetenPATH seam, so the two-CLI check never scans the
-	// host PATH or execs a real baseten install.
-	cliVersions := cfg.basetenVersions
-	if cliVersions == nil && !cfg.noBasetenCLI {
-		cliVersions = []string{"baseten 0.2.0"}
-	}
-	var cliDirs []string
-	for i, v := range cliVersions {
-		d := filepath.Join(dir, fmt.Sprintf("baseten-cli-%d", i))
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		script := fmt.Sprintf("#!/bin/sh\necho %q\n", v)
-		if err := os.WriteFile(filepath.Join(d, "baseten"), []byte(script), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		cliDirs = append(cliDirs, d)
-	}
-	oldBasetenPATH := basetenPATH
-	basetenPATH = func() string { return strings.Join(cliDirs, string(os.PathListSeparator)) }
-	t.Cleanup(func() { basetenPATH = oldBasetenPATH })
-
 	// The fake door writes the probe's telemetry row before responding,
 	// so the row is always readable immediately; shrink the row wait so
 	// the deliberate no-row skip cases do not stall the suite.
@@ -514,7 +494,7 @@ func newDoctorFixture(t *testing.T, mut func(*doctorFixtureCfg)) *doctorFixture 
 	t.Setenv("OPENROUTER_SWITCH_ENV_FILE", filepath.Join(dir, "env"))
 	t.Setenv("OPENROUTER_SWITCH_LAUNCHD", "off")
 	t.Setenv("ANTHROPIC_BASE_URL", "")
-	t.Setenv("BASETEN_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv(claudeSubagentEnvKey, "")
 	// Clear the harness env slots the model_env check scans for, so the
 	// green run does not pick up a real shell value.
@@ -547,7 +527,7 @@ func TestDoctorAllGreen(t *testing.T) {
 		}
 	}
 	for _, want := range [][2]string{
-		{"config", "load"}, {"auth", "signin"}, {"router", "client:claude-code"},
+		{"config", "load"}, {"auth", "key"}, {"router", "client:claude-code"},
 		{"door", "doorz:" + fx.doorPort}, {"door", "wiring:" + fx.doorPort},
 		{"claude", "base_url"}, {"claude", "subagents"}, {"claude", "subagent_env"},
 		{"claude", "model_routes"}, {"claude", "model_env"},
@@ -635,7 +615,7 @@ func TestDoctorShellEnvOverridesSettings(t *testing.T) {
 }
 
 func TestDoctorSubagentsChecks(t *testing.T) {
-	aliases := map[string]string{"claude-baseten-glm-5-2": "zai-org/GLM-5.2"}
+	aliases := map[string]string{"claude-openrouter-glm-5-2": "zai-org/GLM-5.2"}
 
 	t.Run("unset is ok", func(t *testing.T) {
 		newDoctorFixture(t, nil)
@@ -649,11 +629,11 @@ func TestDoctorSubagentsChecks(t *testing.T) {
 	t.Run("configured alias with wiring is ok", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.subagentModel = "claude-baseten-glm-5-2"
+			c.subagentModel = "claude-openrouter-glm-5-2"
 		})
 		rep := runDoctor(doctorOpts{})
 		c := findCheck(t, rep, "claude", "subagents")
-		if c.Status != docOK || !strings.Contains(c.Finding, "subagent_model=claude-baseten-glm-5-2") {
+		if c.Status != docOK || !strings.Contains(c.Finding, "subagent_model=claude-openrouter-glm-5-2") {
 			t.Errorf("subagents = %+v, want ok naming the configured model", c)
 		}
 	})
@@ -678,10 +658,10 @@ func TestDoctorSubagentsChecks(t *testing.T) {
 		}
 	})
 
-	t.Run("unconfigured baseten alias fails naming the configured set", func(t *testing.T) {
+	t.Run("unconfigured OpenRouter alias fails naming the configured set", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.subagentModel = "claude-baseten-removed"
+			c.subagentModel = "claude-openrouter-removed"
 		})
 		rep := runDoctor(doctorOpts{})
 		if rep.ExitCode != 1 {
@@ -691,7 +671,7 @@ func TestDoctorSubagentsChecks(t *testing.T) {
 		if c.Status != docFail {
 			t.Fatalf("subagents = %+v, want fail", c)
 		}
-		for _, want := range []string{"claude-baseten-removed", "claude-baseten-glm-5-2", "invalid"} {
+		for _, want := range []string{"claude-openrouter-removed", "claude-openrouter-glm-5-2", "invalid"} {
 			if !strings.Contains(c.Finding, want) {
 				t.Errorf("finding %q missing %q", c.Finding, want)
 			}
@@ -707,7 +687,7 @@ func TestDoctorSubagentsChecks(t *testing.T) {
 	t.Run("enabled but wiring off warns", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.subagentModel = "claude-baseten-glm-5-2"
+			c.subagentModel = "claude-openrouter-glm-5-2"
 			c.settingsJSON = `{"permissions":{}}`
 		})
 		rep := runDoctor(doctorOpts{})
@@ -723,7 +703,7 @@ func TestDoctorSubagentsChecks(t *testing.T) {
 	t.Run("routing off is ok and displays as inherit", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.subagentModel = "claude-baseten-glm-5-2"
+			c.subagentModel = "claude-openrouter-glm-5-2"
 			c.subagentRouting = "off"
 		})
 		rep := runDoctor(doctorOpts{})
@@ -789,13 +769,13 @@ func TestDoctorSubagentEnvVarWarns(t *testing.T) {
 }
 
 func TestDoctorSubagentTrafficCheck(t *testing.T) {
-	aliases := map[string]string{"claude-baseten-glm-5-2": "zai-org/GLM-5.2"}
+	aliases := map[string]string{"claude-openrouter-glm-5-2": "zai-org/GLM-5.2"}
 	now := time.Now().Unix()
 
 	t.Run("enabled with subagent traffic is ok", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.subagentModel = "claude-baseten-glm-5-2"
+			c.subagentModel = "claude-openrouter-glm-5-2"
 			c.telRows = []telRowSpec{
 				{TS: now - 60, Subagent: false},
 				{TS: now - 30, Subagent: true},
@@ -811,7 +791,7 @@ func TestDoctorSubagentTrafficCheck(t *testing.T) {
 	t.Run("enabled with recent rows but no subagent warns", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.subagentModel = "claude-baseten-glm-5-2"
+			c.subagentModel = "claude-openrouter-glm-5-2"
 			c.telRows = []telRowSpec{
 				{TS: now - 60, Subagent: false},
 				{TS: now - 30, Subagent: false},
@@ -832,7 +812,7 @@ func TestDoctorSubagentTrafficCheck(t *testing.T) {
 	t.Run("enabled with only old rows is ok", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.subagentModel = "claude-baseten-glm-5-2"
+			c.subagentModel = "claude-openrouter-glm-5-2"
 			c.telRows = []telRowSpec{
 				{TS: now - 48*3600, Subagent: false},
 			}
@@ -862,7 +842,7 @@ func TestDoctorSubagentTrafficCheck(t *testing.T) {
 // check (config/schema.md): empty is ok, a valid pin is ok, an
 // invalid key or target fails naming the router refusal.
 func TestDoctorModelRoutesCheck(t *testing.T) {
-	aliases := map[string]string{"claude-baseten-glm-5-2": "zai-org/GLM-5.2"}
+	aliases := map[string]string{"claude-openrouter-glm-5-2": "zai-org/GLM-5.2"}
 
 	t.Run("empty is ok", func(t *testing.T) {
 		newDoctorFixture(t, nil)
@@ -887,7 +867,7 @@ func TestDoctorModelRoutesCheck(t *testing.T) {
 	t.Run("valid alias pin is ok", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.modelRoutes = map[string]string{"sonnet": "claude-baseten-glm-5-2"}
+			c.modelRoutes = map[string]string{"sonnet": "claude-openrouter-glm-5-2"}
 		})
 		rep := runDoctor(doctorOpts{})
 		if c := findCheck(t, rep, "claude", "model_routes"); c.Status != docOK {
@@ -971,14 +951,14 @@ func TestDoctorModelRoutesCheck(t *testing.T) {
 	t.Run("alias-namespace key fails as non-family", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.modelRoutes = map[string]string{"claude-baseten-glm-5-2": "native"}
+			c.modelRoutes = map[string]string{"claude-openrouter-glm-5-2": "native"}
 		})
 		rep := runDoctor(doctorOpts{})
 		c := findCheck(t, rep, "claude", "model_routes")
 		if c.Status != docFail {
 			t.Fatalf("model_routes = %+v, want fail", c)
 		}
-		for _, want := range []string{"claude-baseten-glm-5-2", "supported family"} {
+		for _, want := range []string{"claude-openrouter-glm-5-2", "supported family"} {
 			if !strings.Contains(c.Finding, want) {
 				t.Errorf("finding %q missing %q", c.Finding, want)
 			}
@@ -1009,7 +989,7 @@ func TestDoctorModelRoutesCheck(t *testing.T) {
 	t.Run("unconfigured alias target fails naming the configured set", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.modelAliases = aliases
-			c.modelRoutes = map[string]string{"opus": "claude-baseten-removed"}
+			c.modelRoutes = map[string]string{"opus": "claude-openrouter-removed"}
 		})
 		rep := runDoctor(doctorOpts{})
 		if rep.ExitCode != 1 {
@@ -1019,7 +999,7 @@ func TestDoctorModelRoutesCheck(t *testing.T) {
 		if c.Status != docFail {
 			t.Fatalf("model_routes = %+v, want fail", c)
 		}
-		for _, want := range []string{"claude-baseten-removed", "claude-baseten-glm-5-2", "router will refuse"} {
+		for _, want := range []string{"claude-openrouter-removed", "claude-openrouter-glm-5-2", "router will refuse"} {
 			if !strings.Contains(c.Finding, want) {
 				t.Errorf("finding %q missing %q", c.Finding, want)
 			}
@@ -1252,24 +1232,18 @@ func TestDoctorForeignAdminPort(t *testing.T) {
 	}
 }
 
-func TestDoctorUnresolvedAPIKeyNoOAuth(t *testing.T) {
-	newDoctorFixture(t, func(c *doctorFixtureCfg) {
-		c.signedIn = false
-		c.globalAuth = "${BASETEN_API_KEY}"
-	})
+func TestDoctorMissingOpenRouterAPIKey(t *testing.T) {
+	newDoctorFixture(t, func(c *doctorFixtureCfg) { c.hasAPIKey = false })
 	rep := runDoctor(doctorOpts{})
-	c := findCheck(t, rep, "auth", "signin")
-	if c.Status != docFail || !strings.Contains(c.Finding, "${BASETEN_API_KEY}") {
-		t.Fatalf("signin = %+v, want fail naming ${BASETEN_API_KEY}", c)
+	c := findCheck(t, rep, "auth", "key")
+	if c.Status != docFail || !strings.Contains(c.Finding, "no OpenRouter API key") {
+		t.Fatalf("key = %+v, want fail naming the missing OpenRouter key", c)
 	}
-	if !strings.Contains(c.Fix, "baseten auth login") || !strings.Contains(c.Fix, "BASETEN_API_KEY=") {
-		t.Errorf("fix = %q, want both fix paths (login and env file)", c.Fix)
+	if !strings.Contains(c.Fix, "openrouter-switch auth set-key") || !strings.Contains(c.Fix, "OPENROUTER_API_KEY") {
+		t.Errorf("fix = %q, want both keychain and environment paths", c.Fix)
 	}
-	if rep.FirstFailure != "auth/signin" {
+	if rep.FirstFailure != "auth/key" {
 		t.Errorf("first_failure = %q", rep.FirstFailure)
-	}
-	if p := findCheck(t, rep, "config", "placeholders"); p.Status != docWarn {
-		t.Errorf("config/placeholders = %s, want warn", p.Status)
 	}
 }
 
@@ -1632,7 +1606,7 @@ func TestDoctorMenubarBinaryCheck(t *testing.T) {
 				t.Errorf("finding %q missing %q", c.Finding, want)
 			}
 		}
-		if !strings.Contains(c.Fix, "brew reinstall basetenlabs/baseten/openrouter-switch") {
+		if !strings.Contains(c.Fix, "brew reinstall ckorhonen/openrouter-switch/openrouter-switch") {
 			t.Errorf("fix = %q, want canonical Homebrew reinstall", c.Fix)
 		}
 		if len(c.fixArgv) != 0 {
@@ -1703,43 +1677,43 @@ func TestDoctorMenubarBinaryCheck(t *testing.T) {
 // --- auth health (running-router credential health) ------------------------
 
 // TestDoctorAuthHealthCheck covers the running-router credential health
-// check (the credential-refresh contract): refresh_failed is a FAIL naming
-// the reauth verb, error warns transient, ok passes, an admin payload
+// check: invalid is a FAIL naming the replacement-key verb, error warns,
+// valid passes, an admin payload
 // without the required field fails, and a down router skips. The store-based
-// signin check stays ok throughout: the
+// credential-store check stays ok throughout: the
 // dead-credential state is exactly the one it cannot see.
 func TestDoctorAuthHealthCheck(t *testing.T) {
-	t.Run("refresh_failed is a broken link naming reauth", func(t *testing.T) {
+	t.Run("invalid is a broken link naming set-key", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
-			c.authHealth = "refresh_failed"
-			c.authLastError = `oauth2: "invalid_grant"`
+			c.authHealth = "invalid"
+			c.authLastError = "authentication failed"
 		})
 		rep := runDoctor(doctorOpts{})
 		c := findCheck(t, rep, "auth", "health")
 		if c.Status != docFail {
 			t.Fatalf("auth/health = %s (%s), want fail", c.Status, c.Finding)
 		}
-		if !strings.Contains(c.Finding, "invalid_grant") {
-			t.Errorf("finding %q must name the refresh error", c.Finding)
+		if !strings.Contains(c.Finding, "authentication failed") {
+			t.Errorf("finding %q must name the validation error", c.Finding)
 		}
-		if !strings.Contains(c.Fix, "openrouter-switch auth login") || !strings.Contains(c.Fix, "baseten auth login") {
-			t.Errorf("fix %q must name both reauth paths", c.Fix)
+		if c.Fix != "openrouter-switch auth set-key" {
+			t.Errorf("fix %q must name the replacement-key command", c.Fix)
 		}
 		if rep.FirstFailure != "auth/health" {
 			t.Errorf("first_failure = %q, want auth/health", rep.FirstFailure)
 		}
-		if s := findCheck(t, rep, "auth", "signin"); s.Status != docOK {
-			t.Errorf("auth/signin = %s, want ok (the store looks healthy; only the router knows)", s.Status)
+		if s := findCheck(t, rep, "auth", "key"); s.Status != docOK {
+			t.Errorf("auth/key = %s, want ok (the store looks healthy; only the router knows)", s.Status)
 		}
 	})
 
-	t.Run("refresh error is sanitized before terminal output", func(t *testing.T) {
-		// last_refresh_error carries token-endpoint response bytes
+	t.Run("validation error is sanitized before terminal output", func(t *testing.T) {
+		// last_error carries upstream response bytes
 		// verbatim; a hostile endpoint could inject ANSI sequences and
 		// newlines that forge check lines, or flood the terminal.
-		hostile := "oauth2: cannot fetch token\x1b[2K\n[ok]   auth: all healthy" + strings.Repeat("A", 5000)
+		hostile := "cannot validate key\x1b[2K\n[ok]   auth: all healthy" + strings.Repeat("A", 5000)
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
-			c.authHealth = "refresh_failed"
+			c.authHealth = "invalid"
 			c.authLastError = hostile
 		})
 		rep := runDoctor(doctorOpts{})
@@ -1755,23 +1729,41 @@ func TestDoctorAuthHealthCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("transient error warns", func(t *testing.T) {
+	t.Run("validation error warns", func(t *testing.T) {
 		newDoctorFixture(t, func(c *doctorFixtureCfg) {
 			c.authHealth = "error"
 			c.authLastError = "dial tcp: i/o timeout"
 		})
 		rep := runDoctor(doctorOpts{})
 		c := findCheck(t, rep, "auth", "health")
-		if c.Status != docWarn || !strings.Contains(c.Finding, "transient") {
-			t.Fatalf("auth/health = %s (%s), want transient warn", c.Status, c.Finding)
+		if c.Status != docWarn || !strings.Contains(c.Finding, "could not validate") {
+			t.Fatalf("auth/health = %s (%s), want validation warn", c.Status, c.Finding)
 		}
 		if rep.ExitCode != 0 {
-			t.Errorf("exit = %d, a transient warn must not fail the chain", rep.ExitCode)
+			t.Errorf("exit = %d, a validation warning must not fail the chain", rep.ExitCode)
 		}
 	})
 
-	t.Run("ok passes", func(t *testing.T) {
-		newDoctorFixture(t, func(c *doctorFixtureCfg) { c.authHealth = "ok" })
+	t.Run("forbidden is a broken link naming set-key", func(t *testing.T) {
+		newDoctorFixture(t, func(c *doctorFixtureCfg) {
+			c.authHealth = "forbidden"
+			c.authLastError = "account policy denied access"
+		})
+		rep := runDoctor(doctorOpts{})
+		c := findCheck(t, rep, "auth", "health")
+		if c.Status != docFail {
+			t.Fatalf("auth/health = %s (%s), want fail", c.Status, c.Finding)
+		}
+		if !strings.Contains(c.Finding, "account policy denied access") {
+			t.Errorf("finding %q must name the validation error", c.Finding)
+		}
+		if c.Fix != "openrouter-switch auth set-key" {
+			t.Errorf("fix %q must name the replacement-key command", c.Fix)
+		}
+	})
+
+	t.Run("valid passes", func(t *testing.T) {
+		newDoctorFixture(t, func(c *doctorFixtureCfg) { c.authHealth = "valid" })
 		rep := runDoctor(doctorOpts{})
 		if c := findCheck(t, rep, "auth", "health"); c.Status != docOK {
 			t.Fatalf("auth/health = %s (%s), want ok", c.Status, c.Finding)
@@ -1783,7 +1775,7 @@ func TestDoctorAuthHealthCheck(t *testing.T) {
 		rep := runDoctor(doctorOpts{})
 		c := findCheck(t, rep, "auth", "health")
 		if c.Status != docFail ||
-			!strings.Contains(c.Finding, "required health field") ||
+			!strings.Contains(c.Finding, "required status field") ||
 			!strings.Contains(c.Fix, "openrouter-switch up") {
 			t.Fatalf("auth/health = %s (%s), fix %q; want current-contract failure", c.Status, c.Finding, c.Fix)
 		}
@@ -1798,121 +1790,26 @@ func TestDoctorAuthHealthCheck(t *testing.T) {
 	})
 }
 
-// --- two-CLI hazard ---------------------------------------------------------
-
-// TestDoctorBasetenCLICheck covers the PATH scan for baseten installs:
-// one CLI is ok, two warn naming both paths and versions because credential
-// ownership becomes ambiguous,
-// same-version duplicates still warn, and no CLI skips with the install
-// hint. All hermetic via the basetenPATH seam; only fixture-written
-// scripts are ever exec'd.
-func TestDoctorBasetenCLICheck(t *testing.T) {
-	t.Run("one CLI ok", func(t *testing.T) {
-		newDoctorFixture(t, nil)
-		rep := runDoctor(doctorOpts{})
-		c := findCheck(t, rep, "auth", "cli")
-		if c.Status != docOK || !strings.Contains(c.Finding, "baseten 0.2.0") {
-			t.Fatalf("auth/cli = %s (%s), want ok naming the version", c.Status, c.Finding)
-		}
-	})
-
-	t.Run("two CLIs with different versions warn naming both", func(t *testing.T) {
-		newDoctorFixture(t, func(c *doctorFixtureCfg) {
-			c.basetenVersions = []string{"baseten 0.1.0", "baseten 0.2.0"}
-		})
-		rep := runDoctor(doctorOpts{})
-		c := findCheck(t, rep, "auth", "cli")
-		if c.Status != docWarn {
-			t.Fatalf("auth/cli = %s (%s), want warn", c.Status, c.Finding)
-		}
-		for _, want := range []string{"baseten-cli-0", "baseten-cli-1", "baseten 0.1.0", "baseten 0.2.0", "incompatible credential-store formats"} {
-			if !strings.Contains(c.Finding, want) {
-				t.Errorf("finding %q missing %q", c.Finding, want)
-			}
-		}
-		if !strings.Contains(c.Fix, "remove the stale copies") {
-			t.Errorf("fix %q must say to remove the stale copies", c.Fix)
-		}
-		if rep.ExitCode != 0 {
-			t.Errorf("exit = %d, the two-CLI warn must not fail the chain", rep.ExitCode)
-		}
-	})
-
-	t.Run("two CLIs with the same version still warn", func(t *testing.T) {
-		newDoctorFixture(t, func(c *doctorFixtureCfg) {
-			c.basetenVersions = []string{"baseten 0.2.0", "baseten 0.2.0"}
-		})
-		rep := runDoctor(doctorOpts{})
-		if c := findCheck(t, rep, "auth", "cli"); c.Status != docWarn {
-			t.Fatalf("auth/cli = %s (%s), want warn on duplicate installs", c.Status, c.Finding)
-		}
-	})
-
-	t.Run("no CLI skips with the install hint", func(t *testing.T) {
-		newDoctorFixture(t, func(c *doctorFixtureCfg) { c.noBasetenCLI = true })
-		rep := runDoctor(doctorOpts{})
-		c := findCheck(t, rep, "auth", "cli")
-		if c.Status != docSkip || !strings.Contains(c.Finding, basetenBrewHint) {
-			t.Fatalf("auth/cli = %s (%s), want skip with the brew hint", c.Status, c.Finding)
-		}
-	})
-}
-
-// TestScanBasetenCLIsSkipsRelativePATHEntries pins the LookPath-parity
-// policy: scan results are exec'd for --version, so a relative PATH
-// entry (including ".") would resolve against doctor's cwd and run an
-// untrusted checkout's bin/baseten with the user's privileges. Relative
-// entries must never be scanned, reported, or exec'd.
-func TestScanBasetenCLIsSkipsRelativePATHEntries(t *testing.T) {
-	dir := t.TempDir()
-	writeCLI := func(d string) string {
-		t.Helper()
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		p := filepath.Join(d, "baseten")
-		if err := os.WriteFile(p, []byte("#!/bin/sh\necho baseten 9.9.9\n"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-	absCLI := writeCLI(filepath.Join(dir, "abs"))
-	writeCLI(filepath.Join(dir, "rel")) // reachable only via the relative entry
-	writeCLI(dir)                       // reachable only via "."
-	t.Chdir(dir)
-
-	oldPATH := basetenPATH
-	basetenPATH = func() string {
-		return strings.Join([]string{"rel", ".", filepath.Join(dir, "abs")}, string(os.PathListSeparator))
-	}
-	t.Cleanup(func() { basetenPATH = oldPATH })
-
-	got := scanBasetenCLIs()
-	if len(got) != 1 || got[0] != absCLI {
-		t.Fatalf("scanBasetenCLIs = %v, want only the absolute entry %q", got, absCLI)
-	}
-}
-
 // --- doctor --probe served-route assertion ----------------------------------
 
 // The served-route tests pin the fix for the impact-map blind spot:
 // doctor --probe used to validate "the harness gets answers", so door
-// failover made it pass while the Baseten path was dead. The fake door
-// answers the probe with the X-Baseten-Switch-Door marker and (optionally) appends
+// failover made it pass while the OpenRouter path was dead. The fake door
+// answers the probe with the X-OpenRouter-Switch-Door marker and (optionally) appends
 // the probe's telemetry row, emulating the router's write.
 
 func TestDoctorProbeServedRouteMatches(t *testing.T) {
 	fx := newDoctorFixture(t, func(c *doctorFixtureCfg) {
 		c.doorProbe = "router"
-		c.probeTelRoute = "baseten"
+		c.probeTelRoute = "openrouter"
 	})
 	rep := runDoctor(doctorOpts{probe: true, yes: true, timeoutSec: 5})
 	if c := findCheck(t, rep, "e2e", "probe:"+fx.doorPort); c.Status != docOK {
 		t.Fatalf("probe = %s (%s), want ok", c.Status, c.Finding)
 	}
 	c := findCheck(t, rep, "e2e", "route:"+fx.doorPort)
-	if c.Status != docOK || !strings.Contains(c.Finding, "baseten") {
-		t.Fatalf("route = %s (%s), want ok naming baseten", c.Status, c.Finding)
+	if c.Status != docOK || !strings.Contains(c.Finding, "openrouter") {
+		t.Fatalf("route = %s (%s), want ok naming openrouter", c.Status, c.Finding)
 	}
 	if rep.ExitCode != 0 {
 		t.Errorf("exit = %d, want 0\nchecks: %+v", rep.ExitCode, rep.Checks)
@@ -1931,7 +1828,7 @@ func TestDoctorProbeDoorFallbackFails(t *testing.T) {
 	if c.Status != docFail {
 		t.Fatalf("route = %s (%s), want fail", c.Status, c.Finding)
 	}
-	for _, want := range []string{"X-Baseten-Switch-Door: fallback", `"baseten"`} {
+	for _, want := range []string{"X-OpenRouter-Switch-Door: fallback", `"openrouter"`} {
 		if !strings.Contains(c.Finding, want) {
 			t.Errorf("finding %q missing %q", c.Finding, want)
 		}
@@ -1944,7 +1841,7 @@ func TestDoctorProbeDoorFallbackFails(t *testing.T) {
 func TestDoctorProbeRouterFallbackServedFails(t *testing.T) {
 	fx := newDoctorFixture(t, func(c *doctorFixtureCfg) {
 		c.doorProbe = "router"
-		c.probeTelRoute = "baseten"
+		c.probeTelRoute = "openrouter"
 		c.probeTelEffective = "anthropic" // the router's fallback_route served it
 	})
 	rep := runDoctor(doctorOpts{probe: true, yes: true, timeoutSec: 5})
@@ -1952,7 +1849,7 @@ func TestDoctorProbeRouterFallbackServedFails(t *testing.T) {
 	if c.Status != docFail {
 		t.Fatalf("route = %s (%s), want fail", c.Status, c.Finding)
 	}
-	for _, want := range []string{`"anthropic"`, `"baseten"`} {
+	for _, want := range []string{`"anthropic"`, `"openrouter"`} {
 		if !strings.Contains(c.Finding, want) {
 			t.Errorf("finding %q must name served vs configured (%q)", c.Finding, want)
 		}
@@ -1977,14 +1874,14 @@ func TestDoctorProbeNoTelemetryRowSkips(t *testing.T) {
 // TestDoctorProbePinnedModelRouteOK pins the model_routes disambiguation:
 // a route_effective value on the probe's row is NOT fallback evidence
 // when a pin designates that route for the probe's model. Config: route
-// baseten with opus pinned native; the probe's model is an opus id, so
+// OpenRouter with opus pinned native; the probe's model is an opus id, so
 // the row carries route_effective=anthropic on a fully healthy system,
 // and the check must pass.
 func TestDoctorProbePinnedModelRouteOK(t *testing.T) {
 	fx := newDoctorFixture(t, func(c *doctorFixtureCfg) {
 		c.modelRoutes = map[string]string{"opus": "native"}
 		c.doorProbe = "router"
-		c.probeTelRoute = "baseten"
+		c.probeTelRoute = "openrouter"
 		c.probeTelEffective = "anthropic" // the pin served it natively
 	})
 	rep := runDoctor(doctorOpts{probe: true, yes: true, timeoutSec: 5})
@@ -2007,7 +1904,7 @@ func TestDoctorProbePinnedModelRouteOK(t *testing.T) {
 func TestDoctorProbeConcurrentRowNotAttributed(t *testing.T) {
 	fx := newDoctorFixture(t, func(c *doctorFixtureCfg) {
 		c.doorProbe = "router"
-		c.probeTelRoute = "baseten" // the probe itself went over the primary
+		c.probeTelRoute = "openrouter" // the probe itself went over the primary
 		c.probeConcurrentModel = "claude-haiku-4-5"
 	})
 	rep := runDoctor(doctorOpts{probe: true, yes: true, timeoutSec: 5})
@@ -2021,16 +1918,16 @@ func TestDoctorProbeConcurrentRowNotAttributed(t *testing.T) {
 }
 
 // TestDoctorProbeUnstampedDoorFails enforces the current door contract. Without
-// X-Baseten-Switch-Door, telemetry cannot be attributed safely to the probe.
+// X-OpenRouter-Switch-Door, telemetry cannot be attributed safely to the probe.
 func TestDoctorProbeUnstampedDoorFails(t *testing.T) {
 	fx := newDoctorFixture(t, func(c *doctorFixtureCfg) {
-		c.doorProbe = "none"        // door answers without the header
-		c.probeTelRoute = "baseten" // a healthy-looking row exists anyway
+		c.doorProbe = "none"           // door answers without the header
+		c.probeTelRoute = "openrouter" // a healthy-looking row exists anyway
 	})
 	rep := runDoctor(doctorOpts{probe: true, yes: true, timeoutSec: 5})
 	c := findCheck(t, rep, "e2e", "route:"+fx.doorPort)
 	if c.Status != docFail ||
-		!strings.Contains(c.Finding, "required X-Baseten-Switch-Door") ||
+		!strings.Contains(c.Finding, "required X-OpenRouter-Switch-Door") ||
 		!strings.Contains(c.Fix, "openrouter-switch up") {
 		t.Fatalf("route = %s (%s), fix %q; want current-contract failure", c.Status, c.Finding, c.Fix)
 	}
@@ -2061,10 +1958,10 @@ func TestDoctorClientForMatchesShape(t *testing.T) {
 // codexDoctorManagedOverlay is the adapter-written overlay pointing at
 // the door port the codexDoctorConfig topology resolves (8081).
 const codexDoctorManagedOverlay = `# Managed by openrouter-switch ('openrouter-switch codex on'); remove with 'openrouter-switch codex off'.
-model_provider = "baseten"
+model_provider = "openrouter"
 model = "` + gateway.CodexCompatibilityModel + `"
 
-[model_providers.baseten]
+[model_providers.openrouter]
 name = "OpenRouter Switch (local gateway)"
 base_url = "http://127.0.0.1:8081/v1"
 wire_api = "responses"
@@ -2307,7 +2204,7 @@ func TestDoctorCodexAuthToken(t *testing.T) {
 }
 
 // TestDoctorCodexConfigToml pins the additive-invariant peek: only a
-// ROOT-scope model_provider = "baseten" in the user's config.toml warns;
+// ROOT-scope model_provider = "openrouter" in the user's config.toml warns;
 // table-scoped values, other providers, and an absent file hold the
 // invariant. The file is never written, only read.
 func TestDoctorCodexConfigToml(t *testing.T) {
@@ -2317,10 +2214,10 @@ func TestDoctorCodexConfigToml(t *testing.T) {
 		wantStatus string
 	}{
 		{"absent", "", docOK},
-		{"root flipped to baseten", "model = \"gpt-5\"\nmodel_provider = \"baseten\"\n", docWarn},
-		{"root flipped with inline comment", "model_provider = \"baseten\" # oops\n", docWarn},
+		{"root flipped to openrouter", "model = \"gpt-5\"\nmodel_provider = \"openrouter\"\n", docWarn},
+		{"root flipped with inline comment", "model_provider = \"openrouter\" # oops\n", docWarn},
 		{"other root provider", "model_provider = \"other\"\n", docOK},
-		{"baseten only inside a table", "[profiles.x]\nmodel_provider = \"baseten\"\n", docOK},
+		{"openrouter only inside a table", "[profiles.x]\nmodel_provider = \"openrouter\"\n", docOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2469,11 +2366,11 @@ func TestCodexRootModelProvider(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{"root value", "model_provider = \"baseten\"\n", "baseten"},
-		{"inline comment stripped", "model_provider = \"baseten\" # note\n", "baseten"},
-		{"comment line ignored", "# model_provider = \"baseten\"\n", ""},
-		{"table-scoped ignored", "[profiles.x]\nmodel_provider = \"baseten\"\n", ""},
-		{"root before table wins", "model_provider = \"other\"\n[profiles.x]\nmodel_provider = \"baseten\"\n", "other"},
+		{"root value", "model_provider = \"openrouter\"\n", "openrouter"},
+		{"inline comment stripped", "model_provider = \"openrouter\" # note\n", "openrouter"},
+		{"comment line ignored", "# model_provider = \"openrouter\"\n", ""},
+		{"table-scoped ignored", "[profiles.x]\nmodel_provider = \"openrouter\"\n", ""},
+		{"root before table wins", "model_provider = \"other\"\n[profiles.x]\nmodel_provider = \"openrouter\"\n", "other"},
 		{"absent", "model = \"gpt-5\"\n", ""},
 	}
 	for _, tc := range cases {

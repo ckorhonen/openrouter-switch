@@ -5,7 +5,10 @@ let package = Package(
     name: "OpenRouterSwitch",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "OpenRouterSwitch", path: "Sources/OpenRouterSwitch"),
+        .executableTarget(
+            name: "OpenRouterSwitch",
+            path: "Sources/OpenRouterSwitch",
+            linkerSettings: [.linkedFramework("Security")]),
         .testTarget(name: "OpenRouterSwitchTests", dependencies: ["OpenRouterSwitch"])
     ]
 )

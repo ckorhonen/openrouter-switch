@@ -638,7 +638,7 @@ func (d *Door) relay(w http.ResponseWriter, resp *http.Response, via string) {
 			h.Add(k, v)
 		}
 	}
-	h.Set("X-Baseten-Switch-Door", via)
+	h.Set("X-OpenRouter-Switch-Door", via)
 	w.WriteHeader(resp.StatusCode)
 	flusher, _ := w.(http.Flusher)
 	buf := make([]byte, 32<<10)
@@ -661,7 +661,7 @@ func (d *Door) relay(w http.ResponseWriter, resp *http.Response, via string) {
 func (d *Door) writeError(w http.ResponseWriter, via string, status int, msg string) {
 	body, _ := json.Marshal(map[string]any{
 		"error": map[string]any{
-			"type":    "baseten_switch_door_error",
+			"type":    "openrouter_switch_door_error",
 			"message": msg,
 		},
 		"door": map[string]any{
@@ -671,7 +671,7 @@ func (d *Door) writeError(w http.ResponseWriter, via string, status int, msg str
 	})
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
-	h.Set("X-Baseten-Switch-Door", via)
+	h.Set("X-OpenRouter-Switch-Door", via)
 	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }

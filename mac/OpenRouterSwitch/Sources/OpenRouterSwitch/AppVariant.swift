@@ -61,20 +61,15 @@ struct RuntimeProfile: Equatable {
             "OPENROUTER_SWITCH_TELEMETRY_DIR": root.appendingPathComponent("telemetry").path,
             "OPENROUTER_SWITCH_ROUTE_FILE": root.appendingPathComponent("route").path,
             "OPENROUTER_SWITCH_ENV_FILE": root.appendingPathComponent("env").path,
-            "OPENROUTER_SWITCH_AUTH_FILE": root.appendingPathComponent("auth.json").path,
-            "BASETEN_CONFIG_DIR": root.appendingPathComponent("baseten").path,
-            "OPENROUTER_SWITCH_AUTH_NO_KEYRING": "1",
             "OPENROUTER_SWITCH_PRIVATE_RUNTIME": "1",
-            "OPENROUTER_SWITCH_OAUTH_PROFILE": "openrouter-switch-preview",
             "OPENROUTER_SWITCH_CLAUDE_SETTINGS": root.appendingPathComponent("claude/settings.json").path,
             "OPENROUTER_SWITCH_BACKUP_DIR": root.appendingPathComponent("backups").path,
             "OPENROUTER_SWITCH_GATEWAY_TOKEN": "openrouter-switch-local-gateway-preview",
             "OPENROUTER_SWITCH_LAUNCHD": "off",
             "OPENROUTER_SWITCH_MENUBAR": "off",
             "OPENROUTER_SWITCH_MENUBAR_APP": "",
-            "BASETEN_API_KEY": "",
-            "OPENROUTER_SWITCH_API_KEY": "",
-            "OPENROUTER_SWITCH_API_KEY_FALLBACK": "",
+            "OPENROUTER_SWITCH_AUTH_NO_KEYRING": "1",
+            "OPENROUTER_API_KEY": "",
             "ANTHROPIC_API_KEY": "",
             "OPENROUTER_SWITCH_ANTHROPIC_KEY": "",
             "ANTHROPIC_AUTH_TOKEN": "",
@@ -176,8 +171,8 @@ struct AppVariant: Equatable {
     let allowsLoginItem: Bool
     let runtime: RuntimeProfile
 
-    static let stableBundleIdentifier = "co.baseten.switch"
-    static let previewBundleIdentifier = "co.baseten.switch.preview"
+    static let stableBundleIdentifier = "com.ckorhonen.openrouter-switch"
+    static let previewBundleIdentifier = "com.ckorhonen.openrouter-switch.preview"
     static let stableExecutableName = "OpenRouterSwitch"
     static let previewExecutableName = "OpenRouterSwitchPreview"
     static let stableDisplayName = "OpenRouter Switch"

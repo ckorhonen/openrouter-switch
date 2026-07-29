@@ -21,16 +21,16 @@ import (
 
 // codexTestStaleOverlay has the current managed shape but points at a dead
 // port, modeling a stale current overlay.
-const codexTestStaleOverlay = `model_provider = "baseten"
+const codexTestStaleOverlay = `model_provider = "openrouter"
 model = "openrouter-switch-compat-v1"
 
-[model_providers.baseten]
-name = "baseten"
+[model_providers.openrouter]
+name = "openrouter"
 base_url = "http://127.0.0.1:9081/v1"
 wire_api = "responses"
 `
 
-// codexTestForeignOverlay lacks the baseten provider table entirely.
+// codexTestForeignOverlay lacks the openrouter provider table entirely.
 const codexTestForeignOverlay = `# the user's own experiment
 model_provider = "other"
 
@@ -44,6 +44,11 @@ env_key = "OTHER_KEY"
 func testCodexAdapter(t *testing.T) (*codexAdapter, *bytes.Buffer) {
 	t.Helper()
 	dir := t.TempDir()
+	mux := http.NewServeMux()
+	handleEligibleTestCatalog(mux)
+	adminServer := httptest.NewServer(mux)
+	t.Cleanup(adminServer.Close)
+	t.Setenv("OPENROUTER_SWITCH_ADMIN_ADDR", hostPort(t, adminServer.URL))
 	overlay := filepath.Join(dir, "codex-home", codexOverlayName)
 	out := &bytes.Buffer{}
 	return &codexAdapter{
@@ -269,7 +274,7 @@ func TestCodexOwnershipRequiresSelectedProviderModelAndBaseURL(t *testing.T) {
 	}{
 		{
 			name: "provider not selected",
-			raw:  strings.Replace(valid, `model_provider = "baseten"`, `model_provider = "other"`, 1),
+			raw:  strings.Replace(valid, `model_provider = "openrouter"`, `model_provider = "other"`, 1),
 		},
 		{
 			name: "compatibility model absent",
@@ -617,6 +622,33 @@ clients:
 	}
 }
 
+func TestCodexRouteRejectsUnavailableModelWithoutMutation(t *testing.T) {
+	a, _ := testCodexAdapter(t)
+	configBody := `global:
+  routing_enabled: true
+clients:
+  - name: codex
+    enabled: true
+    protocol_shape: openai
+    default_model: zai-org/GLM-5.2
+`
+	if err := os.WriteFile(a.configPath, []byte(configBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := fileBytes(t, a.configPath)
+	var stdout bytes.Buffer
+	if code := a.route([]string{"unknown/model", "--json"}, &stdout); code != 1 {
+		t.Fatalf("route = %d, want 1 (%s)", code, stdout.String())
+	}
+	result := decodeMutationResult(t, stdout.String())
+	if result.Error == nil || result.Error.Code != "model_unavailable" {
+		t.Fatalf("result = %+v", result)
+	}
+	if got := fileBytes(t, a.configPath); !bytes.Equal(got, before) {
+		t.Fatal("unavailable model mutated config")
+	}
+}
+
 func TestCodexRouteDoesNotInspectUnrecognizedOverlay(t *testing.T) {
 	a, _ := testCodexAdapter(t)
 	configBody := `global:
@@ -703,7 +735,7 @@ func TestCodexGatewayAuthTokenStubPlacement(t *testing.T) {
 	})
 	t.Run("never clobbers an existing value", func(t *testing.T) {
 		a, _ := testCodexAdapter(t)
-		pre := "# managed by hand\nBASETEN_API_KEY=abc123\nCODEX_AUTH_TOKEN=user-chosen\n"
+		pre := "# managed by hand\nOPENROUTER_API_KEY=abc123\nCODEX_AUTH_TOKEN=user-chosen\n"
 		if err := os.MkdirAll(filepath.Dir(a.envFilePath), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -719,7 +751,7 @@ func TestCodexGatewayAuthTokenStubPlacement(t *testing.T) {
 	})
 	t.Run("appends preserving other content", func(t *testing.T) {
 		a, _ := testCodexAdapter(t)
-		pre := "# comment kept\nBASETEN_API_KEY=abc123\n"
+		pre := "# comment kept\nOPENROUTER_API_KEY=abc123\n"
 		if err := os.MkdirAll(filepath.Dir(a.envFilePath), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -1118,7 +1150,7 @@ door:
 		t.Fatalf("cmdCodex on = %d", code)
 	}
 	raw := string(fileBytes(t, overlay))
-	for _, want := range []string{`model_provider = "baseten"`, `model = "` + gateway.CodexCompatibilityModel + `"`, `base_url = "http://127.0.0.1:8081/v1"`} {
+	for _, want := range []string{`model_provider = "openrouter"`, `model = "` + gateway.CodexCompatibilityModel + `"`, `base_url = "http://127.0.0.1:8081/v1"`} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("overlay missing %s:\n%s", want, raw)
 		}

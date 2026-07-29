@@ -19,7 +19,7 @@ func TestBuildPreviewConfigSanitizesInlineCredentialsAndQuotedBindKeys(t *testin
 	const raw = `
 global:
   routing_enabled: false
-  auth: {baseten: literal-baseten-secret, anthropic: literal-anthropic-secret}
+  auth: {anthropic: literal-anthropic-secret}
   telemetry_dir: /Users/test/.config/openrouter-switch/telemetry
 clients:
   - name: claude-code
@@ -42,8 +42,7 @@ door:
 	if err != nil {
 		t.Fatalf("BuildPreviewConfig: %v", err)
 	}
-	if got.Global.Auth["baseten"] != "${BASETEN_API_KEY}" ||
-		got.Global.Auth["anthropic"] != "${ANTHROPIC_API_KEY}" {
+	if got.Global.Auth["anthropic"] != "${ANTHROPIC_API_KEY}" {
 		t.Fatalf("global auth was not sanitized: %#v", got.Global.Auth)
 	}
 	client := got.Clients[0]
@@ -60,6 +59,12 @@ door:
 		got.Door.Ports[0].BindAddr != policy.DoorAddr ||
 		got.Door.Ports[0].RouterAddr != policy.RouterAddr {
 		t.Fatalf("door ports were not isolated: %#v", got.Door.Ports)
+	}
+
+	source.Global.Auth["openrouter"] = "literal-openrouter-secret"
+	if _, err := BuildPreviewConfig(&source, policy); err == nil ||
+		!strings.Contains(err.Error(), "auth set-key") {
+		t.Fatalf("unsupported OpenRouter auth error = %v", err)
 	}
 }
 

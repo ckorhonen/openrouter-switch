@@ -1,6 +1,8 @@
 # Third-party notices
 
 OpenRouter Switch includes or derives from the following open-source work.
+It is derived from Baseten Switch, Copyright (c) 2026 Baseten, under the MIT
+License preserved in `LICENSE`.
 
 ## MIT-licensed work
 
@@ -68,8 +70,7 @@ license:
 
 ## Go Authors packages
 
-[golang.org/x/oauth2](https://github.com/golang/oauth2) and
-[golang.org/x/sys](https://github.com/golang/sys) are included under the
+[golang.org/x/sys](https://github.com/golang/sys) is included under the
 following license:
 
 > Copyright 2009 The Go Authors.

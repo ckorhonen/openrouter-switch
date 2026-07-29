@@ -1,5 +1,5 @@
 {
-  description = "OpenRouter Switch: local gateway routing AI coding harnesses between native providers and Baseten";
+  description = "OpenRouter Switch: local gateway routing AI coding harnesses through OpenRouter";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

@@ -45,120 +45,88 @@ final class PopupDisplayTests: XCTestCase {
             "Version skew: router v0.2.0, CLI v0.2.1")
     }
 
-    private func auth(signedIn: Bool, profile: String,
-                      fallbackInUse: Bool, health: String = "",
-                      lastError: String = "") -> AuthStatus {
-        AuthStatus(dict: ["signed_in": signedIn, "profile": profile,
-                          "fallback_enabled": true,
-                          "fallback_in_use": fallbackInUse,
-                          "health": health,
-                          "last_refresh_error": lastError])
+    private func auth(
+        status: String,
+        source: String = "",
+        label: String = "",
+        remaining: Double? = nil,
+        error: String = ""
+    ) -> AuthStatus {
+        var dict: [String: Any] = [
+            "status": status,
+            "source": source,
+            "masked_label": label,
+            "error": error,
+        ]
+        if let remaining {
+            dict["limit_remaining"] = remaining
+        }
+        return AuthStatus(dict: dict)
     }
 
     func testAuthLineLabel() {
         XCTAssertEqual(authLineLabel(auth: nil), "Auth: unknown")
         XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "user@example",
-                                     fallbackInUse: false)),
-            "Auth: user@example OAuth")
+            authLineLabel(auth: auth(
+                status: "valid",
+                source: "keychain",
+                label: "sk-or-…test")),
+            "Auth: valid · Keychain · sk-or-…test")
         XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "",
-                                     fallbackInUse: false)),
-            "Auth: OAuth")
+            authLineLabel(auth: auth(
+                status: "valid",
+                source: "environment")),
+            "Auth: valid · environment")
         XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "user@example",
-                                     fallbackInUse: true)),
-            "Auth: user@example OAuth, API-key fallback in use")
+            authLineLabel(auth: auth(status: "missing")),
+            "Auth: API key required")
         XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: false, profile: "",
-                                     fallbackInUse: true)),
-            "Auth: API-key fallback in use")
+            authLineLabel(auth: auth(status: "invalid")),
+            "Auth: API key invalid")
         XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: false, profile: "",
-                                     fallbackInUse: false)),
-            "Auth: not signed in")
+            authLineLabel(auth: auth(status: "forbidden")),
+            "Auth: API key forbidden")
     }
 
-    // Health-driven auth line states (oauth-expiry spike).
     func testAuthLineLabelHealthStates() {
-        // refresh_failed: short and loud, overriding the profile and
-        // fallback suffix (detail moves to authDetailLine).
         XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "zak@baseten",
-                                     fallbackInUse: true,
-                                     health: "refresh_failed")),
-            "Auth: reauthentication required")
-        // signed_out: the existing not-signed-in presentation, even if
-        // signed_in (store presence) disagrees with the gateway.
-        XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "zak@baseten",
-                                     fallbackInUse: false,
-                                     health: "signed_out")),
-            "Auth: not signed in")
-        XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: false, profile: "",
-                                     fallbackInUse: true,
-                                     health: "signed_out")),
-            "Auth: API-key fallback in use")
-        // error is transient: the normal line, no alarm.
-        XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "zak@baseten",
-                                     fallbackInUse: false, health: "error")),
-            "Auth: zak@baseten OAuth")
-        // ok and empty health: unchanged.
-        XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "zak@baseten",
-                                     fallbackInUse: false, health: "ok")),
-            "Auth: zak@baseten OAuth")
-        XCTAssertEqual(
-            authLineLabel(auth: auth(signedIn: true, profile: "zak@baseten",
-                                     fallbackInUse: false, health: "")),
-            "Auth: zak@baseten OAuth")
+            authLineLabel(auth: auth(status: "error")),
+            "Auth: validation unavailable")
+        XCTAssertEqual(authLineLabel(auth: auth(status: "unknown")),
+                       "Auth: unknown")
     }
 
-    // The reauth predicate gates the warning tint, the button, and the
-    // amber icon: true only for refresh_failed.
-    func testAuthNeedsReauth() {
-        XCTAssertTrue(authNeedsReauth(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false,
-            health: "refresh_failed")))
-        XCTAssertFalse(authNeedsReauth(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false, health: "ok")))
-        XCTAssertFalse(authNeedsReauth(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false, health: "error")))
-        XCTAssertFalse(authNeedsReauth(auth: auth(
-            signedIn: false, profile: "", fallbackInUse: false,
-            health: "signed_out")))
-        XCTAssertFalse(authNeedsReauth(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false, health: "")))
-        XCTAssertFalse(authNeedsReauth(auth: nil))
+    func testAuthNeedsAttention() {
+        for status in ["missing", "invalid", "forbidden"] {
+            XCTAssertTrue(authNeedsAttention(auth: auth(status: status)))
+        }
+        for status in ["valid", "ok", "error", "unknown"] {
+            XCTAssertFalse(authNeedsAttention(auth: auth(status: status)))
+        }
+        XCTAssertFalse(authNeedsAttention(auth: nil))
     }
 
     // The detail line renders only in the dead-credential state, and
     // reuses the menu-safe truncation.
     func testAuthDetailLine() {
         XCTAssertNil(authDetailLine(auth: nil))
-        XCTAssertNil(authDetailLine(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false, health: "ok")))
-        // A transient error's message stays hidden (no alarm).
-        XCTAssertNil(authDetailLine(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false,
-            health: "error", lastError: "net timeout")))
-        // Dead but no recorded error: no empty line.
-        XCTAssertNil(authDetailLine(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false,
-            health: "refresh_failed")))
         XCTAssertEqual(
             authDetailLine(auth: auth(
-                signedIn: true, profile: "", fallbackInUse: false,
-                health: "refresh_failed",
-                lastError: "oauth2: \"invalid_grant\"")),
-            #"oauth2: "invalid_grant""#)
+                status: "valid",
+                remaining: 42)),
+            "OpenRouter key limit remaining: 42")
+        XCTAssertNil(authDetailLine(auth: auth(
+            status: "error", error: "net timeout")))
+        XCTAssertNil(authDetailLine(auth: auth(status: "invalid")))
+        XCTAssertEqual(
+            authDetailLine(auth: auth(
+                status: "invalid",
+                error: "OpenRouter rejected this key.")),
+            "OpenRouter rejected this key.")
         // Long or multi-line errors collapse to one truncated line.
         let long = authDetailLine(auth: auth(
-            signedIn: true, profile: "", fallbackInUse: false,
-            health: "refresh_failed",
-            lastError: "line one\n" + String(repeating: "x", count: 200)))
+            status: "invalid",
+            error: "line one\n" + String(repeating: "x", count: 200)))
         XCTAssertEqual(long?.count, 80)
         XCTAssertEqual(long?.hasSuffix("..."), true)
         XCTAssertEqual(long?.contains("\n"), false)
@@ -203,14 +171,14 @@ final class PopupDisplayTests: XCTestCase {
         XCTAssertEqual(shortModelName("GLM-5.2"), "GLM-5.2")
         XCTAssertEqual(shortModelName(""), "")
 
-        let baseten = ClientStatus(dict: [
-            "name": "claude-code", "enabled": true, "effective_route": "baseten",
+        let openrouter = ClientStatus(dict: [
+            "name": "claude-code", "enabled": true, "effective_route": "openrouter",
             "unmatched_native_model": [
                 "effective_model": "zai-org/GLM-5.2",
             ],
         ])!
-        XCTAssertEqual(routingDestinationLabel(baseten), "Baseten · GLM-5.2")
-        XCTAssertEqual(clientMenuTitle(baseten), "Claude Code: Baseten · GLM-5.2")
+        XCTAssertEqual(routingDestinationLabel(openrouter), "OpenRouter · GLM-5.2")
+        XCTAssertEqual(clientMenuTitle(openrouter), "Claude Code: OpenRouter · GLM-5.2")
 
         let native = ClientStatus(dict: [
             "name": "codex", "enabled": true, "effective_route": "openai",
@@ -218,14 +186,14 @@ final class PopupDisplayTests: XCTestCase {
         XCTAssertEqual(routingDestinationLabel(native), "Native · Openai")
 
         let fallback = ClientStatus(dict: [
-            "name": "claude-code", "enabled": true, "effective_route": "baseten",
+            "name": "claude-code", "enabled": true, "effective_route": "openrouter",
             "native_route": "anthropic",
             "fallback": ["active": true],
         ])!
         XCTAssertEqual(routingDestinationLabel(fallback),
                        "Fallback · Anthropic")
-        XCTAssertEqual(routingCountLabel([baseten, native]), "1 Baseten route")
-        XCTAssertEqual(routingCountLabel([native]), "0 Baseten routes")
+        XCTAssertEqual(routingCountLabel([openrouter, native]), "1 OpenRouter route")
+        XCTAssertEqual(routingCountLabel([native]), "0 OpenRouter routes")
         XCTAssertEqual(routingCountLabel([fallback]), "1 fallback")
         XCTAssertEqual(compactFeedModelLabel(
             requested: "claude-haiku-4-5",
@@ -234,55 +202,55 @@ final class PopupDisplayTests: XCTestCase {
         XCTAssertEqual(compactFeedModelLabel(requested: "claude-haiku-4-5",
                                              upstream: ""),
                        "claude-haiku-4-5")
-        XCTAssertEqual(compactFeedRouteLabel(route: "baseten", routeEffective: ""),
-                       "Baseten")
-        XCTAssertEqual(compactFeedRouteLabel(route: "baseten",
+        XCTAssertEqual(compactFeedRouteLabel(route: "openrouter", routeEffective: ""),
+                       "OpenRouter")
+        XCTAssertEqual(compactFeedRouteLabel(route: "openrouter",
                                              routeEffective: "anthropic"),
                        "Anthropic fallback")
     }
 
     func testGlobalRoutingStateAndSubtitle() {
-        let baseten = ClientStatus(dict: [
-            "name": "claude-code", "enabled": true, "effective_route": "baseten",
+        let openrouter = ClientStatus(dict: [
+            "name": "claude-code", "enabled": true, "effective_route": "openrouter",
         ])!
         let native = ClientStatus(dict: [
             "name": "codex", "enabled": true, "effective_route": "openai",
         ])!
         let disabled = ClientStatus(dict: [
-            "name": "disabled", "enabled": false, "effective_route": "baseten",
+            "name": "disabled", "enabled": false, "effective_route": "openrouter",
         ])!
         let fallback = ClientStatus(dict: [
-            "name": "claude-code", "enabled": true, "effective_route": "baseten",
+            "name": "claude-code", "enabled": true, "effective_route": "openrouter",
             "fallback": ["active": true],
         ])!
 
         XCTAssertEqual(globalRoutingState([]), .off)
         XCTAssertEqual(globalRoutingState([disabled]), .off)
-        XCTAssertEqual(globalRoutingState([baseten, disabled]), .on)
+        XCTAssertEqual(globalRoutingState([openrouter, disabled]), .on)
         XCTAssertEqual(globalRoutingState([native, disabled]), .off)
-        XCTAssertEqual(globalRoutingState([baseten, native]), .mixed)
+        XCTAssertEqual(globalRoutingState([openrouter, native]), .mixed)
 
-        XCTAssertEqual(globalRoutingSubtitle(gatewayUp: false, clients: [baseten],
+        XCTAssertEqual(globalRoutingSubtitle(gatewayUp: false, clients: [openrouter],
                                              auth: nil),
                        "Gateway stopped")
         XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true, clients: [], auth: nil),
                        "No enabled routing clients")
-        XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true, clients: [baseten],
+        XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true, clients: [openrouter],
                                              auth: nil),
-                       "Routing through Baseten")
+                       "Routing through OpenRouter")
         XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true, clients: [native],
                                              auth: nil),
                        "Using native providers")
         XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true,
-                                             clients: [baseten, native], auth: nil),
-                       "1 of 2 routes through Baseten")
+                                             clients: [openrouter, native], auth: nil),
+                       "1 of 2 routes through OpenRouter")
         XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true, clients: [fallback],
                                              auth: nil),
                        "1 route using fallback")
-        let deadAuth = AuthStatus(dict: ["health": "refresh_failed"])
-        XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true, clients: [baseten],
+        let deadAuth = AuthStatus(dict: ["status": "invalid"])
+        XCTAssertEqual(globalRoutingSubtitle(gatewayUp: true, clients: [openrouter],
                                              auth: deadAuth),
-                       "Authentication required")
+                       "OpenRouter API key required")
     }
 
     // MARK: - Sparkline bucket-to-points mapping
@@ -406,19 +374,19 @@ final class PopupDisplayTests: XCTestCase {
 
     func testFeedRouteLabel() {
         // No fallback: the plain requested route.
-        XCTAssertEqual(feedRouteLabel(route: "baseten", routeEffective: ""),
-                       "baseten")
+        XCTAssertEqual(feedRouteLabel(route: "openrouter", routeEffective: ""),
+                       "openrouter")
         // Fallback: the effective route tagged "(fb)".
-        XCTAssertEqual(feedRouteLabel(route: "baseten", routeEffective: "anthropic"),
+        XCTAssertEqual(feedRouteLabel(route: "openrouter", routeEffective: "anthropic"),
                        "anthropic (fb)")
     }
 
     func testFeedRowsRouteAndFallback() {
         let s = snapshot("""
         {"recent": [
-          {"ts": 100, "route": "baseten", "route_effective": "",
+          {"ts": 100, "route": "openrouter", "route_effective": "",
            "status": 200},
-          {"ts": 200, "route": "baseten", "route_effective": "anthropic",
+          {"ts": 200, "route": "openrouter", "route_effective": "anthropic",
            "status": 200}
         ]}
         """)
@@ -426,7 +394,7 @@ final class PopupDisplayTests: XCTestCase {
         // Newest first: the fallback row, then the plain row.
         XCTAssertEqual(rows[0].route, "anthropic (fb)")
         XCTAssertTrue(rows[0].isFallback)
-        XCTAssertEqual(rows[1].route, "baseten")
+        XCTAssertEqual(rows[1].route, "openrouter")
         XCTAssertFalse(rows[1].isFallback)
     }
 }

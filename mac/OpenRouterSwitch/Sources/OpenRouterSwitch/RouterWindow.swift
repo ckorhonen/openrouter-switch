@@ -3,7 +3,7 @@ import SwiftUI
 
 enum RouterWindowToolbarItems {
     static let refresh = NSToolbarItem.Identifier(
-        "co.baseten.switch.refresh")
+        "com.ckorhonen.openrouter-switch.refresh")
     static let defaultIdentifiers = [refresh]
 }
 
@@ -173,7 +173,7 @@ final class RouterWindowController: NSObject, NSWindowDelegate, NSToolbarDelegat
     private func makeToolbar() -> NSToolbar {
         let toolbar = NSToolbar(
             identifier: NSToolbar.Identifier(
-                "co.baseten.switch.router-window"))
+                "com.ckorhonen.openrouter-switch.router-window"))
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
@@ -340,7 +340,7 @@ func livePathGatewayHealth(_ snapshot: RoutingSnapshot?) -> String {
 
 func livePathEffectiveRoute(_ client: ClientStatus) -> String {
     if !client.effectiveSummary.isEmpty {
-        guard client.effectiveRoute == "baseten",
+        guard client.effectiveRoute == "openrouter",
               let effectiveModel = client.unmatchedNativeModel?.effectiveModel,
               !effectiveModel.isEmpty,
               catalogModelEntry(
@@ -348,10 +348,10 @@ func livePathEffectiveRoute(_ client: ClientStatus) -> String {
                 catalog: client.modelCatalog) != nil else {
             return client.effectiveSummary
         }
-        return "Baseten · \(catalogModelDisplayLabel(effectiveModel, catalog: client.modelCatalog))"
+        return "OpenRouter · \(catalogModelDisplayLabel(effectiveModel, catalog: client.modelCatalog))"
     }
     if !client.effectiveRoute.isEmpty {
-        return client.effectiveRoute.capitalized
+        return providerDisplayName(client.effectiveRoute)
     }
     return "Unavailable"
 }
@@ -538,8 +538,8 @@ func clientPagePresentation(
     case "codex":
         return ClientPagePresentation(
             headerDescription: globalRoutingEnabled
-                ? "Global routing is On. Codex requests use the configured Baseten route. Reasoning settings below apply to the selected model."
-                : "Global routing is Off. The Baseten profile requires routing On; start Codex without the profile to use OpenAI.",
+                ? "Global routing is On. Codex requests use the configured OpenRouter route. Reasoning settings below apply to the selected model."
+                : "Global routing is Off. The OpenRouter profile requires routing On; start Codex without the profile to use OpenAI.",
             activationCommand: nil,
             showsModelRouting: true,
             showsReasoning: true,
@@ -687,6 +687,7 @@ private struct RoutingOverviewView: View {
     @ObservedObject var doorStore: DoorStatusStore
     let variant: AppVariant
     let isPreview: Bool
+    @State private var candidateAPIKey = ""
 
     var body: some View {
         ScrollView {
@@ -694,6 +695,7 @@ private struct RoutingOverviewView: View {
                 Label("Overview", systemImage: "switch.2")
                     .font(.title2.weight(.semibold))
 
+                credentialGroup
                 liveRequestPath
 
                 if state.routingSnapshot != nil {
@@ -715,6 +717,98 @@ private struct RoutingOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .accessibilityIdentifier("routing-overview")
+    }
+
+    private var credentialGroup: some View {
+        RoutingSectionCard {
+            Label("OpenRouter API Key", systemImage: "key.fill")
+                .font(.headline)
+        } content: {
+            VStack(alignment: .leading, spacing: 10) {
+                statusRow(
+                    label: "Status",
+                    value: credentialStatusLabel(
+                        auth: state.auth,
+                        resolution: state.credentialResolution))
+                statusRow(
+                    label: "Source",
+                    value: credentialSourceLabel(
+                        auth: state.auth,
+                        resolution: state.credentialResolution))
+                if let auth = state.auth,
+                   !auth.maskedLabel.isEmpty {
+                    statusRow(label: "Key", value: auth.maskedLabel)
+                }
+                if let auth = state.auth,
+                   let remaining = auth.limitRemaining {
+                    statusRow(
+                        label: "Limit remaining",
+                        value: keyLimitLabel(remaining))
+                }
+                Divider()
+                SecureField(
+                    state.credentialResolution.source == .keychain
+                        ? "Enter a replacement key"
+                        : "Enter an OpenRouter API key",
+                    text: $candidateAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(
+                        isPreview || state.credentialMutationInFlight)
+                    .accessibilityLabel("OpenRouter API key")
+                    .accessibilityIdentifier("openrouter-api-key")
+                HStack {
+                    Button(
+                        state.credentialMutationInFlight
+                            ? "Validating…"
+                            : "Validate and Save"
+                    ) {
+                        let candidate = candidateAPIKey
+                        candidateAPIKey = ""
+                        Task { await state.saveAPIKey(candidate) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        isPreview
+                            || state.credentialMutationInFlight
+                            || candidateAPIKey.trimmingCharacters(
+                                in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("save-openrouter-api-key")
+
+                    if state.credentialResolution.source == .keychain {
+                        Button("Delete Keychain Key", role: .destructive) {
+                            Task { await state.deleteKeychainAPIKey() }
+                        }
+                        .disabled(
+                            isPreview || state.credentialMutationInFlight)
+                        .accessibilityIdentifier("delete-openrouter-api-key")
+                    }
+
+                    Spacer()
+                    Link(
+                        "Manage OpenRouter keys",
+                        destination: URL(
+                            string: "https://openrouter.ai/settings/keys")!)
+                }
+                if effectiveCredentialSource(
+                    auth: state.auth,
+                    resolution: state.credentialResolution
+                ) == .environment {
+                    Text(
+                        "Using read-only OPENROUTER_API_KEY. Saving here creates a Keychain key that takes precedence.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(
+                        "Keys are validated before replacement and stored in macOS Keychain. Existing keys are never displayed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(6)
+        }
+        .accessibilityIdentifier("overview-openrouter-api-key")
     }
 
     private var liveRequestPath: some View {
@@ -740,7 +834,7 @@ private struct RoutingOverviewView: View {
                         ? "checkmark.circle.fill"
                         : "xmark.circle.fill",
                     color: state.gatewayUp
-                        ? Color(nsColor: AppColors.basetenGreen)
+                        ? Color(nsColor: AppColors.openRouterIndigo)
                         : .red)
 
                 if state.snapshotIsStale {
@@ -797,7 +891,7 @@ private struct RoutingOverviewView: View {
                 ? "checkmark.circle.fill"
                 : "minus.circle",
             color: client.enabled && client.currentlyBound
-                ? Color(nsColor: AppColors.basetenGreen)
+                ? Color(nsColor: AppColors.openRouterIndigo)
                 : .secondary)
         livePathValueRow(
             label: "Configured",
@@ -831,7 +925,7 @@ private struct RoutingOverviewView: View {
                 ? .red
                 : (status?.tripped == true
                     ? .orange
-                    : Color(nsColor: AppColors.basetenGreen)))
+                    : Color(nsColor: AppColors.openRouterIndigo)))
         if let status {
             livePathValueRow(
                 label: "Cooldown",
@@ -978,6 +1072,64 @@ private struct RoutingOverviewView: View {
     }
 }
 
+func effectiveCredentialSource(
+    auth: AuthStatus?,
+    resolution: OpenRouterCredentialResolution
+) -> OpenRouterCredentialSource? {
+    if let source = auth?.source,
+       let gatewaySource = OpenRouterCredentialSource(rawValue: source) {
+        return gatewaySource
+    }
+    return resolution.source
+}
+
+func credentialSourceLabel(
+    auth: AuthStatus? = nil,
+    resolution: OpenRouterCredentialResolution
+) -> String {
+    switch effectiveCredentialSource(
+        auth: auth,
+        resolution: resolution) {
+    case .keychain:
+        return "macOS Keychain"
+    case .environment:
+        return "Environment · read-only"
+    case nil:
+        return "Not configured"
+    }
+}
+
+func credentialStatusLabel(
+    auth: AuthStatus?,
+    resolution: OpenRouterCredentialResolution
+) -> String {
+    if let auth {
+        switch auth.status {
+        case "valid", "ok":
+            return "Valid"
+        case "missing", "signed_out":
+            return "API key required"
+        case "invalid":
+            return "Invalid"
+        case "forbidden":
+            return "Forbidden"
+        case "error":
+            return "Validation unavailable"
+        default:
+            break
+        }
+    }
+    return resolution.isConfigured
+        ? "Waiting for gateway validation"
+        : "API key required"
+}
+
+func keyLimitLabel(_ value: Double) -> String {
+    value.rounded() == value
+        ? String(Int64(value))
+        : String(format: "%.2f", value)
+}
+
 private struct ClientRoutingView: View {
     @ObservedObject var state: OpenRouterSwitchState
     let client: ClientStatus
@@ -1052,10 +1204,10 @@ private struct ClientRoutingView: View {
                 symbol: "exclamationmark.triangle.fill",
                 color: .red)
         }
-        if authNeedsReauth(auth: state.auth),
+        if authNeedsAttention(auth: state.auth),
            state.displayedGlobalRoutingEnabled {
             warningBanner(
-                "Baseten authentication requires attention.",
+                "OpenRouter API key requires attention.",
                 symbol: "key.fill",
                 color: .orange)
         }
@@ -1112,7 +1264,7 @@ private struct ClientRoutingView: View {
             } content: {
                 VStack(alignment: .leading, spacing: 10) {
                 Text(
-                    "These settings apply when \(clientDisplayName(client.name)) uses the selected Baseten model.")
+                    "These settings apply when \(clientDisplayName(client.name)) uses the selected OpenRouter model.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -1322,9 +1474,9 @@ private struct ClientRoutingView: View {
                 "Loading reasoning options. Saved settings remain visible while editing is unavailable.",
                 symbol: "arrow.clockwise",
                 color: .secondary)
-        case .signedOut(let reason):
+        case .unavailable(let reason):
             warningBanner(
-                "\(liveModelCatalogSignedOutMessage(reason)) Saved reasoning settings remain visible.",
+                "\(liveModelCatalogUnavailableMessage(reason)) Saved reasoning settings remain visible.",
                 symbol: "key.fill",
                 color: .orange)
         case .error:
@@ -1394,7 +1546,7 @@ private struct ClientRoutingView: View {
                     .tag(FamilyPickerSelection.native)
                 Divider()
                 if !projection.selectable.isEmpty {
-                    Section("Baseten") {
+                    Section("OpenRouter") {
                         ForEach(
                             projection.selectable,
                             id: \.target
@@ -1470,7 +1622,7 @@ private struct ClientRoutingView: View {
                 selection: codexRouteBinding
             ) {
                 if !projection.selectable.isEmpty {
-                    Section("Baseten") {
+                    Section("OpenRouter") {
                         ForEach(
                             projection.selectable,
                             id: \.target
@@ -1509,7 +1661,7 @@ private struct ClientRoutingView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Loading Baseten Model APIs...")
+                    Text("Loading OpenRouter account models…")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -1517,9 +1669,9 @@ private struct ClientRoutingView: View {
                 .padding(.vertical, 8)
                 Divider()
             }
-        case .signedOut(let reason):
+        case .unavailable(let reason):
             VStack(spacing: 0) {
-                Text(liveModelCatalogSignedOutMessage(reason))
+                Text(liveModelCatalogUnavailableMessage(reason))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1538,7 +1690,7 @@ private struct ClientRoutingView: View {
         case .ready(let models):
             if models.isEmpty {
                 VStack(spacing: 0) {
-                    Text("No Baseten Model APIs found.")
+                    Text("No eligible OpenRouter account models found.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1577,7 +1729,7 @@ private struct ClientRoutingView: View {
                         .tag(SubagentPickerSelection.useClaudeCodeModel)
                     Divider()
                     if !projection.selectable.isEmpty {
-                        Section("Baseten") {
+                        Section("OpenRouter") {
                             ForEach(
                                 projection.selectable,
                                 id: \.target
@@ -1820,7 +1972,7 @@ func codexRouteConfiguredLabel(
 }
 
 func codexRoutePickerSummary() -> String {
-    "Choose the Baseten model used for Codex requests."
+    "Choose the OpenRouter model used for Codex requests."
 }
 
 func codexRouteEffectiveStatus(

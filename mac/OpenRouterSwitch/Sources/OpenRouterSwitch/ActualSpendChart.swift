@@ -2,10 +2,10 @@ import Charts
 import SwiftUI
 
 extension Color {
-    static let basetenGreen = Color(
-        red: 22 / 255,
-        green: 215 / 255,
-        blue: 102 / 255)
+    static let openRouterIndigo = Color(
+        red: 109 / 255,
+        green: 94 / 255,
+        blue: 247 / 255)
     static let claudeTerracotta = Color(
         red: 217 / 255,
         green: 119 / 255,
@@ -34,8 +34,8 @@ struct ActualSpendChart: View {
                     y: .value("Provider or model", row.label)
                 )
                 .foregroundStyle(
-                    row.provider.caseInsensitiveCompare("Baseten") == .orderedSame
-                        ? Color.basetenGreen
+                    row.provider.caseInsensitiveCompare("OpenRouter") == .orderedSame
+                        ? Color.openRouterIndigo
                         : Color.claudeTerracotta)
                 .annotation(position: .trailing, alignment: .leading) {
                     Text(trafficCurrency(row.actualCostUSD))

@@ -17,18 +17,18 @@ func TestBuildUsesPersistedCostsAndPreservesTrafficContract(t *testing.T) {
 	setActualCost(&claude, 30_000_000_000)
 	setLatency(&claude, 600, 1600)
 
-	baseten := analyticsEvent(101, "baseten", "claude-opus-4-8", "zai-org/GLM-5.2")
-	setUsage(&baseten, 1_000_000, 100_000, 20, 30)
-	baseten.Usage.CacheWriteTotalInputTokens = int64Pointer(30)
-	baseten.Usage.CacheWrite5mInputTokens = nil
-	baseten.Usage.CacheWrite1hInputTokens = nil
-	setActualCost(&baseten, 2_000_000_000)
-	setCounterfactualCost(&baseten, 12_000_000_000)
-	setLatency(&baseten, 200, 1200)
+	openrouter := analyticsEvent(101, "openrouter", "claude-opus-4-8", "zai-org/GLM-5.2")
+	setUsage(&openrouter, 1_000_000, 100_000, 20, 30)
+	openrouter.Usage.CacheWriteTotalInputTokens = int64Pointer(30)
+	openrouter.Usage.CacheWrite5mInputTokens = nil
+	openrouter.Usage.CacheWrite1hInputTokens = nil
+	setActualCost(&openrouter, 2_000_000_000)
+	setCounterfactualCost(&openrouter, 12_000_000_000)
+	setLatency(&openrouter, 200, 1200)
 
 	unpricedCounterfactual := analyticsEvent(
 		102,
-		"baseten",
+		"openrouter",
 		"claude-sonnet-4-6",
 		"moonshotai/Kimi-K3",
 	)
@@ -37,7 +37,7 @@ func TestBuildUsesPersistedCostsAndPreservesTrafficContract(t *testing.T) {
 
 	incomplete := analyticsEvent(
 		103,
-		"baseten",
+		"openrouter",
 		"claude-opus-4-8",
 		"unknown-upstream",
 	)
@@ -46,7 +46,7 @@ func TestBuildUsesPersistedCostsAndPreservesTrafficContract(t *testing.T) {
 
 	events := []telemetry.EventV1{
 		claude,
-		baseten,
+		openrouter,
 		unpricedCounterfactual,
 		incomplete,
 	}
@@ -67,24 +67,24 @@ func TestBuildUsesPersistedCostsAndPreservesTrafficContract(t *testing.T) {
 		t.Fatalf("coverage = %+v", got.Coverage)
 	}
 	if got.Cost.Summary.ActualClaudeCostUSD != 30 ||
-		got.Cost.Summary.ActualBasetenCostUSD != 3 ||
-		got.Cost.Summary.EstimatedNativeCostForBasetenUSD != 12 ||
+		got.Cost.Summary.ActualOpenRouterCostUSD != 3 ||
+		got.Cost.Summary.EstimatedNativeCostForOpenRouterUSD != 12 ||
 		got.Cost.Summary.SavedUSD != 10 {
 		t.Fatalf("persisted cost summary = %+v", got.Cost.Summary)
 	}
 	if len(got.Cost.Providers) != 2 ||
 		got.Cost.Providers[0].Provider != "Claude" ||
-		got.Cost.Providers[1].Provider != "Baseten" {
+		got.Cost.Providers[1].Provider != "OpenRouter" {
 		t.Fatalf("providers = %+v", got.Cost.Providers)
 	}
 	if got.Cost.Providers[1].Tokens != 1_100_015 {
-		t.Fatalf("Baseten tokens = %d, want input+output only 1100015",
+		t.Fatalf("OpenRouter tokens = %d, want input+output only 1100015",
 			got.Cost.Providers[1].Tokens)
 	}
-	if len(got.Cost.Savings.ByBasetenModel) != 1 ||
-		got.Cost.Savings.ByBasetenModel[0].ModelID != "zai-org/GLM-5.2" ||
-		got.Cost.Savings.ByBasetenModel[0].DisplayName != "GLM 5.2" {
-		t.Fatalf("savings models = %+v", got.Cost.Savings.ByBasetenModel)
+	if len(got.Cost.Savings.ByOpenRouterModel) != 1 ||
+		got.Cost.Savings.ByOpenRouterModel[0].ModelID != "zai-org/GLM-5.2" ||
+		got.Cost.Savings.ByOpenRouterModel[0].DisplayName != "GLM 5.2" {
+		t.Fatalf("savings models = %+v", got.Cost.Savings.ByOpenRouterModel)
 	}
 	if got.Cost.Models[0].ModelID != "fable" ||
 		got.Cost.Models[0].DisplayName != "Fable" {
@@ -99,7 +99,7 @@ func TestBuildUsesPersistedCostsAndPreservesTrafficContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(encoded), `"model":`) ||
-		strings.Contains(string(encoded), `"baseten_model":`) {
+		strings.Contains(string(encoded), `"openrouter_model":`) {
 		t.Fatalf("response exposes retired model field: %s", encoded)
 	}
 }
@@ -107,9 +107,9 @@ func TestBuildUsesPersistedCostsAndPreservesTrafficContract(t *testing.T) {
 func TestBuildGroupsByIdentityNotDisplayName(t *testing.T) {
 	claudeOne := analyticsEvent(100, "anthropic", "claude-sonnet-4-6", "claude-sonnet-4-6")
 	claudeTwo := analyticsEvent(101, "anthropic", "claude-sonnet-5-0", "claude-sonnet-5-0")
-	basetenOne := analyticsEvent(102, "baseten", "claude-opus-4-8", "org-a/shared-model")
-	basetenTwo := analyticsEvent(103, "baseten", "claude-opus-4-8", "org-b/shared_model")
-	events := []telemetry.EventV1{claudeOne, claudeTwo, basetenOne, basetenTwo}
+	openrouterOne := analyticsEvent(102, "openrouter", "claude-opus-4-8", "org-a/shared-model")
+	openrouterTwo := analyticsEvent(103, "openrouter", "claude-opus-4-8", "org-b/shared_model")
+	events := []telemetry.EventV1{claudeOne, claudeTwo, openrouterOne, openrouterTwo}
 	for index := range events {
 		setUsage(&events[index], 1, 1, 0, 0)
 	}
@@ -123,7 +123,7 @@ func TestBuildGroupsByIdentityNotDisplayName(t *testing.T) {
 		nil,
 	)
 	if len(got.Cost.Models) != 3 {
-		t.Fatalf("model groups = %+v, want one Claude family and two Baseten IDs", got.Cost.Models)
+		t.Fatalf("model groups = %+v, want one Claude family and two OpenRouter IDs", got.Cost.Models)
 	}
 	if got.Cost.Models[0].ModelID != "sonnet" ||
 		got.Cost.Models[0].DisplayName != "Sonnet" ||
@@ -134,16 +134,16 @@ func TestBuildGroupsByIdentityNotDisplayName(t *testing.T) {
 		got.Cost.Models[2].ModelID != "org-b/shared_model" ||
 		got.Cost.Models[1].DisplayName != "shared model" ||
 		got.Cost.Models[2].DisplayName != "shared model" {
-		t.Fatalf("Baseten identity groups = %+v", got.Cost.Models[1:])
+		t.Fatalf("OpenRouter identity groups = %+v", got.Cost.Models[1:])
 	}
 }
 
 func TestBuildProjectsCatalogNameAcrossTraffic(t *testing.T) {
 	event := analyticsEvent(
 		100,
-		"baseten",
+		"openrouter",
 		"claude-opus-4-8",
-		"baseten/inkling-v1",
+		"openrouter/inkling-v1",
 	)
 	setUsage(&event, 100, 20, 0, 0)
 	setActualCost(&event, 2_000_000_000)
@@ -152,9 +152,9 @@ func TestBuildProjectsCatalogNameAcrossTraffic(t *testing.T) {
 
 	catalog := pricing.New()
 	if err := catalog.ReplaceProviderAvailability(
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		[]pricing.AvailabilityModel{{
-			CanonicalModelID: "baseten/inkling-v1",
+			CanonicalModelID: "openrouter/inkling-v1",
 			DisplayName:      "Inkling",
 		}},
 		"test_model_apis",
@@ -174,29 +174,29 @@ func TestBuildProjectsCatalogNameAcrossTraffic(t *testing.T) {
 	)
 
 	if len(got.Cost.Models) != 1 ||
-		got.Cost.Models[0].ModelID != "baseten/inkling-v1" ||
+		got.Cost.Models[0].ModelID != "openrouter/inkling-v1" ||
 		got.Cost.Models[0].DisplayName != "Inkling" {
 		t.Fatalf("cost models = %+v", got.Cost.Models)
 	}
 	if len(got.Performance.Models) != 1 ||
-		got.Performance.Models[0].ModelID != "baseten/inkling-v1" ||
+		got.Performance.Models[0].ModelID != "openrouter/inkling-v1" ||
 		got.Performance.Models[0].DisplayName != "Inkling" {
 		t.Fatalf("performance models = %+v", got.Performance.Models)
 	}
-	if len(got.Cost.Savings.ByBasetenModel) != 1 ||
-		got.Cost.Savings.ByBasetenModel[0].ModelID != "baseten/inkling-v1" ||
-		got.Cost.Savings.ByBasetenModel[0].DisplayName != "Inkling" {
-		t.Fatalf("savings models = %+v", got.Cost.Savings.ByBasetenModel)
+	if len(got.Cost.Savings.ByOpenRouterModel) != 1 ||
+		got.Cost.Savings.ByOpenRouterModel[0].ModelID != "openrouter/inkling-v1" ||
+		got.Cost.Savings.ByOpenRouterModel[0].DisplayName != "Inkling" {
+		t.Fatalf("savings models = %+v", got.Cost.Savings.ByOpenRouterModel)
 	}
 	if len(got.Cost.Savings.Mappings) != 1 ||
-		got.Cost.Savings.Mappings[0].BasetenModelID != "baseten/inkling-v1" ||
-		got.Cost.Savings.Mappings[0].BasetenDisplayName != "Inkling" {
+		got.Cost.Savings.Mappings[0].OpenRouterModelID != "openrouter/inkling-v1" ||
+		got.Cost.Savings.Mappings[0].OpenRouterDisplayName != "Inkling" {
 		t.Fatalf("savings mappings = %+v", got.Cost.Savings.Mappings)
 	}
 }
 
 func TestBuildCollectionDisabledRetainsHistory(t *testing.T) {
-	event := analyticsEvent(10, "baseten", "claude-opus-4-8", "zai-org/GLM-5.2")
+	event := analyticsEvent(10, "openrouter", "claude-opus-4-8", "zai-org/GLM-5.2")
 	setUsage(&event, 1, 1, 0, 0)
 	setActualCost(&event, 2_000_000_000)
 	setCounterfactualCost(&event, 10_000_000_000)
@@ -218,7 +218,7 @@ func TestBuildCollectionDisabledRetainsHistory(t *testing.T) {
 		t.Fatal("collection_enabled = true")
 	}
 	if got.Coverage.RequestRows != 1 ||
-		got.Cost.Summary.ActualBasetenCostUSD != 2 ||
+		got.Cost.Summary.ActualOpenRouterCostUSD != 2 ||
 		got.Cost.Summary.SavedUSD != 8 {
 		t.Fatalf("disabled collection hid retained history: %+v", got)
 	}
@@ -234,7 +234,7 @@ func TestBuildEmptySlicesEncodeAsArrays(t *testing.T) {
 		nil,
 	)
 	if got.Cost.Providers == nil || got.Cost.Models == nil ||
-		got.Cost.Savings.ByBasetenModel == nil || got.Cost.Savings.Mappings == nil ||
+		got.Cost.Savings.ByOpenRouterModel == nil || got.Cost.Savings.Mappings == nil ||
 		got.Performance.Providers == nil || got.Performance.Models == nil {
 		t.Fatalf("nil collection in empty response: %+v", got)
 	}

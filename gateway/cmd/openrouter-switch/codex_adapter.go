@@ -1,19 +1,19 @@
 // codex_adapter.go implements `openrouter-switch codex on|off|status`.
 //
-// codex profiles are standalone overlay files: `codex --profile baseten`
-// loads $CODEX_HOME/baseten.config.toml on top of config.toml for that
+// codex profiles are standalone overlay files: `codex --profile openrouter`
+// loads $CODEX_HOME/openrouter.config.toml on top of config.toml for that
 // session only. The adapter owns that overlay file in its ENTIRETY:
-// `model_provider = "baseten"`, a synthetic compatibility model that keeps
-// Codex on the reduced request shape validated against Baseten, and the
-// [model_providers.baseten] table pointing at the gateway
+// `model_provider = "openrouter"`, a synthetic compatibility model that keeps
+// Codex on the reduced request shape validated against OpenRouter, and the
+// [model_providers.openrouter] table pointing at the gateway
 // door. The user's config.toml is never written, so default codex
-// behavior is untouched and `--profile baseten` is the whole opt-in.
+// behavior is untouched and `--profile openrouter` is the whole opt-in.
 //
 // `on` writes the overlay and takes a WHOLE-FILE backup of any
 // pre-existing file at that path on the FIRST on only, and only when
 // the current content is not already gateway-managed (managed = the
-// baseten root provider, the current compatibility model, the
-// [model_providers.baseten] table, and a base_url on a gateway port),
+// openrouter root provider, the current compatibility model, the
+// [model_providers.openrouter] table, and a base_url on a gateway port),
 // so a repeated `on` can never snapshot our own overlay as "the
 // user's original". A current-shape file on an old port is backed up
 // and replaced; unrecognized content is refused. `off` restores the
@@ -68,14 +68,14 @@ import (
 const (
 	codexManagedEnvKey = "CODEX_AUTH_TOKEN"
 	codexAuthTokenStub = "openrouter-switch-local"
-	codexOverlayName   = "baseten.config.toml"
+	codexOverlayName   = "openrouter.config.toml"
 	codexHarnessName   = "codex"
-	codexProviderTable = "[model_providers.baseten]"
+	codexProviderTable = "[model_providers.openrouter]"
 )
 
 func cmdCodex(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: openrouter-switch codex on|off|status|route <baseten-slug>|reasoning baseten <model> off|follow-harness|effort <value>|default  (start/stop are aliases for on/off)")
+		fmt.Fprintln(os.Stderr, "usage: openrouter-switch codex on|off|status|route <openrouter-slug>|reasoning openrouter <model> off|follow-harness|effort <value>|default  (start/stop are aliases for on/off)")
 		return 2
 	}
 	a, err := newCodexAdapterFromEnv()
@@ -132,7 +132,7 @@ type codexAdapter struct {
 	clientName    string          // the openai-shape client the overlay rides
 	clientEnabled bool            // false = parked; the profile has no live route
 	desiredPort   string          // door port carrying the codex client
-	modelSlug     string          // current gateway default Baseten route target
+	modelSlug     string          // current gateway default OpenRouter route target
 	slugErr       error           // target resolution failure; only on() and route need it
 	gatewayPorts  map[string]bool // every local port we consider "ours" (door binds + router listeners)
 	out           io.Writer       // human-readable action/warning output
@@ -186,7 +186,6 @@ const codexClientYAML = `  - name: codex
     auth_token:
       header: Authorization
       value: ${CODEX_AUTH_TOKEN}
-    default_model: zai-org/GLM-5.2
     responses_compatibility:
       text_format_default: on
       additional_tools_input: off
@@ -246,7 +245,7 @@ func codexDoorPort(f *config.File) (*config.Client, string, map[string]bool, err
 	return nil, "", nil, fmt.Errorf("no door port routes to the %s client listener %s; add a door.ports entry with router_addr: %s", target.Name, target.BindAddr, target.BindAddr)
 }
 
-// codexDefaultSlug resolves the Baseten slug the overlay pins as its
+// codexDefaultSlug resolves the OpenRouter slug the overlay pins as its
 // model from the client routing config.
 func codexDefaultSlug(c *config.Client) (string, error) {
 	if s := c.DefaultModel; s != "" {
@@ -261,13 +260,13 @@ func (a *codexAdapter) desiredURL() string {
 
 // desiredOverlay is the whole managed file. codex reads it as a
 // session overlay on top of config.toml when invoked with
-// `--profile baseten`; the synthetic model makes codex send the reduced
-// unknown-model body shape that inference.baseten.co accepts. The
-// gateway resolves it to the Codex client's current default_model.
+// `--profile openrouter`; the synthetic model makes codex send the reduced
+// unknown-model body shape expected by the local compatibility gateway.
+// The gateway resolves it to the Codex client's current default_model.
 func (a *codexAdapter) desiredOverlay() []byte {
 	return []byte(fmt.Sprintf(`# Managed by openrouter-switch ('openrouter-switch codex on'); remove with 'openrouter-switch codex off'.
-# Opt in per session: codex --profile baseten  (your config.toml is never touched)
-model_provider = "baseten"
+# Opt in per session: codex --profile openrouter  (your config.toml is never touched)
+model_provider = "openrouter"
 model = %q
 
 %s
@@ -296,7 +295,7 @@ func (a *codexAdapter) isGatewayURL(raw string) bool {
 
 // codexOverlayShape is the minimal parse of an overlay file used by
 // the ownership tests. Deliberately not a TOML parser (dependency
-// policy): it reads only the root provider/model and the local baseten
+// policy): it reads only the root provider/model and the local openrouter
 // provider table markers written by desiredOverlay.
 type codexOverlayShape struct {
 	providerTable bool
@@ -364,12 +363,12 @@ func codexTOMLValue(v string) string {
 }
 
 // codexOursShaped reports whether a file carries the openrouter-switch overlay
-// shape: the baseten root provider, the current compatibility model, the
+// shape: the openrouter root provider, the current compatibility model, the
 // provider table, and a base_url. Shape only; a current-shape overlay on a
 // dead port is still ours. Requiring every marker avoids claiming an arbitrary
-// user-authored baseten provider table or any noncurrent profile.
+// user-authored openrouter provider table or any noncurrent profile.
 func codexOursShaped(sh codexOverlayShape) bool {
-	return sh.modelProvider == "baseten" &&
+	return sh.modelProvider == "openrouter" &&
 		sh.model == gateway.CodexCompatibilityModel &&
 		sh.providerTable && sh.baseURL != ""
 }
@@ -503,7 +502,7 @@ func (a *codexAdapter) on() int {
 	ours := existed && codexOursShaped(parseCodexOverlay(raw))
 	managed := existed && a.overlayManaged(raw)
 	if existed && !ours {
-		fmt.Fprintf(a.out, "codex on: %s already exists and is not openrouter-switch-managed (expected root model_provider = \"baseten\", model = %q, and a %s table with base_url); refusing to overwrite it. Move it aside and re-run 'openrouter-switch codex on'.\n",
+		fmt.Fprintf(a.out, "codex on: %s already exists and is not openrouter-switch-managed (expected root model_provider = \"openrouter\", model = %q, and a %s table with base_url); refusing to overwrite it. Move it aside and re-run 'openrouter-switch codex on'.\n",
 			a.overlayPath, gateway.CodexCompatibilityModel, codexProviderTable)
 		return 1
 	}
@@ -586,7 +585,7 @@ func (a *codexAdapter) on() int {
 	} else {
 		fmt.Fprintf(a.out, "codex: already on (%s is up to date)\n", a.overlayPath)
 	}
-	fmt.Fprintln(a.out, "opt in per session with 'codex --profile baseten' (default codex behavior is unchanged); revert with 'openrouter-switch codex off'.")
+	fmt.Fprintln(a.out, "opt in per session with 'codex --profile openrouter' (default codex behavior is unchanged); revert with 'openrouter-switch codex off'.")
 	return 0
 }
 
@@ -666,7 +665,7 @@ func appendEnvLine(path, key, value string) error {
 // door's SIGHUP diff rebinds the door port, briefly resetting live
 // Claude Code connections (the Codex integration contract risk 3).
 func (a *codexAdapter) unpark() int {
-	fmt.Fprintf(a.out, "the gateway %s client is parked (enabled: false in %s); 'codex --profile baseten' has no live route until it is enabled.\n", a.clientName, a.configPath)
+	fmt.Fprintf(a.out, "the gateway %s client is parked (enabled: false in %s); 'codex --profile openrouter' has no live route until it is enabled.\n", a.clientName, a.configPath)
 	fmt.Fprintf(a.out, "Enabling it changes the shared door port spec: the door's SIGHUP rebinds port %s, briefly resetting live Claude Code connections.\n", a.desiredPort)
 	fmt.Fprintf(a.out, "Enable the %s client now? [y/N] ", a.clientName)
 	var resp string
@@ -883,7 +882,7 @@ func (a *codexAdapter) noteNotRestored(bak *codexBackup) {
 
 // --- route -------------------------------------------------------------------
 
-const codexRouteUsage = "usage: openrouter-switch codex route <baseten-slug>  (example: openrouter-switch codex route zai-org/GLM-5.2)"
+const codexRouteUsage = "usage: openrouter-switch codex route <account-model-slug>"
 
 // route changes only the Codex client's gateway default_model. The managed
 // overlay remains byte-identical and continues to emit the compatibility
@@ -917,8 +916,18 @@ func (a *codexAdapter) route(args []string, stdout io.Writer) int {
 			Key:             "default_model",
 			ConfigPath:      a.configPath,
 		}, "invalid_route_target",
-			fmt.Sprintf("codex route: %q is not a raw Baseten slug containing \"/\"\n%s", target, codexRouteUsage),
+			fmt.Sprintf("codex route: %q is not a raw OpenRouter slug containing \"/\"\n%s", target, codexRouteUsage),
 			false, 2)
+	}
+	if eligibilityErr := requireEligibleOpenRouterModel(target); eligibilityErr != nil {
+		return failMutation(opts, stdout, mutationResult{
+			OperationID:     opts.OperationID,
+			Operation:       "set_codex_route",
+			RequestedTarget: target,
+			Client:          a.clientName,
+			Key:             "default_model",
+			ConfigPath:      a.configPath,
+		}, eligibilityErr.code, eligibilityErr.message, eligibilityErr.retriable, 1)
 	}
 	lock, err := acquireConfigMutationLock(a.configPath)
 	if err != nil {
@@ -1019,7 +1028,7 @@ func (a *codexAdapter) status(stdout io.Writer) int {
 	}
 	state := "off (no managed overlay)"
 	if managed {
-		state = "on (managed overlay installed; opt in with 'codex --profile baseten')"
+		state = "on (managed overlay installed; opt in with 'codex --profile openrouter')"
 	}
 	fmt.Fprintf(stdout, "codex: %s\n", state)
 	fmt.Fprintf(stdout, "  overlay:             %s (%s)\n", a.overlayPath, overlayLabel)

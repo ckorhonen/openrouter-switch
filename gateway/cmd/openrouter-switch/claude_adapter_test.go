@@ -27,8 +27,8 @@ func testAdapter(t *testing.T) (*claudeAdapter, *bytes.Buffer) {
 		desiredPort:  testDoorPort,
 		gatewayPorts: map[string]bool{"8081": true, "18081": true},
 		modelAliases: map[string]string{
-			"claude-baseten-glm-5-2":   "zai-org/GLM-5.2",
-			"claude-baseten-kimi-k2-7": "moonshotai/Kimi-K2-7",
+			"claude-openrouter-glm-5-2":   "zai-org/GLM-5.2",
+			"claude-openrouter-kimi-k2-7": "moonshotai/Kimi-K2-7",
 		},
 		out: out,
 	}, out
@@ -407,7 +407,7 @@ func TestClaudeOffResetsPersistedModelAlias(t *testing.T) {
 		// User picks a gateway alias via the /v1/models picker; it
 		// persists to settings (the model-discovery contract trap).
 		root := readTree(t, a.settingsPath)
-		root["model"] = "claude-baseten-glm-5-2"
+		root["model"] = "claude-openrouter-glm-5-2"
 		b, _ := json.MarshalIndent(root, "", "  ")
 		if err := os.WriteFile(a.settingsPath, append(b, '\n'), 0o600); err != nil {
 			t.Fatal(err)
@@ -425,7 +425,7 @@ func TestClaudeOffResetsPersistedModelAlias(t *testing.T) {
 	})
 	t.Run("deleted without backup", func(t *testing.T) {
 		a, out := testAdapter(t)
-		writeSettingsFile(t, a, `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8081"},"model":"claude-baseten-kimi-k2-7"}`)
+		writeSettingsFile(t, a, `{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8081"},"model":"claude-openrouter-kimi-k2-7"}`)
 		if code := a.off(); code != 0 {
 			t.Fatalf("off = %d", code)
 		}

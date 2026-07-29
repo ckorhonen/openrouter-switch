@@ -47,10 +47,19 @@ trap cleanup EXIT
 asset="gitleaks_${version}_${platform}.tar.gz"
 archive="$tool_root/$asset"
 url="https://github.com/gitleaks/gitleaks/releases/download/v${version}/${asset}"
-curl --fail --silent --show-error --location \
+if ! curl --fail --silent --show-error --location \
     --proto '=https' --tlsv1.2 \
     --output "$archive" \
-    "$url"
+    "$url"; then
+    command -v gh >/dev/null 2>&1 \
+        || fail "download failed and gh is unavailable"
+    rm -f -- "$archive"
+    gh release download "v${version}" \
+        --repo gitleaks/gitleaks \
+        --pattern "$asset" \
+        --dir "$tool_root" \
+        || fail "download failed with curl and gh"
+fi
 
 actual_sha256="$(shasum -a 256 "$archive" | awk '{print $1}')"
 [[ "$actual_sha256" == "$expected_sha256" ]] \

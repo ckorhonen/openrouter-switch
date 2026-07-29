@@ -549,7 +549,7 @@ func TestRoutingMutationClaudeRouteUsesJournaledReceipt(t *testing.T) {
 		configPath: path,
 		clientName: "claude-code",
 		modelAliases: map[string]string{
-			"claude-baseten-glm-5-2": "zai-org/GLM-5.2",
+			"claude-openrouter-glm-5-2": "zai-org/GLM-5.2",
 		},
 		out: io.Discard,
 	}

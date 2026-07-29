@@ -22,7 +22,7 @@ type doctorProbeResult struct {
 	Model     string
 	Error     string
 
-	// DoorVia is the X-Baseten-Switch-Door response header: "router" when the
+	// DoorVia is the X-OpenRouter-Switch-Door response header: "router" when the
 	// router answered and "fallback" when the door's native failover
 	// served the request.
 	DoorVia string
@@ -74,7 +74,7 @@ func doctorProbeClient(c *http.Client, target doctorProbeTarget) *doctorProbeRes
 	result := &doctorProbeResult{
 		Status:    resp.StatusCode,
 		LatencyMs: latency,
-		DoorVia:   resp.Header.Get("X-Baseten-Switch-Door"),
+		DoorVia:   resp.Header.Get("X-OpenRouter-Switch-Door"),
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		var payload struct {
@@ -108,7 +108,7 @@ func confirmDoctorProbes(targets []doctorProbeTarget) (bool, error) {
 		return true, nil
 	}
 	fmt.Fprintf(os.Stderr, "About to fire %d real 1-token inference request(s) through the gateway.\n", count)
-	fmt.Fprintln(os.Stderr, "Each request may cost a fraction of a cent on the upstream provider (baseten/anthropic/openai).")
+	fmt.Fprintln(os.Stderr, "Each request may cost a fraction of a cent on the upstream provider (openrouter/anthropic/openai).")
 	fmt.Fprint(os.Stderr, "Proceed? [y/N] ")
 	var response string
 	fmt.Fscanln(os.Stdin, &response)

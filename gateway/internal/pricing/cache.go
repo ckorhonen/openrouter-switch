@@ -77,8 +77,8 @@ func (s *Snapshot) ExportProviderCache(provider string) ([]byte, error) {
 		}
 	}
 	var pricingCatalog *providerCachePricingCatalog
-	if provider == ProviderBaseten {
-		authority := activeBasetenPricingCatalog(cacheableLayers)
+	if provider == ProviderOpenRouter {
+		authority := activeOpenRouterPricingCatalog(cacheableLayers)
 		if authority.metadata.Source != "" {
 			pricingCatalog = &providerCachePricingCatalog{
 				Source:           authority.metadata.Source,
@@ -224,7 +224,7 @@ func (p *Pricing) ImportProviderCache(body []byte) error {
 		replacesPricing:             *envelope.ReplacesPricing,
 	}
 	if envelope.PricingCatalog != nil {
-		catalog.basetenPricing = &basetenPricingCatalog{
+		catalog.openrouterPricing = &openrouterPricingCatalog{
 			metadata: CatalogMetadata{
 				Source:           envelope.PricingCatalog.Source,
 				Provenance:       envelope.PricingCatalog.Provenance,
@@ -266,15 +266,15 @@ func validateProviderCachePricingCatalog(
 		}
 		return nil
 	}
-	if envelope.Provider != ProviderBaseten {
+	if envelope.Provider != ProviderOpenRouter {
 		return fmt.Errorf(
-			"provider cache replaces_pricing is only valid for Baseten",
+			"provider cache replaces_pricing is only valid for OpenRouter",
 		)
 	}
 	catalog := envelope.PricingCatalog
 	if catalog == nil {
 		return fmt.Errorf(
-			"Baseten provider cache pricing_catalog is required",
+			"OpenRouter provider cache pricing_catalog is required",
 		)
 	}
 	if strings.TrimSpace(catalog.Source) == "" ||
@@ -282,13 +282,13 @@ func validateProviderCachePricingCatalog(
 		catalog.FetchedAt.IsZero() ||
 		len(catalog.Models) == 0 {
 		return fmt.Errorf(
-			"Baseten provider cache pricing_catalog is incomplete",
+			"OpenRouter provider cache pricing_catalog is incomplete",
 		)
 	}
 	if catalog.PricedModelCount < 0 ||
 		catalog.PricedModelCount > len(catalog.Models) {
 		return fmt.Errorf(
-			"Baseten provider cache priced_model_count is invalid",
+			"OpenRouter provider cache priced_model_count is invalid",
 		)
 	}
 	sorted := append([]string(nil), catalog.Models...)
@@ -298,12 +298,12 @@ func validateProviderCachePricingCatalog(
 			id != sorted[index] ||
 			(index > 0 && id == catalog.Models[index-1]) {
 			return fmt.Errorf(
-				"Baseten provider cache pricing models must be unique and sorted",
+				"OpenRouter provider cache pricing models must be unique and sorted",
 			)
 		}
 		if _, ok := envelope.Models[id]; !ok {
 			return fmt.Errorf(
-				"Baseten pricing model %q is absent from provider cache",
+				"OpenRouter pricing model %q is absent from provider cache",
 				id,
 			)
 		}
@@ -316,7 +316,7 @@ func validateProviderCachePricingCatalog(
 	}
 	if priced != catalog.PricedModelCount {
 		return fmt.Errorf(
-			"Baseten provider cache priced_model_count = %d, want %d",
+			"OpenRouter provider cache priced_model_count = %d, want %d",
 			catalog.PricedModelCount,
 			priced,
 		)

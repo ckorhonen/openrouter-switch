@@ -82,6 +82,7 @@ private final class ModelCatalogURLProtocol: URLProtocol {
     static var responseData = Data()
     static var statusCode = 200
     static var observedURL: URL?
+    static var observedTimeout: TimeInterval?
 
     override class func canInit(with request: URLRequest) -> Bool {
         true
@@ -94,6 +95,7 @@ private final class ModelCatalogURLProtocol: URLProtocol {
 
     override func startLoading() {
         Self.observedURL = request.url
+        Self.observedTimeout = request.timeoutInterval
         let response = HTTPURLResponse(
             url: request.url!,
             statusCode: Self.statusCode,
@@ -111,6 +113,45 @@ private final class ModelCatalogURLProtocol: URLProtocol {
 }
 
 final class ModelCatalogTests: XCTestCase {
+    func testGatewayClientUsesEndpointSpecificRequestTimeouts() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 60
+        configuration.protocolClasses = [ModelCatalogURLProtocol.self]
+        let client = GatewayAPIClient(
+            runtime: .stable(),
+            session: URLSession(configuration: configuration))
+
+        ModelCatalogURLProtocol.responseData = Data("{}".utf8)
+        ModelCatalogURLProtocol.statusCode = 200
+        ModelCatalogURLProtocol.observedTimeout = nil
+        _ = try await client.fetchStatus()
+        XCTAssertEqual(
+            try XCTUnwrap(ModelCatalogURLProtocol.observedTimeout),
+            2,
+            accuracy: 0.001)
+
+        ModelCatalogURLProtocol.responseData = Data("""
+        {"auth":{"state":"valid","source":"keychain"}}
+        """.utf8)
+        ModelCatalogURLProtocol.observedTimeout = nil
+        _ = try await client.reloadCredentials()
+        XCTAssertEqual(
+            try XCTUnwrap(ModelCatalogURLProtocol.observedTimeout),
+            7,
+            accuracy: 0.001)
+
+        ModelCatalogURLProtocol.responseData = Data("""
+        {"state":"ready","models":[]}
+        """.utf8)
+        ModelCatalogURLProtocol.observedTimeout = nil
+        _ = try await client.fetchModelCatalog()
+        XCTAssertEqual(
+            try XCTUnwrap(ModelCatalogURLProtocol.observedTimeout),
+            22,
+            accuracy: 0.001)
+    }
+
     func testGatewayClientDecodesNarrowModelCatalogContract() async throws {
         ModelCatalogURLProtocol.responseData = Data("""
         {
@@ -118,12 +159,16 @@ final class ModelCatalogTests: XCTestCase {
           "models": [
             {
               "slug": "zai-org/GLM-5.2",
-              "display_name": "GLM 5.2"
+              "display_name": "GLM 5.2",
+              "tool_capable": true,
+              "context_tokens": 131072,
+              "max_output_tokens": 32768,
+              "input_modalities": ["text"],
+              "output_modalities": ["text"],
+              "supported_parameters": ["tools", "reasoning"]
             }
           ],
-          "signed_out_reason": "",
-          "fetched_at": "2026-07-24T18:00:00Z",
-          "error": ""
+          "fetched_at": "2026-07-24T18:00:00Z"
         }
         """.utf8)
         ModelCatalogURLProtocol.statusCode = 200
@@ -137,10 +182,16 @@ final class ModelCatalogTests: XCTestCase {
         let snapshot = try await client.fetchModelCatalog()
 
         XCTAssertEqual(snapshot.state, .ready)
-        XCTAssertNil(snapshot.signedOutReason)
+        XCTAssertNil(snapshot.unavailableReason)
         XCTAssertEqual(snapshot.models.count, 1)
         XCTAssertEqual(snapshot.models[0].slug, "zai-org/GLM-5.2")
         XCTAssertEqual(snapshot.models[0].displayName, "GLM 5.2")
+        XCTAssertTrue(snapshot.models[0].toolCapable)
+        XCTAssertEqual(snapshot.models[0].contextTokens, 131_072)
+        XCTAssertEqual(snapshot.models[0].maxOutputTokens, 32_768)
+        XCTAssertEqual(snapshot.models[0].supportedParameters, [
+            "tools", "reasoning",
+        ])
         XCTAssertEqual(
             ModelCatalogURLProtocol.observedURL?.path,
             "/v1/admin/model-catalog")
@@ -150,8 +201,19 @@ final class ModelCatalogTests: XCTestCase {
         let valid: [String: Any] = [
             "slug": "vendor/model",
             "display_name": "Model",
+            "tool_capable": true,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supported_parameters": ["tools"],
         ]
         XCTAssertNotNil(LiveModelCatalogEntry(dict: valid))
+        let omittedArrays = LiveModelCatalogEntry(dict: [
+            "slug": "vendor/metadata-light",
+            "display_name": "Metadata Light",
+            "tool_capable": true,
+        ])
+        XCTAssertNotNil(omittedArrays)
+        XCTAssertFalse(omittedArrays?.selectable ?? true)
 
         for invalid in [
             [
@@ -177,6 +239,10 @@ final class ModelCatalogTests: XCTestCase {
         let model = LiveModelCatalogEntry(dict: [
             "slug": "vendor/model-with-hyphens",
             "display_name": "",
+            "tool_capable": true,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supported_parameters": ["tools"],
         ])
 
         XCTAssertEqual(model?.displayLabel, "vendor/model-with-hyphens")
@@ -186,13 +252,15 @@ final class ModelCatalogTests: XCTestCase {
         let validModel: [String: Any] = [
             "slug": "vendor/model",
             "display_name": "Model",
+            "tool_capable": true,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supported_parameters": ["tools"],
         ]
         let valid: [String: Any] = [
             "state": "ready",
-            "signed_out_reason": "",
             "models": [validModel],
             "fetched_at": "2026-07-24T18:00:00Z",
-            "error": "",
         ]
         XCTAssertNotNil(LiveModelCatalogSnapshot(dict: valid))
 
@@ -204,46 +272,28 @@ final class ModelCatalogTests: XCTestCase {
             ],
             [
                 "state": "unknown",
-                "signed_out_reason": "",
+                "unavailable_reason": "",
                 "models": [validModel],
                 "fetched_at": "",
                 "error": "",
             ],
             [
                 "state": "ready",
-                "signed_out_reason": "",
+                "unavailable_reason": "",
                 "models": "not-an-array",
                 "fetched_at": "",
                 "error": "",
             ],
             [
                 "state": "ready",
-                "signed_out_reason": "",
-                "models": [validModel],
-                "error": "",
-            ],
-            [
-                "state": "ready",
-                "signed_out_reason": "",
-                "models": [validModel],
-                "fetched_at": "",
-            ],
-            [
-                "state": "ready",
+                "unavailable_reason": "invalid_credentials",
                 "models": [validModel],
                 "fetched_at": "",
                 "error": "",
             ],
             [
-                "state": "ready",
-                "signed_out_reason": "session_expired",
-                "models": [validModel],
-                "fetched_at": "",
-                "error": "",
-            ],
-            [
-                "state": "signed_out",
-                "signed_out_reason": "unknown",
+                "state": "unavailable",
+                "unavailable_reason": "unknown",
                 "models": [],
                 "fetched_at": "",
                 "error": "",
@@ -270,10 +320,14 @@ final class ModelCatalogTests: XCTestCase {
           "state": "ready",
           "models": [
             {
-              "slug": "vendor/model"
+              "slug": "vendor/model",
+              "tool_capable": true,
+              "input_modalities": ["text"],
+              "output_modalities": ["text"],
+              "supported_parameters": ["tools"]
             }
           ],
-          "signed_out_reason": "",
+          "unavailable_reason": "",
           "fetched_at": "2026-07-24T18:00:00Z",
           "error": ""
         }
@@ -299,12 +353,12 @@ final class ModelCatalogTests: XCTestCase {
         let configured = [
             configuredModel(
                 label: "Configured A",
-                target: "claude-baseten-a",
+                target: "claude-openrouter-a",
                 slug: "vendor/a",
                 available: false),
             configuredModel(
                 label: "Configured B",
-                target: "claude-baseten-b",
+                target: "claude-openrouter-b",
                 slug: "vendor/b",
                 available: true),
             configuredModel(
@@ -319,6 +373,14 @@ final class ModelCatalogTests: XCTestCase {
             liveModel("vendor/d", label: "Live D"),
             liveModel("vendor/e", label: "Live E"),
             liveModel("vendor/d", label: "Duplicate D"),
+            LiveModelCatalogEntry(dict: [
+                "slug": "vendor/no-tools",
+                "display_name": "No Tools",
+                "tool_capable": false,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "supported_parameters": [],
+            ])!,
         ]
 
         let projection = projectModelCatalog(
@@ -335,10 +397,10 @@ final class ModelCatalogTests: XCTestCase {
             ])
         XCTAssertEqual(projection.selectable[0].label, "Live A")
         XCTAssertEqual(projection.selectable[0].slug, "vendor/a")
-        XCTAssertEqual(projection.selectable[0].alias, "claude-baseten-a")
+        XCTAssertEqual(projection.selectable[0].alias, "claude-openrouter-a")
         XCTAssertFalse(
             projection.selectable.contains(where: {
-                $0.slug == "private/c"
+                $0.slug == "private/c" || $0.slug == "vendor/no-tools"
             }))
     }
 
@@ -354,8 +416,8 @@ final class ModelCatalogTests: XCTestCase {
         for state in [
             LiveModelCatalogLoadState.idle,
             .loading,
-            .signedOut(.notSignedIn),
-            .signedOut(.sessionExpired),
+            .unavailable(.missingCredentials),
+            .unavailable(.invalidCredentials),
             .error("unavailable"),
         ] {
             let projection = projectModelCatalog(
@@ -407,29 +469,29 @@ final class ModelCatalogTests: XCTestCase {
 
         let notSignedInState = makeState(modelCatalogReader:
             FixedModelCatalogReader(.success(catalogSnapshot(
-                state: .signedOut,
-                signedOutReason: .notSignedIn))))
+                state: .unavailable,
+                unavailableReason: .missingCredentials))))
         notSignedInState.requestModelCatalogRefresh()
         await notSignedInState.waitForModelCatalogRefresh()
         XCTAssertEqual(
             notSignedInState.liveModelCatalogState,
-            .signedOut(.notSignedIn))
+            .unavailable(.missingCredentials))
 
         let expiredState = makeState(modelCatalogReader:
             FixedModelCatalogReader(.success(catalogSnapshot(
-                state: .signedOut,
-                signedOutReason: .sessionExpired))))
+                state: .unavailable,
+                unavailableReason: .invalidCredentials))))
         expiredState.requestModelCatalogRefresh()
         await expiredState.waitForModelCatalogRefresh()
         XCTAssertEqual(
             expiredState.liveModelCatalogState,
-            .signedOut(.sessionExpired))
+            .unavailable(.invalidCredentials))
         XCTAssertEqual(
-            liveModelCatalogSignedOutMessage(.notSignedIn),
-            "Sign in to Baseten to load Model APIs.")
+            liveModelCatalogUnavailableMessage(.missingCredentials),
+            "Add an OpenRouter API key to load account models.")
         XCTAssertEqual(
-            liveModelCatalogSignedOutMessage(.sessionExpired),
-            "Your Baseten session expired. Sign in again to load Model APIs.")
+            liveModelCatalogUnavailableMessage(.invalidCredentials),
+            "The OpenRouter API key is invalid. Replace it to load account models.")
 
         let backendErrorState = makeState(modelCatalogReader:
             FixedModelCatalogReader(.success(catalogSnapshot(
@@ -522,22 +584,34 @@ final class ModelCatalogTests: XCTestCase {
         LiveModelCatalogEntry(dict: [
             "slug": slug,
             "display_name": label,
+            "tool_capable": true,
+            "context_tokens": 131_072,
+            "max_output_tokens": 32_768,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "supported_parameters": ["tools"],
         ])!
     }
 
     private func catalogSnapshot(
         state: LiveModelCatalogResponseState,
         models: [LiveModelCatalogEntry] = [],
-        signedOutReason: LiveModelCatalogSignedOutReason? = nil,
+        unavailableReason: LiveModelCatalogUnavailableReason? = nil,
         error: String = ""
     ) -> LiveModelCatalogSnapshot {
         LiveModelCatalogSnapshot(dict: [
             "state": state.rawValue,
-            "signed_out_reason": signedOutReason?.rawValue ?? "",
+            "unavailable_reason": unavailableReason?.rawValue ?? "",
             "models": models.map {
                 [
                     "slug": $0.slug,
                     "display_name": $0.displayName,
+                    "tool_capable": $0.toolCapable,
+                    "context_tokens": $0.contextTokens as Any,
+                    "max_output_tokens": $0.maxOutputTokens as Any,
+                    "input_modalities": $0.inputModalities,
+                    "output_modalities": $0.outputModalities,
+                    "supported_parameters": $0.supportedParameters,
                 ] as [String: Any]
             },
             "fetched_at": "2026-07-24T18:00:00Z",

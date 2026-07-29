@@ -94,7 +94,7 @@ func (g *Gateway) analyticsResponse(
 	presentationRevision := ""
 	if catalog != nil {
 		presentationRevision = catalog.PresentationRevision(
-			pricing.ProviderBaseten,
+			pricing.ProviderOpenRouter,
 		)
 	}
 	key := analyticsResponseCacheKey{

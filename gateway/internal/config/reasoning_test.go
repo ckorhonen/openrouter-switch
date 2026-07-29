@@ -22,7 +22,7 @@ func TestValidateRoutingPolicyAcceptsClientReasoningModes(t *testing.T) {
 					Name:          "claude-code",
 					ProtocolShape: "anthropic",
 					ModelOptions: ModelOptions{
-						"baseten": {
+						"openrouter": {
 							"zai-org/GLM-5.2": ModelOption{Reasoning: &tc.policy},
 						},
 					},
@@ -56,7 +56,7 @@ func TestValidateRoutingPolicyRejectsInvalidClientReasoningStructure(t *testing.
 		{
 			name: "empty model",
 			options: ModelOptions{
-				"baseten": {
+				"openrouter": {
 					"": ModelOption{
 						Reasoning: &ReasoningPolicy{Mode: ReasoningOff},
 					},
@@ -67,7 +67,7 @@ func TestValidateRoutingPolicyRejectsInvalidClientReasoningStructure(t *testing.
 		{
 			name: "missing reasoning",
 			options: ModelOptions{
-				"baseten": {
+				"openrouter": {
 					"zai-org/GLM-5.2": ModelOption{},
 				},
 			},
@@ -76,7 +76,7 @@ func TestValidateRoutingPolicyRejectsInvalidClientReasoningStructure(t *testing.
 		{
 			name: "unknown mode",
 			options: ModelOptions{
-				"baseten": {
+				"openrouter": {
 					"zai-org/GLM-5.2": ModelOption{
 						Reasoning: &ReasoningPolicy{Mode: "turbo"},
 					},
@@ -87,7 +87,7 @@ func TestValidateRoutingPolicyRejectsInvalidClientReasoningStructure(t *testing.
 		{
 			name: "fixed without effort",
 			options: ModelOptions{
-				"baseten": {
+				"openrouter": {
 					"deepseek-ai/DeepSeek-V4-Pro": ModelOption{
 						Reasoning: &ReasoningPolicy{Mode: ReasoningFixed},
 					},
@@ -98,7 +98,7 @@ func TestValidateRoutingPolicyRejectsInvalidClientReasoningStructure(t *testing.
 		{
 			name: "off with effort",
 			options: ModelOptions{
-				"baseten": {
+				"openrouter": {
 					"zai-org/GLM-5.2": ModelOption{
 						Reasoning: &ReasoningPolicy{
 							Mode:   ReasoningOff,
@@ -112,7 +112,7 @@ func TestValidateRoutingPolicyRejectsInvalidClientReasoningStructure(t *testing.
 		{
 			name: "follow harness with effort",
 			options: ModelOptions{
-				"baseten": {
+				"openrouter": {
 					"zai-org/GLM-5.2": ModelOption{
 						Reasoning: &ReasoningPolicy{
 							Mode:   ReasoningFollowHarness,
@@ -147,7 +147,7 @@ clients:
   - name: claude-code
     protocol_shape: anthropic
     model_options:
-      baseten:
+      openrouter:
         zai-org/GLM-5.2:
           reasoning:
             mode: follow_harness
@@ -159,7 +159,7 @@ clients:
 	if err := ValidateRoutingPolicy(&file); err != nil {
 		t.Fatalf("ValidateRoutingPolicy() error = %v", err)
 	}
-	got := file.Clients[0].ModelOptions["baseten"]["zai-org/GLM-5.2"].Reasoning
+	got := file.Clients[0].ModelOptions["openrouter"]["zai-org/GLM-5.2"].Reasoning
 	if got == nil || got.Mode != ReasoningFollowHarness || got.Effort != "" {
 		t.Fatalf("reasoning policy = %#v", got)
 	}

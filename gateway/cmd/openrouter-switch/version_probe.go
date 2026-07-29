@@ -96,60 +96,6 @@ func isExecutable(path string) bool {
 // menubarVersionTimeout bounds the "<resolved> --version" probe.
 var menubarVersionTimeout = 2 * time.Second
 
-// basetenPATH returns the PATH to scan for baseten CLI installs.
-// Package var, like menubarLocalBin, so the doctor fixture can swap it
-// for temp dirs and never probe (or exec) a real host binary.
-var basetenPATH = func() string { return os.Getenv("PATH") }
-
-// basetenCLIVersion runs "<path> --version" with a short timeout and
-// returns the first output line, trimmed (e.g. "baseten 0.2.0"). Empty
-// on any failure. Package var so tests only ever exec their own fake
-// scripts.
-var basetenCLIVersion = func(path string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), menubarVersionTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "--version").Output()
-	if err != nil {
-		return ""
-	}
-	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-	return strings.TrimSpace(line)
-}
-
-// scanBasetenCLIs walks every basetenPATH dir and returns the distinct
-// baseten executables in PATH order. Distinct means distinct files:
-// symlinked duplicates of one install (brew opt + bin) collapse to a
-// single entry, reported under the first PATH-visible path, so only
-// genuinely separate installs count. Relative PATH entries are skipped,
-// matching exec.LookPath's ErrDot policy: the scan's results are exec'd
-// for --version, and a relative entry resolves against doctor's cwd, so
-// an untrusted checkout shipping bin/baseten would otherwise run with
-// the user's privileges.
-func scanBasetenCLIs() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, dir := range filepath.SplitList(basetenPATH()) {
-		if dir == "" || !filepath.IsAbs(dir) {
-			continue
-		}
-		p := filepath.Join(dir, "baseten")
-		st, err := os.Stat(p)
-		if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		key := p
-		if resolved, err := filepath.EvalSymlinks(p); err == nil {
-			key = resolved
-		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		out = append(out, p)
-	}
-	return out
-}
-
 // menubarBinaryVersion runs "<resolved> --version" with a short timeout
 // and returns the version string it prints. The --version output is a
 // single line "openrouter-switch vX.Y.Z" (or "openrouter-switch dev"); we return the

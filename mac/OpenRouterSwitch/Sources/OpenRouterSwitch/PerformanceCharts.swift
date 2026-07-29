@@ -33,9 +33,9 @@ struct PerformanceCharts: View {
                         y: .value("Provider or model", row.label)
                     )
                     .foregroundStyle(
-                        row.provider.caseInsensitiveCompare("Baseten")
+                        row.provider.caseInsensitiveCompare("OpenRouter")
                             == .orderedSame
-                            ? Color.basetenGreen
+                            ? Color.openRouterIndigo
                             : Color.claudeTerracotta)
                     .annotation(position: .trailing, alignment: .leading) {
                         Text(

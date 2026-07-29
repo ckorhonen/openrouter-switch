@@ -192,7 +192,7 @@ func (g *Gateway) stopCatalogRefresh() {
 	})
 }
 
-// refreshCatalogOnce performs one authenticated GET /v1/models without
+// refreshCatalogOnce performs one authenticated GET /v1/models/user without
 // holding configuration, auth, routing, or pricing publication locks.
 func (g *Gateway) refreshCatalogOnce(parent context.Context) {
 	cfg := g.runtimeConfig()
@@ -208,18 +208,26 @@ func (g *Gateway) refreshCatalogOnce(parent context.Context) {
 
 	ctx, cancel := context.WithTimeout(parent, catalogRefreshTimeout)
 	defer cancel()
-	url := strings.TrimRight(cfg.BasetenURL, "/") + "/v1/models"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	err := g.validateAuthForConfig(ctx, cfg)
 	if err == nil {
-		req.Header.Set("Accept", "application/json")
-		if authorization != "" {
-			req.Header.Set("Authorization", authorization)
+		url := strings.TrimRight(cfg.OpenRouterURL, "/") + "/v1/models/user"
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err == nil {
+			req.Header.Set("Accept", "application/json")
+			if authorization != "" {
+				req.Header.Set("Authorization", authorization)
+			}
+			err = g.fetchAndPublishCatalog(
+				client,
+				req,
+				configCredentialFingerprint(cfg),
+			)
 		}
-		err = g.fetchAndPublishCatalog(client, req)
 	}
 	if err != nil {
 		g.recordCatalogRefreshError(err)
-		fmt.Fprintf(os.Stderr, "[gateway] baseten catalog refresh failed: %v; keeping last-known-good pricing\n", err)
+		fmt.Fprintf(os.Stderr, "[gateway] openrouter catalog refresh failed: %v; keeping last-known-good pricing\n", err)
 		return
 	}
 
@@ -232,31 +240,29 @@ func (g *Gateway) refreshCatalogOnce(parent context.Context) {
 		if err := g.persistProviderCatalogCaches(); err != nil {
 			fmt.Fprintf(
 				os.Stderr,
-				"[gateway] could not cache authenticated Baseten model catalog: %v\n",
+				"[gateway] could not cache authenticated OpenRouter model catalog: %v\n",
 				err,
 			)
 		}
 	}
-	metadata := g.pricing.Capture().BasetenMetadata()
+	metadata := g.pricing.Capture().OpenRouterMetadata()
 	fmt.Fprintf(os.Stderr,
-		"[gateway] baseten catalog refreshed models=%d priced=%d revision=%s\n",
+		"[gateway] openrouter catalog refreshed models=%d priced=%d revision=%s\n",
 		metadata.ModelCount, metadata.PricedModelCount, metadata.Revision)
 }
 
 func (g *Gateway) catalogRequestClient(cfg Config) (*http.Client, string, bool) {
-	g.authMu.Lock()
-	oauthClient := g.oauthClient
-	g.authMu.Unlock()
-	if oauthClient != nil {
-		return oauthClient, "", true
-	}
-	if cfg.APIKeyFallback && cfg.BasetenKey != "" {
-		return g.client, "Bearer " + cfg.BasetenKey, true
+	if cfg.OpenRouterKey != "" {
+		return g.client, "Bearer " + cfg.OpenRouterKey, true
 	}
 	return nil, "", false
 }
 
-func (g *Gateway) fetchAndPublishCatalog(client *http.Client, req *http.Request) error {
+func (g *Gateway) fetchAndPublishCatalog(
+	client *http.Client,
+	req *http.Request,
+	expectedFingerprint string,
+) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -264,21 +270,45 @@ func (g *Gateway) fetchAndPublishCatalog(client *http.Client, req *http.Request)
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-		return fmt.Errorf("baseten /v1/models returned %d", resp.StatusCode)
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			g.markAuthInvalid(expectedFingerprint)
+		case http.StatusForbidden:
+			g.markAuthForbidden(expectedFingerprint)
+		}
+		return fmt.Errorf("openrouter /v1/models/user returned %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, catalogResponseMaxSize+1))
 	if err != nil {
 		return err
 	}
 	if len(body) > catalogResponseMaxSize {
-		return fmt.Errorf("baseten /v1/models response exceeds %d bytes", catalogResponseMaxSize)
+		return fmt.Errorf("openrouter /v1/models/user response exceeds %d bytes", catalogResponseMaxSize)
 	}
-	return g.pricing.ReplaceBasetenCatalog(
+	g.cfgMu.RLock()
+	defer g.cfgMu.RUnlock()
+	if configCredentialFingerprint(g.cfg) != expectedFingerprint {
+		return fmt.Errorf(
+			"OpenRouter credential changed during catalog refresh",
+		)
+	}
+	succeededAt := catalogNow().UTC()
+	if err := g.pricing.ReplaceOpenRouterCatalog(
 		body,
-		"baseten_v1_models",
-		catalogNow().UTC(),
+		"openrouter_models_user",
+		succeededAt,
 		"",
-	)
+	); err != nil {
+		return err
+	}
+	g.authMu.Lock()
+	g.catalogFingerprint = expectedFingerprint
+	g.authStatus = "valid"
+	g.authLastErr = ""
+	g.authLastErrAt = time.Time{}
+	g.authLastOKAt = succeededAt
+	g.authMu.Unlock()
+	return nil
 }
 
 func (g *Gateway) recordCatalogRefreshError(err error) {
@@ -295,14 +325,14 @@ func (g *Gateway) recordCatalogRefreshError(err error) {
 
 func (g *Gateway) catalogHealth() catalogHealth {
 	now := catalogNow().UTC()
-	metadata := g.pricing.Capture().BasetenMetadata()
+	metadata := g.pricing.Capture().OpenRouterMetadata()
 	manager := g.catalogRefresh
 	if manager == nil {
 		return catalogHealth{
 			Source:       metadata.Source,
 			Revision:     metadata.Revision,
 			ModelCount:   metadata.ModelCount,
-			LiveHydrated: metadata.Source == "baseten_v1_models",
+			LiveHydrated: metadata.Source == "openrouter_models_user",
 		}
 	}
 	manager.mu.Lock()
@@ -311,7 +341,7 @@ func (g *Gateway) catalogHealth() catalogHealth {
 		Source:        metadata.Source,
 		Revision:      metadata.Revision,
 		ModelCount:    metadata.ModelCount,
-		LiveHydrated:  metadata.Source == "baseten_v1_models",
+		LiveHydrated:  metadata.Source == "openrouter_models_user",
 		LastAttemptAt: manager.lastAttempt,
 		LastSuccessAt: manager.lastSuccess,
 		NextRefreshAt: manager.nextAt,

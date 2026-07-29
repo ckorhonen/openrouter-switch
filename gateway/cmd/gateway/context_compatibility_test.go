@@ -34,9 +34,9 @@ func TestContextCompatibilityWarning(t *testing.T) {
 				}
 			}
 		},
-		"baseten": {
-			"id": "baseten",
-			"name": "Baseten",
+		"openrouter": {
+			"id": "openrouter",
+			"name": "OpenRouter",
 			"models": {
 				"zai-org/GLM-5.2": {
 					"id": "zai-org/GLM-5.2",
@@ -52,10 +52,22 @@ func TestContextCompatibilityWarning(t *testing.T) {
 	if err := p.ReplaceModelsDev(catalog, capturedAt, ""); err != nil {
 		t.Fatal(err)
 	}
+	if err := p.ReplaceOpenRouterCatalog(
+		[]byte(`{"data":[{
+			"id":"zai-org/GLM-5.2","name":"GLM 5.2","context_length":200000,
+			"supported_parameters":["tools"],
+			"pricing":{"prompt":"0.000001","completion":"0.000002"}
+		}]}`),
+		"openrouter_models_user",
+		capturedAt,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
 	million := int64(1_000_000)
 	if got := contextCompatibilityWarning(
 		p.Capture(),
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		"zai-org/GLM-5.2",
 		&million,
 	); got == "" {
@@ -71,7 +83,7 @@ func TestContextCompatibilityWarning(t *testing.T) {
 	}
 	if got := contextCompatibilityWarning(
 		p.Capture(),
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		"unknown-model",
 		&million,
 	); got != "" {

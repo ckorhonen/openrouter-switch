@@ -4,11 +4,10 @@
 > ad-hoc signed but are not Apple-notarized. macOS may require explicit
 > approval before the app opens for the first time.
 
-Homebrew is the canonical public install and upgrade channel. This one
-command installs the Baseten CLI and OpenRouter Switch from Baseten's public tap:
+Homebrew is the canonical public install and upgrade channel:
 
 ```sh
-brew install basetenlabs/baseten/openrouter-switch
+brew install ckorhonen/openrouter-switch/openrouter-switch
 ```
 
 Then authenticate and start the gateway:
@@ -47,7 +46,7 @@ If macOS blocks the beta app on first launch:
 1. In Finder, open `~/Applications`, double-click **OpenRouter Switch**, then
    dismiss the warning.
 2. Choose **Apple menu > System Settings > Privacy & Security**.
-3. Scroll to the **Security** section and click **Open Anyway** for Baseten
+3. Scroll to the **Security** section and click **Open Anyway** for OpenRouter
    Switch.
 4. Confirm **Open** and authenticate if macOS asks.
 
@@ -62,10 +61,11 @@ openrouter-switch uninstall --dry-run
 openrouter-switch uninstall
 ```
 
-Use `openrouter-switch uninstall --purge --yes` to remove retained OpenRouter Switch
-config, telemetry, logs, and backups. Baseten CLI credentials and keychain
-entries are never removed. The command prints manual instructions when the
-macOS app's Start at Login item prevents safe automated bundle removal.
+Use `openrouter-switch uninstall --purge --yes` to remove retained OpenRouter
+Switch config, telemetry, logs, and backups. The OpenRouter Keychain entry is
+retained unless explicitly removed in the app or macOS Keychain Access. The
+command prints manual instructions when the macOS app's Start at Login item
+prevents safe automated bundle removal.
 
 The repository README contains the supported install, operation,
 troubleshooting, and uninstall instructions.

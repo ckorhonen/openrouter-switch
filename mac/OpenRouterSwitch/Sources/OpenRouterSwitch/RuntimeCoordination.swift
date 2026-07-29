@@ -423,12 +423,10 @@ func previewRuntimeFilesystemError(
         rootURL.appendingPathComponent("logs", isDirectory: true).path,
         rootURL.appendingPathComponent("backups", isDirectory: true).path,
         rootURL.appendingPathComponent("claude", isDirectory: true).path,
-        rootURL.appendingPathComponent("baseten", isDirectory: true).path,
     ]
     let requiredFiles = [
         configPath,
         runtime.environment["OPENROUTER_SWITCH_ENV_FILE"] ?? "",
-        runtime.environment["OPENROUTER_SWITCH_AUTH_FILE"] ?? "",
     ]
     for path in requiredDirectories {
         if let error = privateRuntimeEntryError(
@@ -531,7 +529,7 @@ private func privateRuntimeEntryError(
 func redactDiagnosticText(_ raw: String) -> String {
     var redacted = raw
     let secretKeys = [
-        "BASETEN_API_KEY", "OPENROUTER_SWITCH_API_KEY", "OPENROUTER_SWITCH_API_KEY_FALLBACK",
+        "OPENROUTER_API_KEY",
         "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY",
         "CODEX_AUTH_TOKEN", "OPENROUTER_SWITCH_ANTHROPIC_KEY", "Authorization",
     ]

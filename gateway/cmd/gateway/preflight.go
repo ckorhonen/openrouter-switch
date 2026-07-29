@@ -4,7 +4,6 @@ package gateway
 // they log actionable lines and never stop the gateway.
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,9 +30,11 @@ func applyGlobalAuth(cfg *Config) {
 		return
 	}
 	applyConfigEnv(f)
-	if v := os.Getenv("BASETEN_API_KEY"); v != "" {
-		cfg.BasetenKey = v
-	}
+	key, source, err := resolveConfigCredential(*cfg)
+	cfg.OpenRouterKey = key
+	cfg.CredentialSource = source
+	cfg.CredentialFingerprint = auth.CredentialFingerprint(key)
+	cfg.CredentialError = err
 }
 
 // UnresolvedPlaceholders returns the ${VAR} placeholder names referenced
@@ -61,74 +62,59 @@ func warnUnresolvedPlaceholders(f *config.File, out io.Writer) {
 	}
 }
 
-// basetenRoutedClients returns a display entry per enabled client whose
-// route or fallback_route is baseten. Passthrough routes (anthropic,
+// openrouterRoutedClients returns a display entry per enabled client whose
+// route or fallback_route is openrouter. Passthrough routes (anthropic,
 // openai) are excluded: they use harness credential passthrough and need
 // no gateway-side key.
-func basetenRoutedClients(resolved []resolvedClientConfig) []string {
+func openrouterRoutedClients(resolved []resolvedClientConfig) []string {
 	var out []string
 	for _, rc := range resolved {
 		switch {
-		case rc.Route == "baseten":
-			out = append(out, rc.Name+" (route: baseten)")
-		case rc.FallbackRoute == "baseten":
-			out = append(out, rc.Name+" (fallback_route: baseten)")
+		case rc.Route == "openrouter":
+			out = append(out, rc.Name+" (route: openrouter)")
+		case rc.FallbackRoute == "openrouter":
+			out = append(out, rc.Name+" (fallback_route: openrouter)")
 		}
 	}
 	return out
 }
 
-// hasBasetenCredential reports whether any Baseten credential is
-// available: a non-empty API key, an OAuth credential loadable from the
-// baseten CLI store, or an api_key-type CLI profile whose key is
-// readable.
-func hasBasetenCredential(profile, apiKey string) bool {
-	if apiKey != "" {
-		return true
-	}
-	tok, _, err := auth.Load(profile)
-	if err != nil {
-		var ak *auth.APIKeyProfileError
-		if errors.As(err, &ak) {
-			return ak.Key != ""
-		}
-		return false
-	}
-	return tok != nil
+func hasOpenRouterCredential(apiKey string) bool {
+	return apiKey != ""
 }
 
-// warnMissingBasetenCreds prints a prominent banner naming the affected
+// warnMissingOpenRouterCreds prints a prominent banner naming the affected
 // clients and the fix. Warn-only.
-func warnMissingBasetenCreds(names []string, out io.Writer) {
+func warnMissingOpenRouterCreds(names []string, out io.Writer) {
 	if len(names) == 0 {
 		return
 	}
 	rule := "[gateway] =============================================================="
 	fmt.Fprintln(out, rule)
-	fmt.Fprintln(out, "[gateway] WARNING: no Baseten credential found (no OAuth login and no")
-	fmt.Fprintln(out, "[gateway] API key). These clients route to baseten and their requests")
+	fmt.Fprintln(out, "[gateway] WARNING: no OpenRouter API key found. These clients route")
+	fmt.Fprintln(out, "[gateway] to OpenRouter and their requests")
 	fmt.Fprintln(out, "[gateway] will fail until a credential is configured:")
 	for _, n := range names {
 		fmt.Fprintf(out, "[gateway]   - %s\n", n)
 	}
-	fmt.Fprintln(out, "[gateway] Fix: run 'baseten auth login', or set BASETEN_API_KEY in")
-	fmt.Fprintf(out, "[gateway] %s (or via global.auth.baseten in gateway.yaml).\n", config.EnvFilePath())
+	fmt.Fprintln(out, "[gateway] Fix: run 'openrouter-switch auth set-key', or set")
+	fmt.Fprintf(out, "[gateway] OPENROUTER_API_KEY in %s.\n", config.EnvFilePath())
 	fmt.Fprintln(out, rule)
 }
 
 // runPreflight runs the warn-only checks: unresolved ${VAR} placeholders
-// against the process environment, and baseten-routed clients without a
+// against the process environment, and openrouter-routed clients without a
 // usable credential. Never fatal.
 func runPreflight(cfg *Config, resolved []resolvedClientConfig, out io.Writer) {
 	if f, err := config.Load(preflightConfigPath(cfg)); err == nil {
 		warnUnresolvedPlaceholders(f, out)
 	}
-	names := basetenRoutedClients(resolved)
+	names := openrouterRoutedClients(resolved)
 	if len(names) == 0 {
 		return
 	}
-	if hasBasetenCredential(cfg.OAuthProfile, cfg.BasetenKey) {
+	if hasOpenRouterCredential(cfg.OpenRouterKey) {
 		return
 	}
-	warnMissingBasetenCreds(names, out)
+	warnMissingOpenRouterCreds(names, out)
 }

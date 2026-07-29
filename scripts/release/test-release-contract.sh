@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PACKAGER="$SCRIPT_DIR/build-artifacts.sh"
-CANONICAL_INSTALL="brew install basetenlabs/baseten/openrouter-switch"
+CANONICAL_INSTALL="brew install ckorhonen/openrouter-switch/openrouter-switch"
 INSTALL_SURFACES=(
   "$REPO_DIR/README.md"
   "$REPO_DIR/scripts/release/INSTALL.md"
@@ -25,8 +25,8 @@ for install_surface in "${INSTALL_SURFACES[@]}"; do
   grep -Fq "$CANONICAL_INSTALL" "$install_surface" \
     || fail "$install_surface omitted the canonical single-formula install"
 done
-if grep -F 'basetenlabs/baseten/baseten ' "${INSTALL_SURFACES[@]}"; then
-  fail "a redundant two-formula install command remains"
+if grep -Eiq 'basetenlabs/baseten/(openrouter-switch|baseten-switch)|Baseten CLI|baseten auth' "${INSTALL_SURFACES[@]}"; then
+  fail "obsolete Baseten installation or authentication instructions remain"
 fi
 
 dry_output="$(

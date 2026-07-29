@@ -70,7 +70,7 @@ func menubarDisabled() bool { return os.Getenv("OPENROUTER_SWITCH_MENUBAR") == "
 // menubarInstallHint is the one-line remediation for a machine with no
 // bundle to open, shared by errMenubarAppMissing and the status row so
 // the two never drift.
-const menubarInstallHint = "brew install basetenlabs/baseten/openrouter-switch"
+const menubarInstallHint = "brew install ckorhonen/openrouter-switch/openrouter-switch"
 
 // errMenubarAppMissing marks the no-source-no-copy case so `up` can
 // skip it (the app is optional) while real refresh failures stay loud.
@@ -329,7 +329,7 @@ func validateMaterializedMenubarApp(app string) error {
 	fields := []struct {
 		key, want string
 	}{
-		{"CFBundleIdentifier", "co.baseten.switch"},
+		{"CFBundleIdentifier", "com.ckorhonen.openrouter-switch"},
 		{"CFBundleDisplayName", "OpenRouter Switch"},
 		{"CFBundleExecutable", menubarProcName},
 	}

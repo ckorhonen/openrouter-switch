@@ -13,7 +13,7 @@ type reasoningTelemetryV1 struct {
 	catalogRevision  *string
 }
 
-func applyBasetenReasoningPolicy(
+func applyOpenRouterReasoningPolicy(
 	snapshot *pricing.Snapshot,
 	rc resolvedClientConfig,
 	body []byte,
@@ -34,13 +34,13 @@ func applyBasetenReasoningPolicy(
 
 	capability := catalogReasoningInput(
 		snapshot,
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		targetModel,
 	)
 	catalogRevision := ""
 	if snapshot != nil {
 		if catalogCapability, ok := snapshot.ModelReasoning(
-			pricing.ProviderBaseten,
+			pricing.ProviderOpenRouter,
 			targetModel,
 		); ok {
 			catalogRevision = catalogCapability.Provenance.Revision
@@ -49,11 +49,11 @@ func applyBasetenReasoningPolicy(
 
 	stored := storedReasoningPolicy(
 		rc,
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 		targetModel,
 	)
 	decision, err := reasoning.Resolve(reasoning.Input{
-		Provider:         pricing.ProviderBaseten,
+		Provider:         pricing.ProviderOpenRouter,
 		CanonicalModelID: targetModel,
 		WireShape:        wireShape,
 		Capability:       capability,

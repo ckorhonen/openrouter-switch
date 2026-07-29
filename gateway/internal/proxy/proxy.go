@@ -8,11 +8,11 @@ import (
 	"strings"
 )
 
-// ErrEmptyAPIKey is returned by BuildUpstreamHeaders when APIKey mode is
+// ErrEmptyAPIKey is returned by BuildUpstreamHeaders when OpenRouter mode is
 // requested with an empty key. Sending the request without Authorization
 // would produce a confusing upstream 401 mid-session, so this is a hard
 // error the caller must handle instead of a silent header strip.
-var ErrEmptyAPIKey = errors.New("proxy: empty API key in APIKey auth mode; refusing to send unauthenticated upstream request")
+var ErrEmptyAPIKey = errors.New("proxy: empty OpenRouter API key; refusing to send unauthenticated upstream request")
 
 var HopByHop = map[string]bool{
 	"connection":          true,
@@ -37,12 +37,11 @@ type UpstreamAuthMode int
 
 const (
 	UpstreamModePassthrough UpstreamAuthMode = iota
-	UpstreamModeOAuth
-	UpstreamModeAPIKey
+	UpstreamModeOpenRouter
 )
 
-func BuildUpstreamHeaders(in http.Header, mode UpstreamAuthMode, basetenAPIKey string) (http.Header, error) {
-	if mode == UpstreamModeAPIKey && basetenAPIKey == "" {
+func BuildUpstreamHeaders(in http.Header, mode UpstreamAuthMode, openrouterAPIKey string) (http.Header, error) {
+	if mode == UpstreamModeOpenRouter && openrouterAPIKey == "" {
 		return nil, ErrEmptyAPIKey
 	}
 	out := http.Header{}
@@ -65,12 +64,9 @@ func BuildUpstreamHeaders(in http.Header, mode UpstreamAuthMode, basetenAPIKey s
 		if v := in.Get("X-Api-Key"); v != "" {
 			out.Set("X-Api-Key", v)
 		}
-	case UpstreamModeOAuth:
-		out.Del("Authorization")
+	case UpstreamModeOpenRouter:
 		out.Del("X-Api-Key")
-	case UpstreamModeAPIKey:
-		out.Del("X-Api-Key")
-		out.Set("Authorization", "Api-Key "+basetenAPIKey)
+		out.Set("Authorization", "Bearer "+openrouterAPIKey)
 	}
 	return out, nil
 }

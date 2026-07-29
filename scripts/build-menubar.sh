@@ -24,6 +24,12 @@
 # the Preview identity.
 
 set -euo pipefail
+
+if [[ "$(uname -s)" == "Darwin" &&
+      -z "${DEVELOPER_DIR:-}" &&
+      -d /Applications/Xcode.app/Contents/Developer ]]; then
+    export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
 cd "$(dirname "$0")/../mac/OpenRouterSwitch"
 
 fail() {
@@ -70,14 +76,14 @@ done
 
 case "$VARIANT" in
     stable)
-        BUNDLE_ID="co.baseten.switch"
+        BUNDLE_ID="com.ckorhonen.openrouter-switch"
         APP_NAME="OpenRouter Switch"
         EXECUTABLE_NAME="OpenRouterSwitch"
         BUILD_CHANNEL="stable"
         DIST_DIR="dist"
         ;;
     preview)
-        BUNDLE_ID="co.baseten.switch.preview"
+        BUNDLE_ID="com.ckorhonen.openrouter-switch.preview"
         APP_NAME="OpenRouter Switch Preview"
         EXECUTABLE_NAME="OpenRouterSwitchPreview"
         BUILD_CHANNEL="preview"
@@ -111,7 +117,7 @@ if [[ -n "${OPENROUTER_SWITCH_SWIFT_BUILD_FLAGS:-}" ]]; then
     read -r -a SWIFT_BUILD_FLAGS <<< "$OPENROUTER_SWITCH_SWIFT_BUILD_FLAGS"
 fi
 
-# Stable and Preview share the packaged Baseten-green app artwork. AppIcon.svg
+# Stable and Preview share the packaged OpenRouter app artwork. AppIcon.svg
 # is its editable source; AppIcon.icns is the checked-in macOS bundle asset.
 APP_ICON_SOURCE="Assets/AppIcon.icns"
 
@@ -140,7 +146,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/${EXECUTABLE_NAME}"
 chmod 755 "$APP/Contents/MacOS/${EXECUTABLE_NAME}"
 cp "$APP_ICON_SOURCE" "$APP/Contents/Resources/AppIcon.icns"
-cp "Assets/baseten-logo-white.svg" "$APP/Contents/Resources/baseten-logo-white.svg"
+cp "Assets/openrouter-logo.svg" "$APP/Contents/Resources/openrouter-logo.svg"
 cp "Assets/openai-blossom.svg" "$APP/Contents/Resources/openai-blossom.svg"
 
 cat > "$APP/Contents/Info.plist" <<EOF
@@ -174,13 +180,6 @@ cat > "$APP/Contents/Info.plist" <<EOF
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-	<!-- The Reauthenticate button sends an Apple event to Terminal via
-	     osascript; without this key macOS 13+ denies Automation consent
-	     with no prompt (errAEEventNotPermitted, -1743) in the packaged
-	     bundle, while a bare dev binary inherits the invoking terminal's
-	     consent and masks the failure. -->
-	<key>NSAppleEventsUsageDescription</key>
-	<string>${APP_NAME} opens Terminal to run 'baseten auth login' when the shared Baseten CLI credential needs reauthentication.</string>
 </dict>
 </plist>
 EOF
@@ -196,10 +195,6 @@ fi
 
 echo "==> validating"
 plutil -lint "$APP/Contents/Info.plist"
-# The Automation usage string must survive plist edits: without it the
-# packaged app's Reauthenticate button is denied silently (see comment
-# in the heredoc above).
-plutil -extract NSAppleEventsUsageDescription raw "$APP/Contents/Info.plist" >/dev/null
 codesign --verify --deep --strict --verbose=2 "$APP"
 if [[ "$RELEASE_BUILD" == 1 ]]; then
     signature_info="$(codesign --display --verbose=4 "$APP" 2>&1)"
@@ -213,7 +208,7 @@ if [[ "$RELEASE_BUILD" == 1 ]]; then
 fi
 test -x "$APP/Contents/MacOS/${EXECUTABLE_NAME}"
 test -s "$APP/Contents/Resources/AppIcon.icns"
-test -s "$APP/Contents/Resources/baseten-logo-white.svg"
+test -s "$APP/Contents/Resources/openrouter-logo.svg"
 test -s "$APP/Contents/Resources/openai-blossom.svg"
 for check in \
     "CFBundleIdentifier:${BUNDLE_ID}" \
@@ -244,7 +239,7 @@ done
 # compiled into the shared Swift product. App identity for packaged
 # variants comes from the validated Info.plist above. grep -a scans the
 # Mach-O directly (macOS strings(1) misses Swift constants).
-for needle in "co.baseten.switch" "Start at Login"; do
+for needle in "com.ckorhonen.openrouter-switch" "Start at Login"; do
     if ! grep -qaF "$needle" "$APP/Contents/MacOS/${EXECUTABLE_NAME}"; then
         echo "error: binary does not embed expected string: $needle" >&2
         exit 1

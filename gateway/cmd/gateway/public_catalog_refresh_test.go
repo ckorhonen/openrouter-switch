@@ -52,8 +52,8 @@ const publicCatalogGatewayFixture = `{
       }
     }
   },
-  "baseten": {
-    "id": "baseten",
+  "openrouter": {
+    "id": "openrouter",
     "models": {
       "zai-org/GLM-Test": {
         "id": "zai-org/GLM-Test",
@@ -121,7 +121,7 @@ func TestPublicCatalogRefreshPersistsReloadsAndUsesETag(t *testing.T) {
 	}
 
 	reloaded := pricing.New()
-	loadProviderCatalogCaches(reloaded, configPath)
+	loadProviderCatalogCaches(reloaded, configPath, "")
 	reloadedMetadata := reloaded.Capture().
 		ProviderMetadata(pricing.ProviderAnthropic)
 	if reloadedMetadata.Provenance.LoadedFrom != pricing.LoadedFromRuntimeCache ||
@@ -218,17 +218,17 @@ func TestPublicCatalogRefreshOmitsRootETagWhenProviderCacheIsMissing(
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(t.TempDir(), "gateway.yaml")
-	if err := persistProviderCatalogCaches(seed, configPath); err != nil {
+	if err := persistProviderCatalogCaches(seed, configPath, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(providerCatalogCachePath(
 		configPath,
-		pricing.ProviderBaseten,
+		pricing.ProviderAnthropic,
 	)); err != nil {
 		t.Fatal(err)
 	}
 	partial := pricing.New()
-	loadProviderCatalogCaches(partial, configPath)
+	loadProviderCatalogCaches(partial, configPath, "")
 	if etag := partial.Capture().ModelsDevRootETag(); etag != "" {
 		t.Fatalf("partial root ETag = %q, want empty", etag)
 	}

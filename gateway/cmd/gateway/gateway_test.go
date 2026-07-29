@@ -18,24 +18,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/config"
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/pricing"
 	"github.com/ckorhonen/openrouter-switch/gateway/internal/telemetry"
 )
 
-func testConfig(t *testing.T, upstreamBaseten, upstreamAnthropic string) Config {
+func testConfig(t *testing.T, upstreamOpenRouter, upstreamAnthropic string) Config {
 	t.Helper()
 	t.Setenv("OPENROUTER_SWITCH_AUTH_NO_KEYRING", "1")
 	t.Setenv("OPENROUTER_SWITCH_AUTH_FILE", filepath.Join(t.TempDir(), "auth.json"))
+	const key = "sk-or-test"
 	return Config{
-		TelemetryDir:   filepath.Join(t.TempDir(), "telemetry"),
-		PidFile:        filepath.Join(t.TempDir(), "g.pid"),
-		BasetenURL:     upstreamBaseten,
-		AnthropicURL:   upstreamAnthropic,
-		BasetenKey:     "bas-key",
-		OAuthProfile:   "default",
-		OAuthHost:      "https://api.baseten.co",
-		APIKeyFallback: true,
+		TelemetryDir:          filepath.Join(t.TempDir(), "telemetry"),
+		PidFile:               filepath.Join(t.TempDir(), "g.pid"),
+		OpenRouterURL:         upstreamOpenRouter,
+		AnthropicURL:          upstreamAnthropic,
+		OpenRouterKey:         key,
+		CredentialSource:      auth.SourceEnvironment,
+		CredentialFingerprint: auth.CredentialFingerprint(key),
+		CredentialResolver: func() (string, auth.Source, error) {
+			return key, auth.SourceEnvironment, nil
+		},
 	}
 }
 
@@ -44,22 +48,22 @@ func mustJSON(v any) []byte {
 	return append(b, '\n')
 }
 
-// resolvedAnthropicBaseten returns a generic resolvedClientConfig for an
-// anthropic-shape listener pointed at baseten with the shipped default
+// resolvedAnthropicOpenRouter returns a generic resolvedClientConfig for an
+// anthropic-shape listener pointed at openrouter with the shipped default
 // model so rewrite resolves "claude-opus-4-8" -> "zai-org/GLM-5.2".
 // Generic gateway tests opt into Follow Harness so they exercise their
 // intended behavior independently of the GLM compatibility default.
-func resolvedAnthropicBaseten(t *testing.T) resolvedClientConfig {
+func resolvedAnthropicOpenRouter(t *testing.T) resolvedClientConfig {
 	t.Helper()
 	return resolvedClientConfig{
 		Name:                 "claude-code",
 		BindAddr:             "127.0.0.1:0",
 		ProtocolShape:        "anthropic",
-		Route:                "baseten",
+		Route:                "openrouter",
 		GlobalRoutingEnabled: true,
 		DefaultModel:         "zai-org/GLM-5.2",
 		ModelOptions: config.ModelOptions{
-			pricing.ProviderBaseten: {
+			pricing.ProviderOpenRouter: {
 				"zai-org/GLM-5.2": {
 					Reasoning: &config.ReasoningPolicy{
 						Mode: config.ReasoningFollowHarness,
@@ -70,14 +74,14 @@ func resolvedAnthropicBaseten(t *testing.T) resolvedClientConfig {
 	}
 }
 
-func resolvedOpenAIBaseten(t *testing.T, name, route string) resolvedClientConfig {
+func resolvedOpenAIOpenRouter(t *testing.T, name, route string) resolvedClientConfig {
 	t.Helper()
 	return resolvedClientConfig{
 		Name:                 name,
 		BindAddr:             "127.0.0.1:0",
 		ProtocolShape:        "openai",
 		Route:                route,
-		GlobalRoutingEnabled: route == "baseten",
+		GlobalRoutingEnabled: route == "openrouter",
 		DefaultModel:         "zai-org/GLM-5.2",
 	}
 }
@@ -117,15 +121,14 @@ func TestStableAdminPortContract(t *testing.T) {
 }
 
 func TestResolveAttemptsMarksAuthUnavailableFallback(t *testing.T) {
-	cfg := testConfig(t, "http://baseten.invalid", "http://anthropic.invalid")
-	cfg.BasetenKey = ""
-	cfg.APIKeyFallback = false
+	cfg := testConfig(t, "http://openrouter.invalid", "http://anthropic.invalid")
+	cfg.OpenRouterKey = ""
 	g := &Gateway{
 		cfg:     cfg,
-		pricing: pricing.New(),
+		pricing: testOpenRouterPricing(t),
 		client:  &http.Client{Transport: defaultTransport()},
 	}
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	cl := &clientListener{cfg: rc}
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
@@ -161,10 +164,14 @@ func newGateway(t *testing.T, cfg Config, resolved ...resolvedClientConfig) (*Ga
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := New(cfg, pricing.New(), adminL, resolved)
+	accountCatalog := testOpenRouterPricing(t)
+	g, err := New(cfg, accountCatalog, adminL, resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
+	g.authMu.Lock()
+	g.catalogFingerprint = cfg.CredentialFingerprint
+	g.authMu.Unlock()
 	clientListeners := make([]net.Listener, 0, len(resolved))
 	for _, rc := range resolved {
 		addr := g.ClientAddr(rc.Name)
@@ -174,6 +181,20 @@ func newGateway(t *testing.T, cfg Config, resolved ...resolvedClientConfig) (*Ga
 		clientListeners = append(clientListeners, listenFromAddr(t, addr))
 	}
 	return g, adminL, clientListeners
+}
+
+func testOpenRouterPricing(t *testing.T) *pricing.Pricing {
+	t.Helper()
+	accountCatalog := pricing.New()
+	if err := accountCatalog.ReplaceOpenRouterCatalog(
+		[]byte(testOpenRouterAccountCatalog),
+		"openrouter_models_user",
+		time.Now().UTC(),
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	return accountCatalog
 }
 
 func listenFromAddr(t *testing.T, addr net.Addr) net.Listener {
@@ -193,6 +214,12 @@ func (a *addrOnlyListener) Addr() net.Addr            { return a.addr }
 
 func start(t *testing.T, g *Gateway) context.CancelFunc {
 	t.Helper()
+	// Generic gateway tests use a deterministic live account catalog seeded by
+	// newGateway. Keep the production refresh loop out of unrelated upstream
+	// fixtures; refresh behavior has dedicated tests.
+	if g.catalogRefresh != nil {
+		g.catalogRefresh.started.Store(true)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -338,9 +365,9 @@ func TestTelemetryEventsFromSegmentsReadsV1AndIgnoresPartialTail(t *testing.T) {
 	event := gatewayTelemetryEvent(1)
 	status := http.StatusGatewayTimeout
 	trigger := "ttft_timeout"
-	subagentModel := "anthropic-baseten-kimi"
+	subagentModel := "anthropic-openrouter-kimi"
 	event.Client = "claude-code"
-	event.ConfiguredRoute = "baseten"
+	event.ConfiguredRoute = "openrouter"
 	event.EffectiveProvider = "anthropic"
 	event.RequestedModel = "claude-opus-4-8"
 	event.ServedModel = "zai-org/GLM-5.2"
@@ -383,7 +410,7 @@ func TestTelemetryEventsFromSegmentsReadsV1AndIgnoresPartialTail(t *testing.T) {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
 	got := events[0]
-	if got.ConfiguredRoute != "baseten" ||
+	if got.ConfiguredRoute != "openrouter" ||
 		got.EffectiveProvider != "anthropic" ||
 		got.StatusCode() != http.StatusGatewayTimeout ||
 		!got.IsHTTPError() ||
@@ -397,7 +424,7 @@ func TestCountTokensSynthetic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -425,13 +452,13 @@ func TestCountTokensSynthetic(t *testing.T) {
 	}
 }
 
-func TestPostMessagesBasetenForwardsRewrittenModel(t *testing.T) {
+func TestPostMessagesOpenRouterForwardsRewrittenModel(t *testing.T) {
 	gotModel := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			t.Errorf("unexpected upstream path %q", r.URL.Path)
 		}
-		if r.Header.Get("Authorization") != "Api-Key bas-key" {
+		if r.Header.Get("Authorization") != "Bearer sk-or-test" {
 			t.Errorf("bad upstream auth: %q", r.Header.Get("Authorization"))
 		}
 		b, _ := io.ReadAll(r.Body)
@@ -443,7 +470,7 @@ func TestPostMessagesBasetenForwardsRewrittenModel(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -474,7 +501,7 @@ func TestPostMessagesBasetenForwardsRewrittenModel(t *testing.T) {
 		t.Fatal("upstream never received model")
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
-	if rows[0].ConfiguredRoute != "baseten" || rows[0].ServedModel != "zai-org/GLM-5.2" {
+	if rows[0].ConfiguredRoute != "openrouter" || rows[0].ServedModel != "zai-org/GLM-5.2" {
 		t.Fatalf("telemetry row mismatch: %+v", rows[0])
 	}
 	if valueOrZero(rows[0].Usage.InputTokens) != 10 || valueOrZero(rows[0].Usage.OutputTokens) != 1 {
@@ -485,7 +512,7 @@ func TestPostMessagesBasetenForwardsRewrittenModel(t *testing.T) {
 	}
 }
 
-func TestPostMessagesBasetenSSERelaysAndParsesUsage(t *testing.T) {
+func TestPostMessagesOpenRouterSSERelaysAndParsesUsage(t *testing.T) {
 	sseBody := "event: message_start\ndata: {\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n" +
 		"event: message_delta\ndata: {\"usage\":{\"input_tokens\":42,\"output_tokens\":3,\"cache_read_input_tokens\":5}}\n\n" +
 		"data: [DONE]\n\n"
@@ -496,7 +523,7 @@ func TestPostMessagesBasetenSSERelaysAndParsesUsage(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -515,38 +542,33 @@ func TestPostMessagesBasetenSSERelaysAndParsesUsage(t *testing.T) {
 		t.Fatalf("got %d want 200", resp.StatusCode)
 	}
 	rb, _ := io.ReadAll(resp.Body)
-	// Bug A: the baseten anthropic-shape SSE relay de-double-counts cached
-	// tokens per event, so the message_delta input_tokens (42, inclusive of
-	// the 5 cache reads) reaches the client as the exclusive 37. Framing and
-	// the message_start event (no cache fields) are otherwise untouched.
-	if !strings.Contains(string(rb), "message_delta") || !strings.Contains(string(rb), "input_tokens\":37") {
-		t.Fatalf("SSE usage not normalized in relay: %q", rb)
+	// OpenRouter's native Anthropic Messages endpoint is passed through
+	// unchanged, including its usage accounting.
+	if !strings.Contains(string(rb), "message_delta") || !strings.Contains(string(rb), "input_tokens\":42") {
+		t.Fatalf("SSE usage not relayed unchanged: %q", rb)
 	}
-	if strings.Contains(string(rb), "input_tokens\":42") {
-		t.Fatalf("inclusive input_tokens leaked to client: %q", rb)
+	if strings.Contains(string(rb), "input_tokens\":37") {
+		t.Fatalf("SSE input_tokens unexpectedly rewritten: %q", rb)
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
-	if valueOrZero(rows[0].Usage.InputTokens) != 37 || valueOrZero(rows[0].Usage.OutputTokens) != 3 || valueOrZero(rows[0].Usage.CacheReadInputTokens) != 5 {
-		t.Fatalf("SSE usage parsed wrong (want normalized input 37): %+v", rows[0])
+	if valueOrZero(rows[0].Usage.InputTokens) != 42 || valueOrZero(rows[0].Usage.OutputTokens) != 3 || valueOrZero(rows[0].Usage.CacheReadInputTokens) != 5 {
+		t.Fatalf("SSE usage parsed wrong (want raw input 42): %+v", rows[0])
 	}
 	if !rows[0].IsStream {
 		t.Fatal("is_stream should be true")
 	}
 }
 
-// TestPostMessagesBasetenNormalizesInclusiveInput is the non-streaming half of
-// Bug A: Baseten's anthropic-shape endpoint reports input_tokens inclusive of
-// cache_read_input_tokens. The baseten-route relay must de-double-count so the
-// client (and telemetry) see the exclusive input, with Content-Length adjusted
-// to the rewritten body. Native passthrough (route=anthropic) is unaffected.
-func TestPostMessagesBasetenNormalizesInclusiveInput(t *testing.T) {
+// TestPostMessagesOpenRouterPassesUsageThrough verifies that the native
+// Anthropic Messages response body and usage accounting remain unchanged.
+func TestPostMessagesOpenRouterPassesUsageThrough(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"PONG"}],"model":"zai-org/GLM-5.2","usage":{"input_tokens":46292,"output_tokens":16,"cache_read_input_tokens":46272}}`))
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -565,19 +587,18 @@ func TestPostMessagesBasetenNormalizesInclusiveInput(t *testing.T) {
 		t.Fatalf("got %d want 200", resp.StatusCode)
 	}
 	rb, _ := io.ReadAll(resp.Body)
-	// 46292 - 46272 = 20 exclusive input tokens reach the client.
-	if !strings.Contains(string(rb), "\"input_tokens\":20") {
-		t.Fatalf("input_tokens not normalized in body: %s", rb)
+	if !strings.Contains(string(rb), "\"input_tokens\":46292") {
+		t.Fatalf("input_tokens not passed through in body: %s", rb)
 	}
-	if strings.Contains(string(rb), "46292") {
-		t.Fatalf("inclusive input_tokens leaked to client: %s", rb)
+	if strings.Contains(string(rb), "\"input_tokens\":20,") {
+		t.Fatalf("input_tokens unexpectedly rewritten: %s", rb)
 	}
 	if cl := resp.Header.Get("Content-Length"); cl != "" && cl != itoa(len(rb)) {
 		t.Fatalf("Content-Length %q does not match rewritten body length %d", cl, len(rb))
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
-	if valueOrZero(rows[0].Usage.InputTokens) != 20 || valueOrZero(rows[0].Usage.CacheReadInputTokens) != 46272 {
-		t.Fatalf("telemetry not normalized (want input 20, cache_read 46272): %+v", rows[0])
+	if valueOrZero(rows[0].Usage.InputTokens) != 46292 || valueOrZero(rows[0].Usage.CacheReadInputTokens) != 46272 {
+		t.Fatalf("telemetry usage mismatch (want input 46292, cache_read 46272): %+v", rows[0])
 	}
 }
 
@@ -585,7 +606,7 @@ func TestHEADReturnsBodylessResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -617,7 +638,7 @@ func TestGracefulShutdownWithin3s(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -656,7 +677,7 @@ func TestHealthzClientReturnsEffectiveRoute(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -674,7 +695,7 @@ func TestHealthzClientReturnsEffectiveRoute(t *testing.T) {
 	if err := json.Unmarshal(b, &h); err != nil {
 		t.Fatalf("bad healthz body %s: %v", b, err)
 	}
-	if h["effective_route"] != "baseten" || h["upstream_model"] != "zai-org/GLM-5.2" || h["status"] != "ok" {
+	if h["effective_route"] != "openrouter" || h["upstream_model"] != "zai-org/GLM-5.2" || h["status"] != "ok" {
 		t.Fatalf("healthz mismatch: %+v", h)
 	}
 	if _, ok := h["route"]; ok {
@@ -692,7 +713,7 @@ func fmtString(v interface{}) string {
 	return ""
 }
 
-func TestBasetenRouteRejectsNeedsLoginWhenNoProfileAndNoFallback(t *testing.T) {
+func TestOpenRouterRouteRejectsWhenAPIKeyMissing(t *testing.T) {
 	upstreamHit := false
 	var hitMu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -702,9 +723,10 @@ func TestBasetenRouteRejectsNeedsLoginWhenNoProfileAndNoFallback(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	cfg.APIKeyFallback = false
-	cfg.BasetenKey = "bas-key"
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	cfg.OpenRouterKey = ""
+	cfg.CredentialSource = ""
+	cfg.CredentialFingerprint = ""
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -721,15 +743,15 @@ func TestBasetenRouteRejectsNeedsLoginWhenNoProfileAndNoFallback(t *testing.T) {
 	if resp.StatusCode != 503 {
 		t.Fatalf("got %d want 503", resp.StatusCode)
 	}
-	if got := resp.Header.Get("X-Baseten-Switch"); got != "needs-login" {
-		t.Fatalf("X-Baseten-Switch = %q, want needs-login", got)
+	if got := resp.Header.Get("X-OpenRouter-Switch"); got != "credential-required" {
+		t.Fatalf("X-OpenRouter-Switch = %q, want credential-required", got)
 	}
 	if upstreamHit {
 		t.Fatal("upstream must not be hit on needs-login rejection")
 	}
 }
 
-func TestBasetenRouteAPIKeyFallbackForwardsAPIKeyHeader(t *testing.T) {
+func TestOpenRouterRouteForwardsBearerAPIKey(t *testing.T) {
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -738,9 +760,10 @@ func TestBasetenRouteAPIKeyFallbackForwardsAPIKeyHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	cfg.APIKeyFallback = true
-	cfg.BasetenKey = "fallback-key"
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	cfg.OpenRouterKey = "sk-or-forward"
+	cfg.CredentialSource = auth.SourceEnvironment
+	cfg.CredentialFingerprint = auth.CredentialFingerprint(cfg.OpenRouterKey)
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -757,8 +780,8 @@ func TestBasetenRouteAPIKeyFallbackForwardsAPIKeyHeader(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("got %d want 200", resp.StatusCode)
 	}
-	if gotAuth != "Api-Key fallback-key" {
-		t.Fatalf("upstream Authorization = %q, want Api-Key fallback-key", gotAuth)
+	if gotAuth != "Bearer sk-or-forward" {
+		t.Fatalf("upstream Authorization = %q, want Bearer sk-or-forward", gotAuth)
 	}
 }
 
@@ -766,9 +789,10 @@ func TestAdminAuthStatusReportsNotSignedIn(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	cfg.APIKeyFallback = false
-	cfg.BasetenKey = ""
-	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicBaseten(t))
+	cfg.OpenRouterKey = ""
+	cfg.CredentialSource = ""
+	cfg.CredentialFingerprint = ""
+	g, adminL, _ := newGateway(t, cfg, resolvedAnthropicOpenRouter(t))
 	defer adminL.Close()
 	stop := start(t, g)
 	defer stop()
@@ -786,14 +810,16 @@ func TestAdminAuthStatusReportsNotSignedIn(t *testing.T) {
 	if err := json.Unmarshal(b, &st); err != nil {
 		t.Fatalf("bad status body %s: %v", b, err)
 	}
-	if st["signed_in"] != false {
-		t.Fatalf("signed_in = %v, want false", st["signed_in"])
+	if st["status"] != "missing" {
+		t.Fatalf("status = %v, want missing", st["status"])
 	}
-	if st["profile"] != "default" {
-		t.Fatalf("profile = %v, want default", st["profile"])
+	if st["source"] != "" {
+		t.Fatalf("source = %v, want empty", st["source"])
 	}
-	if st["fallback_enabled"] != false {
-		t.Fatalf("fallback_enabled = %v, want false", st["fallback_enabled"])
+	for _, legacy := range []string{"signed_in", "profile", "fallback_enabled"} {
+		if _, ok := st[legacy]; ok {
+			t.Fatalf("legacy field %q unexpectedly present", legacy)
+		}
 	}
 }
 
@@ -808,14 +834,14 @@ func TestAdminStatusReportsPerListenerClients(t *testing.T) {
 	cfg := testConfig(t, srv.URL, srv.URL)
 	cfg.ConfigPath = filepath.Join(t.TempDir(), "gateway.yaml")
 
-	bas := resolvedAnthropicBaseten(t)
+	bas := resolvedAnthropicOpenRouter(t)
 	ant := resolvedClientConfig{
 		Name:          "cursor",
 		BindAddr:      "127.0.0.1:0",
 		ProtocolShape: "anthropic",
 		Route:         "anthropic",
 	}
-	oai := resolvedOpenAIBaseten(t, "codex", "baseten")
+	oai := resolvedOpenAIOpenRouter(t, "codex", "openrouter")
 	writeGatewayYAML(t, cfg.ConfigPath, []resolvedClientConfig{bas, ant, oai})
 	g, adminL, _ := newGateway(t, cfg, bas, ant, oai)
 	defer adminL.Close()
@@ -863,7 +889,7 @@ func TestAdminStatusReportsPerListenerClients(t *testing.T) {
 		t.Fatalf("cursor status mismatch: %+v", ant2)
 	}
 	if ant2.Unmatched.EffectiveModel != "" {
-		t.Fatalf("cursor unmatched effective_model = %q, want empty (non-baseten route)", ant2.Unmatched.EffectiveModel)
+		t.Fatalf("cursor unmatched effective_model = %q, want empty (non-openrouter route)", ant2.Unmatched.EffectiveModel)
 	}
 	if ant2.NativeRoute != "anthropic" {
 		t.Fatalf("cursor native_route = %q, want anthropic", ant2.NativeRoute)
@@ -877,11 +903,11 @@ func TestAdminStatusReportsPerListenerClients(t *testing.T) {
 	}
 }
 
-// TestOpenAIShapeBasetenForwardsChatCompletions verifies an
-// openai-shape listener forwards /v1/chat/completions to the baseten
+// TestOpenAIShapeOpenRouterForwardsChatCompletions verifies an
+// openai-shape listener forwards /v1/chat/completions to the openrouter
 // upstream, model rewriting applies, and telemetry carries the
 // listener name.
-func TestOpenAIShapeBasetenForwardsChatCompletions(t *testing.T) {
+func TestOpenAIShapeOpenRouterForwardsChatCompletions(t *testing.T) {
 	gotModel := make(chan string, 1)
 	gotPath := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -895,8 +921,8 @@ func TestOpenAIShapeBasetenForwardsChatCompletions(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedOpenAIBaseten(t, "opencode", "baseten")
-	rc.DefaultModel = reasoningNeutralBasetenModel
+	rc := resolvedOpenAIOpenRouter(t, "opencode", "openrouter")
+	rc.DefaultModel = reasoningNeutralOpenRouterModel
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
 	stop := start(t, g)
@@ -924,15 +950,15 @@ func TestOpenAIShapeBasetenForwardsChatCompletions(t *testing.T) {
 	}
 	select {
 	case m := <-gotModel:
-		if m != reasoningNeutralBasetenModel {
-			t.Fatalf("upstream got model %q, want %s", m, reasoningNeutralBasetenModel)
+		if m != reasoningNeutralOpenRouterModel {
+			t.Fatalf("upstream got model %q, want %s", m, reasoningNeutralOpenRouterModel)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("upstream never received model")
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
-	if rows[0].ConfiguredRoute != "baseten" {
-		t.Fatalf("route = %q want baseten", rows[0].ConfiguredRoute)
+	if rows[0].ConfiguredRoute != "openrouter" {
+		t.Fatalf("route = %q want openrouter", rows[0].ConfiguredRoute)
 	}
 	if rows[0].Client != "opencode" {
 		t.Fatalf("client = %q want opencode", rows[0].Client)
@@ -940,7 +966,7 @@ func TestOpenAIShapeBasetenForwardsChatCompletions(t *testing.T) {
 }
 
 // TestTwoClientListenersInOneGateway verifies that two per-client
-// listeners (one anthropic+baseten, one openai+baseten) coexist in a
+// listeners (one anthropic+openrouter, one openai+openrouter) coexist in a
 // single Gateway and each forwards to its own upstream mock.
 func TestTwoClientListenersInOneGateway(t *testing.T) {
 	basSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -960,15 +986,15 @@ func TestTwoClientListenersInOneGateway(t *testing.T) {
 	defer antSrv.Close()
 
 	cfg := testConfig(t, basSrv.URL, antSrv.URL)
-	antRc := resolvedAnthropicBaseten(t)
+	antRc := resolvedAnthropicOpenRouter(t)
 	antRc.Name = "claude-code"
 	antRc.Route = "anthropic" // passthrough to antSrv
 	antRc.ProtocolShape = "anthropic"
 
-	oaiRc := resolvedOpenAIBaseten(t, "opencode", "baseten")
-	oaiRc.DefaultModel = reasoningNeutralBasetenModel
-	// Point baseten upstream at the same mock server; the openai
-	// listener must hit /v1/chat/completions on the baseten mock.
+	oaiRc := resolvedOpenAIOpenRouter(t, "opencode", "openrouter")
+	oaiRc.DefaultModel = reasoningNeutralOpenRouterModel
+	// Point openrouter upstream at the same mock server; the openai
+	// listener must hit /v1/chat/completions on the openrouter mock.
 
 	g, adminL, _ := newGateway(t, cfg, antRc, oaiRc)
 	defer adminL.Close()
@@ -989,7 +1015,7 @@ func TestTwoClientListenersInOneGateway(t *testing.T) {
 		t.Fatalf("anthropic listener got %d want 200", antResp.StatusCode)
 	}
 
-	// openai listener -> baseten upstream, model rewrite + api key.
+	// openai listener -> openrouter upstream, model rewrite + api key.
 	oaiReq, _ := http.NewRequest("POST", clientURL(g, "opencode", "/v1/chat/completions"),
 		bytes.NewReader([]byte(`{"model":"claude-opus-4-8","messages":[]}`)))
 	oaiReq.Header.Set("Content-Type", "application/json")
@@ -1041,7 +1067,7 @@ func TestAnthropicListenerOpenAIRouteTranslates(t *testing.T) {
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
 	cfg.OpenAIURL = srv.URL
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = "openai"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -1097,7 +1123,7 @@ func TestCrossShapeOpenAIPortAnthropicRouteReturns501(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedOpenAIBaseten(t, "opencode", "anthropic")
+	rc := resolvedOpenAIOpenRouter(t, "opencode", "anthropic")
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
 	stop := start(t, g)
@@ -1120,7 +1146,7 @@ func TestCrossShapeOpenAIPortAnthropicRouteReturns501(t *testing.T) {
 // returns a stub message and records a telemetry row.
 func TestMonitorRouteStubAnthropic(t *testing.T) {
 	cfg := testConfig(t, "http://no-upstream.invalid", "http://no-upstream.invalid")
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = "monitor"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -1155,7 +1181,7 @@ func TestMonitorRouteStubAnthropic(t *testing.T) {
 // listener returns a stub chat completion.
 func TestMonitorRouteStubOpenAI(t *testing.T) {
 	cfg := testConfig(t, "http://no-upstream.invalid", "http://no-upstream.invalid")
-	rc := resolvedOpenAIBaseten(t, "opencode", "monitor")
+	rc := resolvedOpenAIOpenRouter(t, "opencode", "monitor")
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
 	stop := start(t, g)
@@ -1183,7 +1209,7 @@ func TestMonitorRouteStubOpenAI(t *testing.T) {
 }
 
 // TestReloadConfigChangesRoute verifies the in-process SIGHUP
-// equivalent: starting with one client (anthropic+baseten) on a
+// equivalent: starting with one client (anthropic+openrouter) on a
 // fixed port, calling reloadConfig after rewriting gateway.yaml to
 // flip its route to anthropic changes the upstream the listener
 // talks to. Config-driven rebind replaces the listener at the same
@@ -1191,7 +1217,7 @@ func TestMonitorRouteStubOpenAI(t *testing.T) {
 func TestReloadConfigChangesRoute(t *testing.T) {
 	basSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"msg_from_baseten","type":"message","content":[{"type":"text","text":"BASETEN"}]}`))
+		_, _ = w.Write([]byte(`{"id":"msg_from_openrouter","type":"message","content":[{"type":"text","text":"OPENROUTER"}]}`))
 	}))
 	defer basSrv.Close()
 	antSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1206,9 +1232,9 @@ func TestReloadConfigChangesRoute(t *testing.T) {
 	bindAddr := "127.0.0.1:" + itoa(port)
 	cfg.ConfigPath = filepath.Join(t.TempDir(), "gateway.yaml")
 
-	rc1 := resolvedAnthropicBaseten(t)
+	rc1 := resolvedAnthropicOpenRouter(t)
 	rc1.BindAddr = bindAddr
-	rc1.Route = "baseten"
+	rc1.Route = "openrouter"
 	// Write the gateway.yaml so reloadConfig can re-read the same
 	// file (with a different route) later.
 	writeGatewayYAML(t, cfg.ConfigPath, []resolvedClientConfig{rc1})
@@ -1218,7 +1244,7 @@ func TestReloadConfigChangesRoute(t *testing.T) {
 	stop := start(t, g)
 	defer stop()
 
-	// First request: should hit baseten mock.
+	// First request: should hit openrouter mock.
 	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}`)
 	req1, _ := http.NewRequest("POST", clientURL(g, "claude-code", "/v1/messages"), bytes.NewReader(body))
 	req1.Header.Set("Content-Type", "application/json")
@@ -1229,13 +1255,13 @@ func TestReloadConfigChangesRoute(t *testing.T) {
 	}
 	rb1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
-	if !strings.Contains(string(rb1), "BASETEN") {
-		t.Fatalf("first response should come from baseten mock, got %s", rb1)
+	if !strings.Contains(string(rb1), "OPENROUTER") {
+		t.Fatalf("first response should come from openrouter mock, got %s", rb1)
 	}
 
 	// Rewrite gateway.yaml with route=anthropic (still anthropic
 	// shape, so compatible) and trigger in-process reload.
-	rc2 := resolvedAnthropicBaseten(t)
+	rc2 := resolvedAnthropicOpenRouter(t)
 	rc2.BindAddr = bindAddr
 	rc2.Route = "anthropic"
 	writeGatewayYAML(t, cfg.ConfigPath, []resolvedClientConfig{rc2})
@@ -1259,7 +1285,7 @@ func TestReloadConfigChangesRoute(t *testing.T) {
 			ok = true
 			break
 		}
-		if strings.Contains(string(rb2), "BASETEN") {
+		if strings.Contains(string(rb2), "OPENROUTER") {
 			// Still old handler; retry after a tick.
 			time.Sleep(50 * time.Millisecond)
 			continue
@@ -1276,12 +1302,12 @@ func TestReloadConfigChangesRoute(t *testing.T) {
 	for _, r := range rows {
 		if r.ConfiguredRoute == "anthropic" {
 			antRows++
-		} else if r.ConfiguredRoute == "baseten" {
+		} else if r.ConfiguredRoute == "openrouter" {
 			basRows++
 		}
 	}
 	if basRows == 0 {
-		t.Fatalf("expected at least one baseten row pre-reload; rows=%+v", rows)
+		t.Fatalf("expected at least one openrouter row pre-reload; rows=%+v", rows)
 	}
 	if antRows == 0 {
 		t.Fatalf("expected at least one anthropic row post-reload; rows=%+v", rows)
@@ -1297,7 +1323,7 @@ func TestTelemetryCarriesClientName(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Name = "custom-listener-xyz"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -1374,7 +1400,7 @@ func writeGatewayYAML(t *testing.T, path string, rcc []resolvedClientConfig) {
 	t.Helper()
 	enabled := false
 	for _, rc := range rcc {
-		if rc.Route == "baseten" {
+		if rc.Route == "openrouter" {
 			enabled = true
 			break
 		}
@@ -1531,10 +1557,10 @@ func TestNativeOpenAIResponsesAccountsForCachedInput(t *testing.T) {
 	}
 }
 
-// TestOpenAIShapeResponsesBasetenRewritesModel verifies an openai-shape
-// listener with route=baseten rewrites the model field via its default
-// default model when forwarding /v1/responses to the Baseten upstream.
-func TestOpenAIShapeResponsesBasetenRewritesModel(t *testing.T) {
+// TestOpenAIShapeResponsesOpenRouterRewritesModel verifies an openai-shape
+// listener with route=openrouter rewrites the model field via its default
+// default model when forwarding /v1/responses to the OpenRouter upstream.
+func TestOpenAIShapeResponsesOpenRouterRewritesModel(t *testing.T) {
 	gotModel := make(chan string, 1)
 	gotPath := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1548,8 +1574,8 @@ func TestOpenAIShapeResponsesBasetenRewritesModel(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedOpenAIBaseten(t, "codex", "baseten")
-	rc.DefaultModel = reasoningNeutralBasetenModel
+	rc := resolvedOpenAIOpenRouter(t, "codex", "openrouter")
+	rc.DefaultModel = reasoningNeutralOpenRouterModel
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
 	stop := start(t, g)
@@ -1577,15 +1603,15 @@ func TestOpenAIShapeResponsesBasetenRewritesModel(t *testing.T) {
 	}
 	select {
 	case m := <-gotModel:
-		if m != reasoningNeutralBasetenModel {
-			t.Fatalf("baseten route must rewrite via default model; upstream got %q, want %s", m, reasoningNeutralBasetenModel)
+		if m != reasoningNeutralOpenRouterModel {
+			t.Fatalf("openrouter route must rewrite via default model; upstream got %q, want %s", m, reasoningNeutralOpenRouterModel)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("upstream never received model")
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
-	if rows[0].ConfiguredRoute != "baseten" {
-		t.Fatalf("route = %q want baseten", rows[0].ConfiguredRoute)
+	if rows[0].ConfiguredRoute != "openrouter" {
+		t.Fatalf("route = %q want openrouter", rows[0].ConfiguredRoute)
 	}
 	if rows[0].Client != "codex" {
 		t.Fatalf("client = %q want codex", rows[0].Client)
@@ -1596,16 +1622,16 @@ func TestCodexCompatibilityModelRoutingBoundary(t *testing.T) {
 	requestBody := []byte(`{"model":"` + CodexCompatibilityModel + `","input":"hi"}`)
 
 	t.Run("global on resolves default and never adds native fallback", func(t *testing.T) {
-		var basetenRequests atomic.Int64
+		var openrouterRequests atomic.Int64
 		gotModel := make(chan string, 1)
-		baseten := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			basetenRequests.Add(1)
+		openrouter := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			openrouterRequests.Add(1)
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			gotModel <- fmtString(body["model"])
 			http.Error(w, "upstream failure", http.StatusInternalServerError)
 		}))
-		defer baseten.Close()
+		defer openrouter.Close()
 		var openAIRequests atomic.Int64
 		openai := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			openAIRequests.Add(1)
@@ -1613,9 +1639,9 @@ func TestCodexCompatibilityModelRoutingBoundary(t *testing.T) {
 		}))
 		defer openai.Close()
 
-		cfg := testConfig(t, baseten.URL, baseten.URL)
+		cfg := testConfig(t, openrouter.URL, openrouter.URL)
 		cfg.OpenAIURL = openai.URL
-		rc := resolvedOpenAIBaseten(t, "codex", "baseten")
+		rc := resolvedOpenAIOpenRouter(t, "codex", "openrouter")
 		rc.HasGlobalRoutingGate = true
 		rc.GlobalRoutingEnabled = true
 		rc.DefaultModel = "moonshotai/Kimi-K2.7-Code"
@@ -1637,10 +1663,10 @@ func TestCodexCompatibilityModelRoutingBoundary(t *testing.T) {
 		}
 		_ = resp.Body.Close()
 		if got := <-gotModel; got != rc.DefaultModel {
-			t.Fatalf("Baseten model = %q, want %q", got, rc.DefaultModel)
+			t.Fatalf("OpenRouter model = %q, want %q", got, rc.DefaultModel)
 		}
-		if basetenRequests.Load() != 1 {
-			t.Fatalf("Baseten requests = %d", basetenRequests.Load())
+		if openrouterRequests.Load() != 1 {
+			t.Fatalf("OpenRouter requests = %d", openrouterRequests.Load())
 		}
 		if openAIRequests.Load() != 0 {
 			t.Fatalf("compatibility sentinel made %d native fallback requests", openAIRequests.Load())
@@ -1656,7 +1682,7 @@ func TestCodexCompatibilityModelRoutingBoundary(t *testing.T) {
 		defer upstream.Close()
 		cfg := testConfig(t, upstream.URL, upstream.URL)
 		cfg.OpenAIURL = upstream.URL
-		rc := resolvedOpenAIBaseten(t, "codex", "baseten")
+		rc := resolvedOpenAIOpenRouter(t, "codex", "openrouter")
 		rc.HasGlobalRoutingGate = true
 		rc.GlobalRoutingEnabled = false
 		rc.FallbackRoute = "openai"
@@ -1694,7 +1720,7 @@ func TestOpenAIShapeResponsesAnthropicRouteReturns501(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedOpenAIBaseten(t, "opencode", "anthropic")
+	rc := resolvedOpenAIOpenRouter(t, "opencode", "anthropic")
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
 	stop := start(t, g)
@@ -1723,11 +1749,11 @@ func TestTelemetryDirExpandsTildeInYAML(t *testing.T) {
 		t.Skipf("no home dir: %v", err)
 	}
 	tmpYAML := filepath.Join(t.TempDir(), "gateway.yaml")
-	body := "global:\n  routing_enabled: false\n  telemetry_dir: ~/baseten-tilde-test\nclients:\n  - name: claude-code\n    enabled: true\n    bind_addr: 127.0.0.1:0\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n"
+	body := "global:\n  routing_enabled: false\n  telemetry_dir: ~/openrouter-tilde-test\nclients:\n  - name: claude-code\n    enabled: true\n    bind_addr: 127.0.0.1:0\n    protocol_shape: anthropic\n    default_model: zai-org/GLM-5.2\n"
 	if err := os.WriteFile(tmpYAML, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(filepath.Join(home, "baseten-tilde-test"))
+	defer os.RemoveAll(filepath.Join(home, "openrouter-tilde-test"))
 
 	f, err := config.Load(tmpYAML)
 	if err != nil {
@@ -1737,7 +1763,7 @@ func TestTelemetryDirExpandsTildeInYAML(t *testing.T) {
 	if _, err := loadResolvedClientsInto(cfg, f, tmpYAML); err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(home, "baseten-tilde-test")
+	want := filepath.Join(home, "openrouter-tilde-test")
 	if cfg.TelemetryDir != want {
 		t.Fatalf("TelemetryDir not tilde-expanded\ngot:  %s\nwant: %s", cfg.TelemetryDir, want)
 	}
@@ -1787,7 +1813,7 @@ func TestPostMessagesSanitizeHistory(t *testing.T) {
 			}))
 			defer srv.Close()
 			cfg := testConfig(t, srv.URL, srv.URL)
-			rc := resolvedAnthropicBaseten(t)
+			rc := resolvedAnthropicOpenRouter(t)
 			rc.SanitizeHistory = tc.sanitize
 			g, adminL, _ := newGateway(t, cfg, rc)
 			defer adminL.Close()
@@ -1837,14 +1863,18 @@ func TestPostMessagesSanitizeHistory(t *testing.T) {
 	}
 }
 
-// TestFallbackRouteOn503WithCooldown: a baseten-routed listener with
+// TestFallbackRouteOn503WithCooldown: a openrouter-routed listener with
 // fallback_route=anthropic retries the fallback when the primary
-// returns 503 (invisible to the client), then routes straight to the
+// returns 503, retries once immediately when Retry-After is absent, then
+// serves the fallback (all invisible to the client). Later requests route
+// straight to the
 // fallback during the cooldown window without re-trying the primary.
 func TestFallbackRouteOn503WithCooldown(t *testing.T) {
 	var primaryHits int32
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&primaryHits, 1)
+		if r.URL.Path == "/v1/messages" {
+			atomic.AddInt32(&primaryHits, 1)
+		}
 		w.WriteHeader(503)
 		_, _ = w.Write([]byte(`{"error":"overloaded"}`))
 	}))
@@ -1855,8 +1885,8 @@ func TestFallbackRouteOn503WithCooldown(t *testing.T) {
 	}))
 	defer fb.Close()
 
-	cfg := testConfig(t, primary.URL, fb.URL) // baseten -> primary, anthropic -> fb
-	rc := resolvedAnthropicBaseten(t)
+	cfg := testConfig(t, primary.URL, fb.URL) // openrouter -> primary, anthropic -> fb
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -1882,28 +1912,28 @@ func TestFallbackRouteOn503WithCooldown(t *testing.T) {
 	if rb := send(); !strings.Contains(rb, "FALLBACK") {
 		t.Fatalf("first request not served by fallback: %s", rb)
 	}
-	if n := atomic.LoadInt32(&primaryHits); n != 1 {
-		t.Fatalf("primary hits = %d, want 1", n)
+	if n := atomic.LoadInt32(&primaryHits); n != 2 {
+		t.Fatalf("primary hits = %d, want 2", n)
 	}
 	// Cooldown active: second request must not touch the primary.
 	if rb := send(); !strings.Contains(rb, "FALLBACK") {
 		t.Fatalf("second request not served by fallback: %s", rb)
 	}
-	if n := atomic.LoadInt32(&primaryHits); n != 1 {
-		t.Fatalf("primary hit during cooldown: hits = %d, want 1", n)
+	if n := atomic.LoadInt32(&primaryHits); n != 2 {
+		t.Fatalf("primary hit during cooldown: hits = %d, want 2", n)
 	}
 
 	rows := waitForRows(t, cfg.TelemetryDir, 2, 2*time.Second)
 	for i, row := range rows {
-		if row.ConfiguredRoute != "baseten" || row.EffectiveProvider != "anthropic" {
-			t.Fatalf("row %d route/effective = %q/%q, want baseten/anthropic", i, row.ConfiguredRoute, row.EffectiveProvider)
+		if row.ConfiguredRoute != "openrouter" || row.EffectiveProvider != "anthropic" {
+			t.Fatalf("row %d route/effective = %q/%q, want openrouter/anthropic", i, row.ConfiguredRoute, row.EffectiveProvider)
 		}
 		if row.IsHTTPError() || row.StatusCode() != 200 {
 			t.Fatalf("row %d status/errored = %d/%v", i, row.StatusCode(), row.IsHTTPError())
 		}
 	}
 	if rows[0].ServedModel != "claude-opus-4-8" {
-		t.Fatalf("fallback must not carry baseten model rewrite, got %q", rows[0].ServedModel)
+		t.Fatalf("fallback must not carry openrouter model rewrite, got %q", rows[0].ServedModel)
 	}
 }
 
@@ -1940,7 +1970,7 @@ func TestClientCancellationDoesNotTripFallback(t *testing.T) {
 	defer fallback.Close()
 
 	cfg := testConfig(t, primary.URL, fallback.URL)
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.FallbackRoute = "anthropic"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -1982,12 +2012,12 @@ func TestClientCancellationDoesNotTripFallback(t *testing.T) {
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
 	if rows[0].TerminationReason != telemetry.TerminationClientCancelled ||
 		rows[0].Status != nil ||
-		rows[0].EffectiveProvider != "baseten" ||
+		rows[0].EffectiveProvider != "openrouter" ||
 		rows[0].Fallback.Attempted ||
 		rows[0].Fallback.Count != 0 ||
 		valueOrZero(rows[0].Fallback.Trigger) != "" {
 		t.Fatalf(
-			"canceled row termination/status/provider/fallback = %q/%v/%q/%+v, want client_cancelled/nil/baseten/no fallback",
+			"canceled row termination/status/provider/fallback = %q/%v/%q/%+v, want client_cancelled/nil/openrouter/no fallback",
 			rows[0].TerminationReason,
 			rows[0].Status,
 			rows[0].EffectiveProvider,
@@ -2032,7 +2062,7 @@ func TestResolveFromFileRejectsInvalidFallback(t *testing.T) {
 		shape, fallback string
 	}{
 		{"openai", "anthropic"},
-		{"anthropic", "baseten"},
+		{"anthropic", "openrouter"},
 		{"anthropic", "monitor"},
 		{"anthropic", "openai"},
 	} {
@@ -2076,7 +2106,7 @@ func TestMessagesTranslatedStreaming(t *testing.T) {
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
 	cfg.OpenAIURL = srv.URL
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = "openai"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -2117,11 +2147,11 @@ func TestMessagesTranslatedStreaming(t *testing.T) {
 	}
 }
 
-// TestBasetenUpstreamShapeOpenAITranslatesAndRewritesModel: route=baseten
+// TestOpenRouterUpstreamShapeOpenAITranslatesAndRewritesModel: route=openrouter
 // with upstream_shape=openai sends translated chat.completions to the
-// baseten upstream with the default-model rewrite (Claude Code on an
-// openai-only Baseten model).
-func TestBasetenUpstreamShapeOpenAITranslatesAndRewritesModel(t *testing.T) {
+// openrouter upstream with the default-model rewrite (Claude Code on an
+// openai-only OpenRouter model).
+func TestOpenRouterUpstreamShapeOpenAITranslatesAndRewritesModel(t *testing.T) {
 	gotBody := make(chan []byte, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
@@ -2134,8 +2164,8 @@ func TestBasetenUpstreamShapeOpenAITranslatesAndRewritesModel(t *testing.T) {
 	}))
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
-	rc := resolvedAnthropicBaseten(t)
-	rc.DefaultModel = reasoningNeutralBasetenModel
+	rc := resolvedAnthropicOpenRouter(t)
+	rc.DefaultModel = reasoningNeutralOpenRouterModel
 	rc.UpstreamShape = "openai"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -2162,13 +2192,13 @@ func TestBasetenUpstreamShapeOpenAITranslatesAndRewritesModel(t *testing.T) {
 		t.Fatal("upstream never hit")
 	}
 	if m := fmtString(up["model"]); m == "claude-opus-4-8" || m == "" {
-		t.Fatalf("model not rewritten for baseten, got %q", m)
+		t.Fatalf("model not rewritten for openrouter, got %q", m)
 	}
 	if _, hasSystem := up["system"]; hasSystem {
 		t.Fatalf("anthropic system field leaked into openai body: %v", up)
 	}
 	rows := waitForRows(t, cfg.TelemetryDir, 1, 2*time.Second)
-	if !rows[0].Translated || rows[0].ConfiguredRoute != "baseten" {
+	if !rows[0].Translated || rows[0].ConfiguredRoute != "openrouter" {
 		t.Fatalf("row wrong: %+v", rows[0])
 	}
 }
@@ -2182,7 +2212,7 @@ func TestMessagesTranslateRejectsImages(t *testing.T) {
 	defer srv.Close()
 	cfg := testConfig(t, srv.URL, srv.URL)
 	cfg.OpenAIURL = srv.URL
-	rc := resolvedAnthropicBaseten(t)
+	rc := resolvedAnthropicOpenRouter(t)
 	rc.Route = "openai"
 	g, adminL, _ := newGateway(t, cfg, rc)
 	defer adminL.Close()
@@ -2208,7 +2238,7 @@ func TestMessagesTranslateRejectsImages(t *testing.T) {
 func TestUpstreamModelForConfiguredDefaultModel(t *testing.T) {
 	g := &Gateway{}
 	rc := resolvedClientConfig{
-		Route:        "baseten",
+		Route:        "openrouter",
 		DefaultModel: "org/default-slug",
 	}
 	if got := g.upstreamModelFor(rc); got != "org/default-slug" {
@@ -2216,7 +2246,7 @@ func TestUpstreamModelForConfiguredDefaultModel(t *testing.T) {
 	}
 	rc.Route = "anthropic"
 	if got := g.upstreamModelFor(rc); got != "" {
-		t.Fatalf("upstreamModelFor = %q, want empty for non-Baseten route", got)
+		t.Fatalf("upstreamModelFor = %q, want empty for non-OpenRouter route", got)
 	}
 }
 
@@ -2271,8 +2301,8 @@ func TestResolveFromFileSkipsSameShapeSharedAddr(t *testing.T) {
 // listener must be order-independent and change when any member's
 // config changes.
 func TestGroupContentHashCoversAllClients(t *testing.T) {
-	a := resolvedClientConfig{Name: "claude-code", BindAddr: "127.0.0.1:18081", ProtocolShape: "anthropic", Route: "baseten"}
-	b := resolvedClientConfig{Name: "codex", BindAddr: "127.0.0.1:18081", ProtocolShape: "openai", Route: "baseten"}
+	a := resolvedClientConfig{Name: "claude-code", BindAddr: "127.0.0.1:18081", ProtocolShape: "anthropic", Route: "openrouter"}
+	b := resolvedClientConfig{Name: "codex", BindAddr: "127.0.0.1:18081", ProtocolShape: "openai", Route: "openrouter"}
 	base := groupContentHash([]resolvedClientConfig{a, b})
 	if groupContentHash([]resolvedClientConfig{b, a}) != base {
 		t.Fatal("group hash must be order-independent")
@@ -2445,7 +2475,7 @@ func TestSharedBindAddrDispatchByPath(t *testing.T) {
 func TestSharedBindAddrModelsHeaderDisambiguation(t *testing.T) {
 	antSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"ant-model"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"type":"model","id":"ant-model","display_name":"Anthropic model","created_at":"2026-01-01T00:00:00Z"}],"has_more":false,"first_id":"ant-model","last_id":"ant-model"}`))
 	}))
 	defer antSrv.Close()
 	oaiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2459,6 +2489,8 @@ func TestSharedBindAddrModelsHeaderDisambiguation(t *testing.T) {
 
 	addr := "127.0.0.1:" + itoa(freeTCPPort(t))
 	ant := resolvedClientConfig{Name: "claude-code", BindAddr: addr, ProtocolShape: "anthropic", Route: "anthropic"}
+	ant.HasGlobalRoutingGate = true
+	ant.GlobalRoutingEnabled = false
 	oai := resolvedClientConfig{Name: "codex", BindAddr: addr, ProtocolShape: "openai", Route: "openai"}
 	g, adminL, _ := newGateway(t, cfg, ant, oai)
 	defer adminL.Close()

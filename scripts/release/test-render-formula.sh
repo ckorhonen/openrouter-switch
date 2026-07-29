@@ -38,8 +38,8 @@ grep -Fqx '# typed: strict' "$formula" \
     || fail "formula omitted the Homebrew Sorbet sigil"
 grep -Fqx '# frozen_string_literal: true' "$formula" \
     || fail "formula omitted the frozen string literal directive"
-grep -Fqx 'class OpenRouterSwitch < Formula' "$formula" \
-    || fail "formula class is not OpenRouterSwitch"
+grep -Fqx 'class OpenrouterSwitch < Formula' "$formula" \
+    || fail "formula class is not OpenrouterSwitch"
 if grep -Eq '^[[:space:]]*version[[:space:]]' "$formula"; then
     fail "formula contains a redundant explicit version stanza"
 fi
@@ -58,13 +58,14 @@ grep -Fqx \
 grep -Fqx '  license "MIT"' "$formula" \
     || fail "formula license does not use the explicit approved SPDX input"
 grep -Fqx \
-    '  url "https://github.com/basetenlabs/openrouter-switch/releases/download/v1.2.3/openrouter-switch_1.2.3_darwin_universal.zip"' \
+    '  url "https://github.com/ckorhonen/openrouter-switch/releases/download/v1.2.3/openrouter-switch_1.2.3_darwin_universal.zip"' \
     "$formula" || fail "formula URL is not canonical"
 grep -Fqx \
     '  sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"' \
     "$formula" || fail "formula checksum is not normalized and pinned"
-grep -Fqx '  depends_on "basetenlabs/baseten/baseten"' "$formula" \
-    || fail "formula does not depend on the fully qualified Baseten CLI"
+if grep -Eiq 'baseten|basetenlabs' "$formula"; then
+    fail "formula retains a Baseten product or dependency reference"
+fi
 grep -Fqx '  depends_on :macos' "$formula" \
     || fail "formula is not restricted to macOS"
 grep -Fqx '    depends_on macos: :ventura' "$formula" \

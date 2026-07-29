@@ -2,7 +2,7 @@ import SwiftUI
 
 enum TrafficBrand: Equatable {
     case claude
-    case baseten
+    case openrouter
     case comparison
 }
 
@@ -17,15 +17,15 @@ struct TrafficBrandMark: View {
                 .fill(Color.claudeTerracotta)
                 .frame(width: size, height: size)
                 .accessibilityHidden(true)
-        case .baseten:
-            BasetenBrandShape()
-                .fill(Color.basetenGreen)
+        case .openrouter:
+            OpenRouterBrandShape()
+                .fill(Color.openRouterIndigo)
                 .frame(width: size, height: size)
                 .accessibilityHidden(true)
         case .comparison:
             HStack(spacing: 3) {
-                BasetenBrandShape()
-                    .fill(Color.basetenGreen)
+                OpenRouterBrandShape()
+                    .fill(Color.openRouterIndigo)
                     .frame(width: size, height: size)
                 ClaudeBrandShape()
                     .fill(Color.claudeTerracotta)
@@ -36,8 +36,8 @@ struct TrafficBrandMark: View {
     }
 }
 
-/// The Baseten branch glyph, normalized from the bundled brand SVG.
-private struct BasetenBrandShape: Shape {
+/// The OpenRouter branch glyph, normalized from the bundled brand SVG.
+private struct OpenRouterBrandShape: Shape {
     func path(in rect: CGRect) -> Path {
         let source = CGRect(x: 278.919, y: 213, width: 523.162, height: 654)
         let scale = min(rect.width / source.width, rect.height / source.height)

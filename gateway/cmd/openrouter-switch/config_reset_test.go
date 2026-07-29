@@ -179,9 +179,8 @@ func TestCmdConfigResetBuildsIsolatedPreviewConfig(t *testing.T) {
 	if file.Global.TelemetryDir != filepath.Join(root, "telemetry") {
 		t.Fatalf("telemetry_dir = %q", file.Global.TelemetryDir)
 	}
-	if file.Global.Auth["baseten"] != "${BASETEN_API_KEY}" ||
-		file.Global.Auth["anthropic"] != "${ANTHROPIC_API_KEY}" ||
-		file.Global.Auth["monitor"] != "" {
+	if len(file.Global.Auth) != 1 ||
+		file.Global.Auth["anthropic"] != "${ANTHROPIC_API_KEY}" {
 		t.Fatalf("unexpected Preview auth placeholders: %v", file.Global.Auth)
 	}
 	if len(file.Clients) != 2 {
@@ -206,7 +205,7 @@ func TestCmdConfigResetBuildsIsolatedPreviewConfig(t *testing.T) {
 		codex.ProtocolShape != "openai" ||
 		codex.AuthToken == nil ||
 		codex.AuthToken.Value != "${CODEX_AUTH_TOKEN}" ||
-		codex.DefaultModel != "zai-org/GLM-5.2" {
+		codex.DefaultModel != "" {
 		t.Fatalf("unexpected Preview parked Codex transformation: %+v", codex)
 	}
 	if file.Door == nil || len(file.Door.Ports) != 1 ||

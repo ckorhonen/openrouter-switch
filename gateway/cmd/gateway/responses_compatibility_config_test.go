@@ -71,7 +71,7 @@ func TestResponsesCompatibilityParticipatesInResolvedHash(t *testing.T) {
 		Name:                   "codex",
 		BindAddr:               "127.0.0.1:18081",
 		ProtocolShape:          "openai",
-		Route:                  "baseten",
+		Route:                  "openrouter",
 		ResponsesCompatibility: off,
 	}
 	withDefaults := base

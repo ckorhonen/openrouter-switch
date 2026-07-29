@@ -22,7 +22,7 @@ func TestRenderPlist(t *testing.T) {
 	wants := []string{
 		"<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
 		"<key>Label</key>",
-		"<string>co.baseten.switch.router</string>",
+		"<string>com.ckorhonen.openrouter-switch.router</string>",
 		"<key>ProgramArguments</key>",
 		"<string>/Users/x/.local/bin/openrouter-switch</string>",
 		"<string>gateway</string>",
@@ -102,13 +102,13 @@ const printQuoted = `system information:
 
 const printColumnar = `	services = {
 		0	-	com.apple.SafariHistoryServiceAgent
-		4321	0	co.baseten.switch.router
-		-	0	co.baseten.switch.door
+		4321	0	com.ckorhonen.openrouter-switch.router
+		-	0	com.ckorhonen.openrouter-switch.door
 	}
 	disabled services = {
-		"co.baseten.switch.door" => disabled
+		"com.ckorhonen.openrouter-switch.door" => disabled
 	}
-	plist path = /Users/x/Library/LaunchAgents/co.baseten.switch.router.plist
+	plist path = /Users/x/Library/LaunchAgents/com.ckorhonen.openrouter-switch.router.plist
 `
 
 func TestLabelsMentioning(t *testing.T) {
@@ -119,7 +119,7 @@ func TestLabelsMentioning(t *testing.T) {
 	}{
 		{"brew label quoted", printQuoted, []string{"homebrew.mxcl.openrouter-switch"}},
 		{"ours columnar dedup, paths ignored", printColumnar,
-			[]string{"co.baseten.switch.door", "co.baseten.switch.router"}},
+			[]string{"com.ckorhonen.openrouter-switch.door", "com.ckorhonen.openrouter-switch.router"}},
 		{"no match", "services = {\n 0 - com.apple.Foo\n}", nil},
 	}
 	for _, tc := range cases {

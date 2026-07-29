@@ -24,7 +24,7 @@ final class RequestPresentationTests: XCTestCase {
 
         XCTAssertEqual(
             requestFallbackReason(fallback),
-            "Baseten could not accept the image, native provider used")
+            "OpenRouter could not accept the image, native provider used")
     }
 
     func testRouteAndModelLabelsShowRequestedToServedPath() {
@@ -35,7 +35,7 @@ final class RequestPresentationTests: XCTestCase {
             "claude-opus-4-8 → claude-opus-4-8-20260701")
         XCTAssertEqual(
             requestRouteLabel(item),
-            "Baseten → Anthropic")
+            "OpenRouter → Anthropic")
         XCTAssertEqual(
             requestServedProviderLabel(item),
             "claude-opus-4-8-20260701 · Anthropic")
@@ -65,7 +65,7 @@ final class RequestPresentationTests: XCTestCase {
             eventID: "0123456789abcdef0123456789abcdef",
             completedAt: Date(timeIntervalSince1970: 1_800_000_000),
             client: "claude-code",
-            configuredRoute: "baseten",
+            configuredRoute: "openrouter",
             effectiveProvider: "anthropic",
             requestedModel: "claude-opus-4-8",
             servedModel: "claude-opus-4-8-20260701",

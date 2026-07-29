@@ -50,9 +50,9 @@ type modelsDevModel struct {
 	} `json:"experimental"`
 }
 
-// ReplaceModelsDev validates the provider-scoped anthropic, openai, and
-// baseten records in one models.dev response, then atomically publishes all
-// three live layers. An error leaves the current snapshot untouched.
+// ReplaceModelsDev validates the public Anthropic and OpenAI provider slices
+// in one models.dev response, then atomically publishes both live layers.
+// OpenRouter account availability and pricing come only from /models/user.
 func (p *Pricing) ReplaceModelsDev(body []byte, fetchedAt time.Time, etag string) error {
 	catalogs, err := parseModelsDev(body, fetchedAt.UTC(), etag, LoadedFromLive)
 	if err != nil {
@@ -152,7 +152,7 @@ func (p *Pricing) RevalidateModelsDev(validatedAt time.Time) error {
 		)
 	}
 	layers := cloneProviderLayers(current.providerLayers)
-	validatedProviders := make(map[string]bool, 3)
+	validatedProviders := make(map[string]bool, 2)
 	for key, catalog := range layers {
 		hasModelsDevSlice := false
 		for _, record := range catalog.models {
@@ -173,7 +173,6 @@ func (p *Pricing) RevalidateModelsDev(validatedAt time.Time) error {
 	for _, provider := range []string{
 		ProviderAnthropic,
 		ProviderOpenAI,
-		ProviderBaseten,
 	} {
 		if !validatedProviders[provider] {
 			return fmt.Errorf(
@@ -206,8 +205,8 @@ func parseModelsDev(body []byte, fetchedAt time.Time, etag string, loadedFrom Lo
 		return nil, fmt.Errorf("decode models.dev trailing data: %w", err)
 	}
 
-	result := make(map[string]providerCatalog, 3)
-	for _, provider := range []string{ProviderAnthropic, ProviderOpenAI, ProviderBaseten} {
+	result := make(map[string]providerCatalog, 2)
+	for _, provider := range []string{ProviderAnthropic, ProviderOpenAI} {
 		raw, ok := root[provider]
 		if !ok {
 			return nil, fmt.Errorf("models.dev catalog omitted provider %q", provider)
@@ -383,19 +382,17 @@ func parseModelsDevModel(
 		return ModelRecord{}, fmt.Errorf("reasoning: %w", err)
 	}
 	record.Reasoning = reasoning
-	if provider != ProviderBaseten {
-		if price, ratePresence, present, err := parseModelsDevCost(source.Cost); err != nil {
-			return ModelRecord{}, fmt.Errorf("standard cost: %w", err)
-		} else if present {
-			record.Prices[ProfileStandard] = PriceProfile{
-				Profile: ProfileStandard, Price: price,
-				RatePresence: ratePresence, RatePresenceKnown: true,
-				Provenance: provenance,
-				RateProvenance: rateProvenanceForPresence(
-					ratePresence,
-					provenance,
-				),
-			}
+	if price, ratePresence, present, err := parseModelsDevCost(source.Cost); err != nil {
+		return ModelRecord{}, fmt.Errorf("standard cost: %w", err)
+	} else if present {
+		record.Prices[ProfileStandard] = PriceProfile{
+			Profile: ProfileStandard, Price: price,
+			RatePresence: ratePresence, RatePresenceKnown: true,
+			Provenance: provenance,
+			RateProvenance: rateProvenanceForPresence(
+				ratePresence,
+				provenance,
+			),
 		}
 	}
 	modeNames := make([]string, 0, len(source.Experimental.Modes))
@@ -424,19 +421,17 @@ func parseModelsDevModel(
 			continue
 		}
 		record.Profiles[profile] = definition
-		if provider != ProviderBaseten {
-			if price, ratePresence, present, err := parseModelsDevCost(mode.Cost); err != nil {
-				return ModelRecord{}, fmt.Errorf("profile %q cost: %w", profile, err)
-			} else if present {
-				record.Prices[profile] = PriceProfile{
-					Profile: profile, Price: price,
-					RatePresence: ratePresence, RatePresenceKnown: true,
-					Provenance: provenance,
-					RateProvenance: rateProvenanceForPresence(
-						ratePresence,
-						provenance,
-					),
-				}
+		if price, ratePresence, present, err := parseModelsDevCost(mode.Cost); err != nil {
+			return ModelRecord{}, fmt.Errorf("profile %q cost: %w", profile, err)
+		} else if present {
+			record.Prices[profile] = PriceProfile{
+				Profile: profile, Price: price,
+				RatePresence: ratePresence, RatePresenceKnown: true,
+				Provenance: provenance,
+				RateProvenance: rateProvenanceForPresence(
+					ratePresence,
+					provenance,
+				),
 			}
 		}
 	}
@@ -557,73 +552,6 @@ func parseModelsDevReasoning(
 		return nil, err
 	}
 	return capability, nil
-}
-
-func attachVendoredBasetenReasoning(catalog *providerCatalog) error {
-	var envelope struct {
-		SchemaVersion int                        `json:"schema_version"`
-		Source        string                     `json:"source"`
-		SourceCommit  string                     `json:"source_commit"`
-		CapturedAt    time.Time                  `json:"captured_at"`
-		Models        map[string]json.RawMessage `json:"models"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(basetenReasoningFallbackJSON))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&envelope); err != nil {
-		return err
-	}
-	var trailing json.RawMessage
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return fmt.Errorf("fallback contains trailing JSON")
-	}
-	if envelope.SchemaVersion != 1 ||
-		envelope.Source != modelsDevSource ||
-		strings.TrimSpace(envelope.SourceCommit) == "" ||
-		envelope.CapturedAt.IsZero() ||
-		len(envelope.Models) == 0 {
-		return fmt.Errorf("fallback envelope is incomplete")
-	}
-	encodedModels, err := json.Marshal(envelope.Models)
-	if err != nil {
-		return err
-	}
-	provenance := Provenance{
-		Source:     modelsDevSource,
-		LoadedFrom: LoadedFromVendoredFallback,
-		Revision:   revisionForRawJSON(encodedModels),
-		CapturedAt: envelope.CapturedAt.UTC(),
-	}
-	for id, raw := range envelope.Models {
-		record, ok := catalog.models[id]
-		if !ok {
-			return fmt.Errorf(
-				"reasoning model %q is absent from pricing fallback",
-				id,
-			)
-		}
-		var source struct {
-			Reasoning        json.RawMessage `json:"reasoning"`
-			ReasoningOptions json.RawMessage `json:"reasoning_options"`
-		}
-		if err := json.Unmarshal(raw, &source); err != nil {
-			return fmt.Errorf("model %q: %w", id, err)
-		}
-		capability, err := parseModelsDevReasoning(
-			source.Reasoning,
-			source.ReasoningOptions,
-			provenance,
-			nil,
-		)
-		if err != nil {
-			return fmt.Errorf("model %q: %w", id, err)
-		}
-		if capability == nil {
-			return fmt.Errorf("model %q omitted reasoning metadata", id)
-		}
-		record.Reasoning = capability
-		catalog.models[id] = record
-	}
-	return nil
 }
 
 func parseModelsDevReasoningOption(

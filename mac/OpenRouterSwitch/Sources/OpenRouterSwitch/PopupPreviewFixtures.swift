@@ -29,6 +29,12 @@ struct PopupPreviewFixture: Identifiable {
             LiveModelCatalogEntry(dict: [
                 "slug": "zai-org/GLM-5.2",
                 "display_name": "GLM 5.2",
+                "tool_capable": true,
+                "context_tokens": 131_072,
+                "max_output_tokens": 16_384,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "supported_parameters": ["tools"],
                 "reasoning": [
                     "supported": true,
                     "options": [
@@ -140,8 +146,8 @@ struct PopupPreviewFixture: Identifiable {
         clients: [client()],
         routerVersion: "v0.2.0",
         cliVersion: "v0.2.1",
-        auth: auth(health: "refresh_failed",
-                   lastError: "oauth2: invalid_grant: refresh token expired"),
+        auth: auth(status: "invalid",
+                   lastError: "The OpenRouter API key is invalid."),
         stats: stats(),
         loginItemStatus: .requiresApproval,
         lastError: nil
@@ -176,7 +182,7 @@ struct PopupPreviewFixture: Identifiable {
     )
 
     private static func client(name: String = "claude-code",
-                               route: String = "baseten",
+                               route: String = "openrouter",
                                nativeRoute: String = "anthropic",
                                effectiveModel: String = "zai-org/GLM-5.2",
                                fallbackActive: Bool = false) -> ClientStatus {
@@ -189,8 +195,8 @@ struct PopupPreviewFixture: Identifiable {
             "native_route": nativeRoute,
             "auth_set": true,
             "currently_bound": true,
-            "effective_summary": route == "baseten"
-                ? "Baseten · \(shortModelName(effectiveModel))"
+            "effective_summary": route == "openrouter"
+                ? "OpenRouter · \(shortModelName(effectiveModel))"
                 : "Native · \(capitalizeFamily(nativeRoute))",
             "fallback": [
                 "active": fallbackActive,
@@ -203,11 +209,11 @@ struct PopupPreviewFixture: Identifiable {
             "unmatched_native_model": [
                 "configured_target": "zai-org/GLM-5.2",
                 "effective_route": route,
-                "effective_model": route == "baseten"
+                "effective_model": route == "openrouter"
                     ? effectiveModel
                     : "",
-                "effective_source": route == "baseten"
-                    ? "default_baseten"
+                "effective_source": route == "openrouter"
+                    ? "default_openrouter"
                     : "global_off",
             ],
             "families": [
@@ -223,7 +229,7 @@ struct PopupPreviewFixture: Identifiable {
                         target: "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"),
             ],
             "model_options": [
-                "baseten": [
+                "openrouter": [
                     "zai-org/GLM-5.2": [
                         "reasoning": [
                             "configured": ["mode": "default"],
@@ -247,7 +253,7 @@ struct PopupPreviewFixture: Identifiable {
             "family": family,
             "configured_target": model,
             "configured_source": "explicit",
-            "effective_route": "baseten",
+            "effective_route": "openrouter",
             "effective_model": model,
             "effective_source": "family_mapping",
         ]
@@ -263,15 +269,17 @@ struct PopupPreviewFixture: Identifiable {
         ]
     }
 
-    private static func auth(health: String = "ok",
+    private static func auth(status: String = "valid",
                              lastError: String = "") -> AuthStatus {
         AuthStatus(dict: [
-            "signed_in": true,
-            "profile": "developer@example.com",
-            "fallback_enabled": false,
-            "fallback_in_use": false,
-            "health": health,
-            "last_refresh_error": lastError,
+            "status": status,
+            "source": "keychain",
+            "masked_label": "sk-or-v1-…9xYz",
+            "limit": 25.0,
+            "limit_remaining": 19.5,
+            "is_free_tier": false,
+            "validated_at": "2026-07-29T16:00:00Z",
+            "error": lastError,
         ])
     }
 
@@ -294,7 +302,7 @@ struct PopupPreviewFixture: Identifiable {
                 [
                     "ts": now - 92,
                     "client": "claude-code",
-                    "route": "baseten",
+                    "route": "openrouter",
                     "route_effective": fallbackActive ? "anthropic" : "",
                     "requested_model": "claude-opus-4-8",
                     "upstream_model": "zai-org/GLM-5.2",
@@ -305,7 +313,7 @@ struct PopupPreviewFixture: Identifiable {
                 [
                     "ts": now - 18,
                     "client": "claude-code",
-                    "route": "baseten",
+                    "route": "openrouter",
                     "route_effective": "",
                     "requested_model": "claude-haiku-4-5",
                     "upstream_model": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B",

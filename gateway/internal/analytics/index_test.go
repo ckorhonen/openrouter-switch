@@ -53,8 +53,8 @@ func TestIndexFollowsMultipleSegmentsAndCompleteLines(t *testing.T) {
 	firstPath := filepath.Join(dir, "requests-2026-07-001.jsonl")
 	secondPath := filepath.Join(dir, "requests-2026-07-002.jsonl")
 	first := analyticsEvent(now.Add(-3*time.Minute).Unix(), "anthropic", "claude-opus-4-8", "claude-opus-4-8")
-	second := analyticsEvent(now.Add(-2*time.Minute).Unix(), "baseten", "claude-opus-4-8", "zai-org/GLM-5.2")
-	third := analyticsEvent(now.Add(-time.Minute).Unix(), "baseten", "claude-sonnet-4-6", "zai-org/GLM-5.2")
+	second := analyticsEvent(now.Add(-2*time.Minute).Unix(), "openrouter", "claude-opus-4-8", "zai-org/GLM-5.2")
+	third := analyticsEvent(now.Add(-time.Minute).Unix(), "openrouter", "claude-sonnet-4-6", "zai-org/GLM-5.2")
 
 	appendEventLine(t, firstPath, first, true)
 	appendEventLine(t, firstPath, map[string]string{"bad": "line"}, true)
@@ -232,7 +232,7 @@ func TestColdBootstrapStopsAtDiscoveredSegmentSize(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "requests-2026-07-001.jsonl")
 	first := analyticsEvent(now.Add(-time.Minute).Unix(), "anthropic", "first", "first")
-	second := analyticsEvent(now.Unix(), "baseten", "second", "second")
+	second := analyticsEvent(now.Unix(), "openrouter", "second", "second")
 	appendEventLine(t, path, first, true)
 
 	originalReadThrough := indexReadSegmentEventsThrough
@@ -315,7 +315,7 @@ func TestIndexDetectsSegmentReplacement(t *testing.T) {
 		t.Fatalf("initial snapshot = %+v", got.Events)
 	}
 
-	replacement := analyticsEvent(now.Unix(), "baseten", "new", "new")
+	replacement := analyticsEvent(now.Unix(), "openrouter", "new", "new")
 	line, err := json.Marshal(replacement)
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +358,7 @@ func TestIndexGenerationTracksDataAndCoverageChanges(t *testing.T) {
 
 	second := analyticsEvent(
 		now.Unix(),
-		"baseten",
+		"openrouter",
 		"second",
 		"second",
 	)
@@ -387,7 +387,7 @@ func TestIndexGenerationTracksDataAndCoverageChanges(t *testing.T) {
 
 	replacement := analyticsEvent(
 		now.Add(time.Second).Unix(),
-		"baseten",
+		"openrouter",
 		"replacement",
 		"replacement",
 	)
@@ -436,7 +436,7 @@ func TestIndexReusesCombinedSnapshotUntilGenerationChanges(t *testing.T) {
 
 	secondEvent := analyticsEvent(
 		now.Unix(),
-		"baseten",
+		"openrouter",
 		"second",
 		"second",
 	)

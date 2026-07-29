@@ -1,6 +1,6 @@
 // Package translate converts between the Anthropic Messages API and the
 // OpenAI Chat Completions API so an anthropic-shape listener can serve a
-// request from an openai-shape upstream (Claude Code on any Baseten model).
+// request from an OpenAI-shape upstream (Claude Code on an OpenRouter model).
 //
 // Scope (see the translation contract): anthropic request in,
 // openai chat.completions upstream, both streaming and non-streaming.

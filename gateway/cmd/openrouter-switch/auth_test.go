@@ -1,169 +1,112 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
+	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ckorhonen/openrouter-switch/gateway/internal/auth"
 )
 
-func writeAuthJSON(t *testing.T, content string) {
+func setAuthSeams(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "auth.json")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("OPENROUTER_SWITCH_AUTH_FILE", path)
-	t.Setenv("OPENROUTER_SWITCH_AUTH_NO_KEYRING", "1")
+	oldResolve := resolveAuthAPIKey
+	oldValidate := validateAuthAPIKey
+	oldStore := storeAuthAPIKey
+	oldRead := readAuthAPIKey
+	t.Cleanup(func() {
+		resolveAuthAPIKey = oldResolve
+		validateAuthAPIKey = oldValidate
+		storeAuthAPIKey = oldStore
+		readAuthAPIKey = oldRead
+	})
 }
 
-func captureStdout(t *testing.T, fn func() int) (string, int) {
-	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+func TestAuthStatusPrintsSafeMetadata(t *testing.T) {
+	setAuthSeams(t)
+	const secret = "sk-or-never-print-this"
+	reset := "monthly"
+	limit := 100.0
+	remaining := 74.5
+	expires := time.Date(2027, 12, 31, 23, 59, 59, 0, time.UTC)
+	resolveAuthAPIKey = func() (string, auth.Source, error) {
+		return secret, auth.SourceKeychain, nil
 	}
-	os.Stdout = w
-	code := fn()
-	w.Close()
-	os.Stdout = old
-	b, _ := io.ReadAll(r)
-	r.Close()
-	return string(b), code
-}
-
-// TestWhoamiDefaultsToCurrentProfile verifies whoami with no --profile flag
-// resolves via auth.json's current-profile pointer (profile default is "",
-// not "default"), matching the gateway and the baseten CLI's email-derived
-// profile names.
-func TestWhoamiDefaultsToCurrentProfile(t *testing.T) {
-	sawAuth := ""
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/users/me" {
-			http.NotFound(w, r)
-			return
+	validateAuthAPIKey = func(_ context.Context, key string) (auth.KeyMetadata, error) {
+		if key != secret {
+			t.Fatalf("validated key = %q", key)
 		}
-		sawAuth = r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"email":          "user@example.com",
-			"workspace_name": "baseten",
-		})
-	}))
-	defer srv.Close()
+		return auth.KeyMetadata{
+			Label:          "sk-or-v1-abc...xyz",
+			Limit:          &limit,
+			LimitRemaining: &remaining,
+			LimitReset:     &reset,
+			ExpiresAt:      &expires,
+		}, nil
+	}
 
-	expiry := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	writeAuthJSON(t, fmt.Sprintf(`{
-  "version": 1,
-  "current": "user@example.com",
-  "profiles": {
-    "user@example.com": {
-      "remote_url": %q,
-      "auth_type": "oauth",
-      "oauth_credential": {"access_token": "at-live", "refresh_token": "rt", "expiry": %q}
-    }
-  }
-}`, srv.URL, expiry))
-
-	out, code := captureStdout(t, func() int {
-		return cmdWhoami([]string{"--host=" + srv.URL})
-	})
-	if code != 0 {
-		t.Fatalf("cmdWhoami = %d, want 0; output:\n%s", code, out)
+	var stdout, stderr bytes.Buffer
+	if code := runAuth([]string{"status"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("runAuth status = %d\nstderr:\n%s", code, stderr.String())
 	}
-	if sawAuth != "Bearer at-live" {
-		t.Fatalf("server saw Authorization %q; current-profile token not used", sawAuth)
+	for _, want := range []string{
+		"Source: keychain",
+		"Label: sk-or-v1-abc...xyz",
+		"Limit: $100.00",
+		"Remaining: $74.50",
+		"Reset: monthly",
+		"Expires: 2027-12-31T23:59:59Z",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Errorf("stdout missing %q:\n%s", want, stdout.String())
+		}
 	}
-	if !strings.Contains(out, "user@example.com") {
-		t.Fatalf("output missing email:\n%s", out)
-	}
-	if !strings.Contains(out, "(current)") {
-		t.Fatalf("output should label the profile as (current):\n%s", out)
+	if strings.Contains(stdout.String(), secret) ||
+		strings.Contains(stderr.String(), secret) {
+		t.Fatal("auth status printed the API key")
 	}
 }
 
-// TestWhoamiExplicitProfileFlagStillWorks confirms --profile continues to
-// select a named profile.
-func TestWhoamiExplicitProfileFlagStillWorks(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"email": "other@example.com", "workspace_name": "w"})
-	}))
-	defer srv.Close()
-	expiry := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	writeAuthJSON(t, fmt.Sprintf(`{
-  "version": 1,
-  "current": "user@example.com",
-  "profiles": {
-    "other@example.com": {
-      "remote_url": %q,
-      "auth_type": "oauth",
-      "oauth_credential": {"access_token": "at-other", "refresh_token": "rt", "expiry": %q}
-    }
-  }
-}`, srv.URL, expiry))
-	out, code := captureStdout(t, func() int {
-		return cmdWhoami([]string{"--profile", "other@example.com", "--host=" + srv.URL})
-	})
-	if code != 0 {
-		t.Fatalf("cmdWhoami = %d, want 0; output:\n%s", code, out)
+func TestAuthStatusReportsMissingCredential(t *testing.T) {
+	setAuthSeams(t)
+	resolveAuthAPIKey = func() (string, auth.Source, error) {
+		return "", "", auth.ErrNoAPIKey
 	}
-	if !strings.Contains(out, "other@example.com") {
-		t.Fatalf("output missing profile email:\n%s", out)
+	var stdout, stderr bytes.Buffer
+	if code := runAuth([]string{"status"}, &stdout, &stderr); code != 3 {
+		t.Fatalf("runAuth status = %d, want 3", code)
+	}
+	if !strings.Contains(stderr.String(), "auth set-key") {
+		t.Fatalf("stderr missing set-key fix:\n%s", stderr.String())
 	}
 }
 
-// TestWhoamiAPIKeyProfile verifies an api_key-type profile reports "signed
-// in with API key" (exit 0) instead of "not signed in" (exit 3).
-func TestWhoamiAPIKeyProfile(t *testing.T) {
-	writeAuthJSON(t, `{
-  "version": 1,
-  "current": "svc",
-  "profiles": {
-    "svc": {"remote_url": "https://api.baseten.co", "auth_type": "api_key", "api_key": "sk-live-1"}
-  }
-}`)
-	out, code := captureStdout(t, func() int {
-		return cmdWhoami(nil)
-	})
-	if code != 0 {
-		t.Fatalf("cmdWhoami = %d, want 0; output:\n%s", code, out)
+func TestAuthStatusDoesNotLeakValidationErrors(t *testing.T) {
+	setAuthSeams(t)
+	const secret = "sk-or-status-secret"
+	resolveAuthAPIKey = func() (string, auth.Source, error) {
+		return secret, auth.SourceEnvironment, nil
 	}
-	if !strings.Contains(out, "Signed in with API key") {
-		t.Fatalf("output should report API key sign-in:\n%s", out)
+	validateAuthAPIKey = func(context.Context, string) (auth.KeyMetadata, error) {
+		return auth.KeyMetadata{}, errors.New("transport accidentally included " + secret)
 	}
-	if !strings.Contains(out, `"svc"`) {
-		t.Fatalf("output should name the profile:\n%s", out)
+	var stdout, stderr bytes.Buffer
+	if code := runAuth([]string{"status"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("runAuth status = %d, want 1", code)
 	}
-	if !strings.Contains(out, "openrouter-switch status") || !strings.Contains(out, "openrouter-switch doctor --probe") {
-		t.Fatalf("output should point API-key users at current routing diagnostics:\n%s", out)
-	}
-	if strings.Contains(out, "session-check") {
-		t.Fatalf("output should not reference the removed session-check command:\n%s", out)
+	if strings.Contains(stderr.String(), secret) {
+		t.Fatalf("stderr leaked key:\n%s", stderr.String())
 	}
 }
 
-// TestWhoamiAPIKeyProfileUnreadableKey verifies an api_key profile whose key
-// cannot be read reports an actionable error (exit 1), not "not signed in".
-func TestWhoamiAPIKeyProfileUnreadableKey(t *testing.T) {
-	writeAuthJSON(t, `{
-  "version": 1,
-  "current": "svc",
-  "profiles": {
-    "svc": {"remote_url": "https://api.baseten.co", "auth_type": "api_key"}
-  }
-}`)
-	out, code := captureStdout(t, func() int {
-		return cmdWhoami(nil)
-	})
-	if code != 1 {
-		t.Fatalf("cmdWhoami = %d, want 1; output:\n%s", code, out)
+func TestAuthUsage(t *testing.T) {
+	for _, args := range [][]string{nil, {"bogus"}, {"status", "extra"}, {"set-key", "secret"}} {
+		var stdout, stderr bytes.Buffer
+		if code := runAuth(args, &stdout, &stderr); code != 2 {
+			t.Errorf("runAuth(%v) = %d, want 2", args, code)
+		}
 	}
 }

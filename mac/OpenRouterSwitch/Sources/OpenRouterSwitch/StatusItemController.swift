@@ -175,8 +175,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if !state.gatewayUp {
             return "Local gateway is unavailable"
         }
-        if authNeedsReauth(auth: state.auth) {
-            return "Authentication required"
+        if authNeedsAttention(auth: state.auth) {
+            return "OpenRouter API key required"
         }
         return state.confirmedGlobalRoutingEnabled
             ? "Routing rules are active"
@@ -208,14 +208,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             added = true
         }
 
-        if authNeedsReauth(auth: state.auth) {
+        if authNeedsAttention(auth: state.auth) {
             let item = variant.channel == .preview
-                ? disabledItem("Preview Authentication Disabled")
+                ? disabledItem("Preview API Key Changes Disabled")
                 : actionItem(
-                    "Authentication Required…",
-                    action: #selector(reauthenticate))
+                    "Configure OpenRouter API Key…",
+                    action: #selector(configureAPIKey))
             item.image = symbol("key.fill")
-            item.isEnabled = variant.channel == .stable && !state.reauthenticating
+            item.isEnabled = variant.channel == .stable
+                && !state.credentialMutationInFlight
             menu.addItem(item)
             added = true
         }
@@ -224,7 +225,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let route = client.fallback.servedRoute.isEmpty
                 ? client.nativeRoute
                 : client.fallback.servedRoute
-            let suffix = route.isEmpty ? "" : " via \(capitalizeFamily(route))"
+            let suffix = route.isEmpty ? "" : " via \(providerDisplayName(route))"
             let item = disabledItem(
                 "\(clientDisplayName(client.name)) Fallback Active\(suffix)")
             item.image = symbol("arrow.triangle.branch")
@@ -347,9 +348,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return state.requestGlobalRouting(enabled)
     }
 
-    @objc private func reauthenticate() {
+    @objc private func configureAPIKey() {
         guard !isPreview, variant.channel == .stable else { return }
-        Task { await state.reauthenticate() }
+        openConfiguration(nil)
     }
 
     @objc private func startSystem() {
@@ -614,7 +615,7 @@ enum StatusHeaderToggleAppearance {
         })
 
     static func trackColor(isOn: Bool) -> NSColor {
-        isOn ? AppColors.basetenGreen : offTrack
+        isOn ? AppColors.openRouterIndigo : offTrack
     }
 
     static func thumbRect(isOn: Bool) -> NSRect {

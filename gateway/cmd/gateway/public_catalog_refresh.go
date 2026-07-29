@@ -271,13 +271,38 @@ func providerCatalogCachePath(configPath, provider string) string {
 	)
 }
 
-func loadProviderCatalogCaches(p *pricing.Pricing, configPath string) {
+func authenticatedProviderCatalogCachePath(
+	configPath,
+	provider,
+	credentialFingerprint string,
+) string {
+	return filepath.Join(
+		providerCatalogCacheDir(configPath),
+		provider+"-account-"+credentialFingerprint+".json",
+	)
+}
+
+func loadProviderCatalogCaches(
+	p *pricing.Pricing,
+	configPath,
+	credentialFingerprint string,
+) {
 	for _, provider := range []string{
 		pricing.ProviderAnthropic,
 		pricing.ProviderOpenAI,
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 	} {
 		path := providerCatalogCachePath(configPath, provider)
+		if provider == pricing.ProviderOpenRouter {
+			if credentialFingerprint == "" {
+				continue
+			}
+			path = authenticatedProviderCatalogCachePath(
+				configPath,
+				provider,
+				credentialFingerprint,
+			)
+		}
 		body, err := readProviderCatalogCache(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
@@ -321,23 +346,31 @@ func readProviderCatalogCache(path string) ([]byte, error) {
 
 func persistProviderCatalogCaches(
 	p *pricing.Pricing,
-	configPath string,
+	configPath,
+	credentialFingerprint string,
 ) error {
-	return persistProviderCatalogSnapshotCaches(p.Capture(), configPath)
+	return persistProviderCatalogSnapshotCaches(
+		p.Capture(),
+		configPath,
+		credentialFingerprint,
+	)
 }
 
 func (g *Gateway) persistProviderCatalogCaches() error {
 	g.catalogCacheMu.Lock()
 	defer g.catalogCacheMu.Unlock()
+	cfg := g.runtimeConfig()
 	return persistProviderCatalogSnapshotCaches(
 		g.pricing.Capture(),
 		g.activeConfigPath(),
+		configCredentialFingerprint(cfg),
 	)
 }
 
 func persistProviderCatalogSnapshotCaches(
 	snapshot *pricing.Snapshot,
-	configPath string,
+	configPath,
+	credentialFingerprint string,
 ) error {
 	dir := providerCatalogCacheDir(configPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -349,8 +382,12 @@ func persistProviderCatalogSnapshotCaches(
 	for _, provider := range []string{
 		pricing.ProviderAnthropic,
 		pricing.ProviderOpenAI,
-		pricing.ProviderBaseten,
+		pricing.ProviderOpenRouter,
 	} {
+		if provider == pricing.ProviderOpenRouter &&
+			credentialFingerprint == "" {
+			continue
+		}
 		body, err := snapshot.ExportProviderCache(provider)
 		if err != nil {
 			return fmt.Errorf("export %s model catalog cache: %w", provider, err)
@@ -358,10 +395,15 @@ func persistProviderCatalogSnapshotCaches(
 		if len(body) == 0 {
 			continue
 		}
-		if err := writePrivateAtomic(
-			providerCatalogCachePath(configPath, provider),
-			body,
-		); err != nil {
+		path := providerCatalogCachePath(configPath, provider)
+		if provider == pricing.ProviderOpenRouter {
+			path = authenticatedProviderCatalogCachePath(
+				configPath,
+				provider,
+				credentialFingerprint,
+			)
+		}
+		if err := writePrivateAtomic(path, body); err != nil {
 			return fmt.Errorf("persist %s model catalog cache: %w", provider, err)
 		}
 	}

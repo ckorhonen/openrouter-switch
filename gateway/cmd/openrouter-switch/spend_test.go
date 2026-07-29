@@ -28,8 +28,8 @@ func TestSpendReadsV1SegmentsAndPersistedActualCost(t *testing.T) {
 		completedAt,
 		1,
 		"claude-code",
-		"baseten",
-		"baseten",
+		"openrouter",
+		"openrouter",
 		"claude-opus-4-8",
 		500,
 		false,
@@ -71,7 +71,7 @@ func TestSpendReadsV1SegmentsAndPersistedActualCost(t *testing.T) {
 	outputText := captureSpendOutput(t, func() int { return cmdSpend(nil) })
 	for _, want := range []string{
 		"2026-07-25",
-		"baseten",
+		"openrouter",
 		"zai-org/GLM-5.2",
 		"10",
 		"cache_5m",
